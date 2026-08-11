@@ -92,9 +92,10 @@ class TeukolskyRadialLines {
 // D4-2 method-of-lines RHS over all signed modes at one theta point.  The
 // three launches share one execution-space instance and therefore preserve
 // their data dependencies without host copies or timestep allocations.
-// No physical SAT penalty is applied: the continuum principal coefficient
-// vanishes at scri and the horizon, and an incoming characteristic/SAT audit
-// is required before adding boundary penalties.
+// No physical SAT penalty is applied. The endpoint audit in boundary.hpp finds
+// one outgoing and two stationary modes at each end, with no incoming mode;
+// its natural continuum symmetrizer is endpoint-degenerate, so a nonzero SAT
+// remains blocked pending a full semi-discrete energy/normal-mode analysis.
 inline void evaluate_sbp_teukolsky_radial_lines_rhs(
     TeukolskyRadialLines& lines, const TeukolskyParameters& base_parameters,
     const double theta, const ReductionEvolution reduction,
