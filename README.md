@@ -97,7 +97,52 @@ angular normalization, layout, and stage semantics. See
 
 ## Current validation status
 
-The symbolic specification audit passes 94/94 checks. The Kokkos bootstrap and
-device-kernel smoke test compile and run with the Serial backend. Physics
-qualification, convergence results, and accelerator results are recorded only
-after the corresponding tests actually run; no untested backend is claimed.
+The symbolic specification audit passes 94/94 checks and the C++ suite passes
+120/120 tests. The complete signed-mode, full-grid common-stage pipeline has
+run on Kokkos Serial, OpenMP, and SYCL on an Intel Arc B580. An identical
+15,015-complex-value checkpoint differs between Serial and B580 by
+`2.69e-18` at maximum (`4.10e-16` relative maximum). CUDA and HIP are supported
+by the backend-neutral source structure but have not been built or tested here.
+
+Run the workstation-sized coupled example directly:
+
+```bash
+./build/serial/teuk_solver spatial-pipeline
+```
+
+The command initializes a signed-mode, band-limited Gaussian, evolves all 13
+fields, and prints reduction, source, forcing, and horizon diagnostics. Useful
+overrides include:
+
+```bash
+./build/serial/teuk_solver spatial-pipeline \
+  spin=0.999 nr=129 ntheta=7 ellmax=4 modes=-4,-2,0,2,4 \
+  final_time=0.01 steps=200 diagnostic_every=20 \
+  checkpoint_every=100 output=run-high-spin
+```
+
+Checkpoint directories contain strict metadata plus an interleaved complex128
+state. Compare states from two backends with:
+
+```bash
+scripts/compare_snapshots.py \
+  run-serial/checkpoint_00000200/state.bin \
+  run-sycl/checkpoint_00000200/state.bin
+```
+
+Resume for another interval with the same numerical configuration and time
+step:
+
+```bash
+./build/serial/teuk_solver spatial-pipeline \
+  spin=0.999 nr=129 ntheta=7 ellmax=4 modes=-4,-2,0,2,4 \
+  final_time=0.01 steps=200 restart=run-high-spin/checkpoint_00000200 \
+  output=run-high-spin-resumed checkpoint_every=200
+```
+
+The boundary treatment currently uses the verified D4-2 SBP closure and zero
+SAT because the implemented characteristic analysis finds no incoming
+propagating mode at either endpoint. A finite `T=1`, `a/M=0.999` pulse run is
+evidence for that tested workload, not a general nonlinear stability theorem.
+See `docs/IMPLEMENTATION_STATUS.md`, `docs/PERFORMANCE.md`, and
+`docs/FINAL_IMPLEMENTATION_REPORT.md` for exact evidence and limitations.
