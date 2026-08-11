@@ -1,6 +1,7 @@
 # Implementation status
 
-Evidence last updated: 2026-08-11, after the independent-audit remediation.
+Evidence last updated: 2026-08-11, after runtime finalization and the
+independent-audit remediation.
 
 ## Remediation status
 
@@ -18,8 +19,15 @@ Evidence last updated: 2026-08-11, after the independent-audit remediation.
 - [x] The default Gaussian startup is labelled reconstruction-inconsistent.
       Constraint-aware mode suppresses second-order forcing until a causal
       start time and independent-constraint tolerance both pass.
-- [x] Source policy, start time, and tolerance are strict checkpoint-v2
-      metadata and are checked against the caller pipeline on write and load.
+- [x] Source policy and monotonic accepted-state activation are strict
+      checkpoint-v4 metadata and are checked against the caller pipeline on
+      write and load.
+- [x] The compiled solver is controlled by strict versioned runtime files,
+      writes a fully resolved provenance file, supports independent parent and
+      daughter bands, and rejects incomplete daughter sets by default.
+- [x] Linear-only operation freezes all ten reconstruction/second-order RHS
+      fields exactly while retaining the production angular, SBP, projection,
+      and common-stage device-RK4 path for the first-order triple.
 - [x] Corrected ordered-pair source algebra, explicit sharp lookup, analytic
       JVP, common-stage RK4, D4-2, and Kokkos-neutral kernels were preserved.
 
@@ -31,7 +39,7 @@ data.
 
 ## Current hard evidence
 
-- C++ tests: 133/133 on Serial, OpenMP, and Intel Arc B580 SYCL.
+- C++ tests: 145/145 on Serial, OpenMP, and Intel Arc B580 SYCL.
 - Symbolic source audit: 94/94 with SymPy 1.14.0 on all three build trees.
 - Angular regressions: `s=-2`, `ell=2,3,4` give `-4,-10,-18`; explicit
   raising/lowering composition, host/device parity, and the Schwarzschild
@@ -39,10 +47,12 @@ data.
 - Band invariance: relative `(I-P)` residual is below `2e-12` for all 13 RHS
   fields and an RK stage, and below `3e-12` after a complete RK4 step. Modes
   include every signed `m` from `-ell_max` through `ell_max`.
-- Physical linear regression: the `M=1` Schwarzschild fundamental
-  gravitational `ell=m=2` ringdown frequency and damping each agree with the
-  standard values `0.37367168` and `0.08896232` within `8e-4`; the fitted
-  recurrence residual is below `1e-5`.
+- Production-path QNM regression: the `M=1` Schwarzschild fundamental
+  gravitational `ell=m=2` complex-frequency error falls from `2.76e-3` to
+  `2.18e-4` under radial refinement, with the final recurrence residual
+  `7.57e-8`. At Kerr `a/M=0.7`, angular-band refinement converges to
+  `(omega_R,-omega_I)=(0.532995,0.0811631)`, within `5.41e-4` of the
+  independent Leaver target.
 - Independent reconstruction constraints: radial refinements
   `N_R=17,33,65` exceed ratio `3.5` for both Bianchi residuals; angular
   refinements `ell_max=2,4,6` decrease monotonically and reach below
@@ -63,7 +73,9 @@ data.
   `6.57e-20`, maximum `2.68e-18`, relative maximum `3.12e-16`.
 
 Exact commands and the bounded spin/dissipation campaign are recorded in
-`POST_AUDIT_REMEDIATION.md`.
+`POST_AUDIT_REMEDIATION.md`; QNM methods and measured sequences are in
+`PRODUCTION_QNM_VALIDATION.md`, and the runtime schema is in
+`RUNTIME_CONFIGURATION.md`.
 
 ## Tested backends
 
@@ -87,8 +99,9 @@ Exact commands and the bounded spin/dissipation campaign are recorded in
   radial error decreases in the manufactured test, while the reduction and
   independent-constraint convergence claims are stated separately at their
   measured orders.
-- Post-audit `T=0.01` runs are finite for `a/M=0,0.7,0.99,0.999`. They are
-  smoke/refinement workloads, not QNM-at-spin or Aretakis measurements.
+- Post-audit `T=0.01` runs are finite for `a/M=0,0.7,0.99,0.999`. Separately,
+  the production-path `a/M=0.7` fundamental QNM is a bounded regression.
+  Neither result qualifies near-extremal QNMs or Aretakis measurements.
   Third/fourth horizon derivatives are noise-sensitive; the fourth derivative
   did not show a resolved high-spin sequence and is not qualified.
 - The executable enforces a radial characteristic CFL check. Angular spectral

@@ -224,3 +224,78 @@ first-order validation and constraint-aware second-order development. It is
 not yet qualified for physical second-order Gaussian evolution, long-time
 near-extremal stability, high-order horizon growth, or publication-grade
 nonlinear measurements.
+
+## Runtime-finalization follow-up
+
+The finalization working tree atop `2165a2b` adds strict versioned runtime
+configuration, separate parent/daughter bands, retained-Galerkin Kerr initial
+data, monotonic accepted-state source activation, checkpoint-v4 persistence,
+and a dedicated production-path QNM executable. `second_order.enabled=false`
+now freezes all ten non-first-order RHS fields exactly; the first-order triple
+still traverses the production angular, projection, D4-2 SBP, and device-RK4
+path.
+
+Fresh Release build trees used the pinned Kokkos submodule
+`3ec81abe1816109f6f62ac48cef41921f91a4d00` (5.1.0):
+
+| backend | C++ assertions | symbolic audit | CTest wall time |
+|---|---:|---:|---:|
+| Serial, GCC 13.3.0 | 145/145 | 94/94 | 20.84 s |
+| OpenMP, GCC 13.3.0, 8 threads | 145/145 | 94/94 | 16.91 s |
+| SYCL, IntelLLVM 2025.3.2, Arc B580 | 145/145 | 94/94 | 56.56 s |
+
+The assertions are split into `143/143` fast unit assertions and `2/2`
+dedicated QNM assertions. The B580 CTest timings were 12.97 s unit, 32.41 s
+QNM, 10.46 s configuration integration, and 0.71 s symbolic audit.
+`/usr/bin/time -v` reported 334,468 KiB maximum host RSS for that complete CTest invocation;
+no peak-device-memory tool was available. Runtime enumeration identified
+Intel Arc B580 Graphics, Unified Runtime Level Zero V2, driver
+`1.15.38308+1`; both Level Zero adapters loaded and `teuk_solver backend`
+reported `Kokkos execution space: SYCL`.
+
+The production QNM values were backend-identical to the printed precision.
+Schwarzschild radial refinement `N_R=17,25,33` reduced complex-frequency error
+from `2.76e-3` through `3.99e-4` to `2.18e-4`. At Kerr `a/M=0.7`, spherical
+band refinement `(ellmax,N_theta)=(3,5),(4,7),(5,8)` produced
+`(omega_R,-omega_I)=(0.532915,0.0811914)`, `(0.532994,0.0811637)`, and
+`(0.532995,0.0811631)`. The final result is within `5.41e-4` of the independent
+Leaver target. Exact fit windows, residuals, references, and limitations are
+recorded in `PRODUCTION_QNM_VALIDATION.md`.
+
+The four checked-in configuration templates were each parsed and run through
+one real production step with temporary output and tight timestep overrides.
+All passed strict parsing, daughter completeness, angular capacity, radial
+CFL, initialization, diagnostics, and evolution. Template step counts were
+increased so the unmodified files also pass their own radial-CFL gate.
+
+Representative commands were:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON \
+  -DKokkos_ENABLE_SERIAL=ON -DKokkos_ENABLE_OPENMP=OFF \
+  -DKokkos_ENABLE_SYCL=OFF -DTEUK_ENABLE_SYMBOLIC_AUDIT=ON \
+  -DPython3_EXECUTABLE=/tmp/teuk-audit-final/bin/python
+cmake --build build -j4
+ctest --test-dir build --output-on-failure
+
+cmake -S . -B build/qualification-openmp -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_TESTING=ON -DKokkos_ENABLE_SERIAL=ON \
+  -DKokkos_ENABLE_OPENMP=ON -DKokkos_ENABLE_SYCL=OFF \
+  -DTEUK_ENABLE_SYMBOLIC_AUDIT=ON \
+  -DPython3_EXECUTABLE=/tmp/teuk-audit-final/bin/python
+cmake --build build/qualification-openmp -j4
+OMP_NUM_THREADS=8 OMP_PROC_BIND=spread OMP_PLACES=cores \
+  ctest --test-dir build/qualification-openmp --output-on-failure
+
+source scripts/source_oneapi_level_zero_gpu.sh
+teuk_source_oneapi_level_zero_gpu
+cmake -S . -B build/qualification-sycl-b580 -DCMAKE_CXX_COMPILER=icpx \
+  -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON \
+  -DKokkos_ENABLE_SERIAL=ON -DKokkos_ENABLE_OPENMP=OFF \
+  -DKokkos_ENABLE_SYCL=ON -DKokkos_ENABLE_CUDA=OFF \
+  -DKokkos_ENABLE_HIP=OFF -DTEUK_ENABLE_SYMBOLIC_AUDIT=ON \
+  -DPython3_EXECUTABLE=/tmp/teuk-audit-final/bin/python
+cmake --build build/qualification-sycl-b580 -j2
+ONEAPI_DEVICE_SELECTOR=level_zero:gpu \
+  ctest --test-dir build/qualification-sycl-b580 --output-on-failure
+```

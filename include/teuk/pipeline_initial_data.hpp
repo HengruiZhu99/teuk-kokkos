@@ -36,9 +36,10 @@ struct PipelineGaussianPulse {
   Real width = 0.1;
   std::vector<GaussianPulseMode> modes;
 
-  // Initial coordinate-time derivative is exactly zero. Q is computed by the
-  // same D4-2 operator used by the production radial path, and P is then set to
-  // -2 K Q + G_m Psi so teukolsky_psi_rhs returns zero pointwise.
+  // Initial coordinate-time derivative is zero in the retained Galerkin
+  // space. Q is computed by the same D4-2 operator used by the production
+  // radial path; P is obtained from the small projected C_T^{-1} system, not
+  // written pointwise, so Kerr multiplication cannot inject ell_max+1.
 
   // Default nonlinear/reconstruction data are explicit zeros. Nonzero scales
   // are diagnostic opt-ins: second order copies the complete consistent

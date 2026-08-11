@@ -95,85 +95,92 @@ See `docs/CONVENTIONS.md` for coordinates, rescalings, signed-mode handling,
 angular normalization, layout, and stage semantics. See
 `docs/IMPLEMENTATION_STATUS.md` for the current evidence and limitations.
 
+## Runtime science runs
+
+The primary executable is configured at runtime and no longer requires a new
+C++ example or rebuild for each spin, grid, mode set, or pulse:
+
+```bash
+./build/serial/teuk_solver --config configs/linear_schwarzschild.cfg
+```
+
+Command-line overrides take precedence over the file and are convenient for
+sweeps:
+
+```bash
+./build/serial/teuk_solver --config configs/near_extremal.cfg \
+  spin=0.99 nr=1025 output.directory=run-a099
+```
+
+The strict dependency-free parser supports `#` comments, typed booleans,
+integers, floating-point/scientific values, signed mode lists, multiple complex
+seed modes, separate first/second angular bands, source policy, diagnostics,
+and checkpoint cadence. Unknown, duplicate, or malformed keys fail closed.
+Configuration is fully validated before the large state allocation.
+
+Every run writes `resolved_config.cfg` beside its output with all defaults and
+overrides plus Git, Kokkos, backend, precision, executable, and schema
+provenance. Checkpoints persist strict geometry/method/mode compatibility and
+the latched source-activation history. See
+[`docs/RUNTIME_CONFIGURATION.md`](docs/RUNTIME_CONFIGURATION.md) for the full
+schema, restart workflow, mode-completeness rules, and parameter-sweep example.
+
+The checked-in templates are:
+
+```text
+configs/linear_schwarzschild.cfg
+configs/kerr_ringdown.cfg
+configs/second_order_22_self_coupling.cfg
+configs/near_extremal.cfg
+```
+
+They are runnable development starting points, not blanket scientific
+qualification.
+
 ## Current validation status
 
 The 2026-08-11 independent audit found that the earlier validation used the
 wrong Teukolsky angular eigenvalue, evolved padded off-band nodal directions,
-and drove the second-order equation from inconsistent zero reconstruction
-data. **Results produced before the remediation commits beginning at
-`0151757` are not scientifically qualified.**
+and drove the second-order equation from inconsistent reconstruction data.
+**Results produced before the remediation commits beginning at `0151757` are
+not scientifically qualified.**
 
-The remediated production operator is
-`-(ell-s)(ell+s+1)`, every complete RK stage derivative is projected into its
-retained spin-weighted band, and the default second-order source is gated by a
-causal start time plus genuinely independent reconstruction constraints. The
-post-audit suite passes 133/133 C++ tests and 94/94 symbolic checks on Serial,
-OpenMP, and Kokkos SYCL on an Intel Arc B580. A fresh 7,735-complex-value
-checkpoint is bitwise identical between Serial and OpenMP; Serial and B580
-differ by `2.68e-18` at maximum (`3.12e-16` relative maximum). CUDA and HIP
-remain untested and are not claimed.
+The remediated production operator is `-(ell-s)(ell+s+1)`. Complete RK stage
+derivatives are projected into their declared fixed-`m`, fixed-spin bands.
+Generated Gaussian data use a retained Galerkin solve for `P`; imported and
+restarted data are measured and rejected if meaningfully off-band.
 
-The Schwarzschild `ell=m=2` ringdown regression agrees with the trusted
-fundamental frequency and damping to `8e-4`; all 13 RHS fields and a full RK4
-step are bandlimited to relative residual below `3e-12`. See
-`docs/POST_AUDIT_REMEDIATION.md` for the exact evidence and remaining limits.
+Second-order source activation is a persistent monotonic accepted-state event,
+not an RK-stage-local branch. Steps split exactly at a prescribed start time,
+all four stages see one flag, and normalized maximum plus weighted constraint
+norms use the natural terms of each independent reconstruction equation.
+Activation time and consecutive-pass state survive checkpoint/restart.
 
-Run the workstation-sized coupled example directly:
+First-order parent modes and second-order targets may differ. Every quadratic
+daughter `m1+m2` is required by default; explicit truncation emits a warning.
+`ellmax_first` and `ellmax_second` are independent runtime values.
 
-```bash
-./build/serial/teuk_solver spatial-pipeline
-```
+The dedicated production QNM test now uses the real Kokkos angular
+coordinator, transforms, stage projections, SBP radial kernel, state layout,
+and common-stage device RK4. Its Schwarzschild complex-frequency error falls
+from `2.76e-3` to `3.99e-4` to `2.18e-4` over `N_R=17,25,33` and agrees across
+two angular configurations. At `a/M=0.7`, the spherical-band sequence
+`ellmax=3,4,5` self-converges and the final complex frequency is within
+`5.41e-4` of the independent Leaver value
+`0.5326002435510186 - 0.08079287315500745 i`. Exact setup, fit windows,
+references, and limitations are in
+[`docs/PRODUCTION_QNM_VALIDATION.md`](docs/PRODUCTION_QNM_VALIDATION.md).
 
-The command initializes a signed-mode, band-limited Gaussian, evolves all 13
-fields, and prints reduction, transport consistency, independent
-reconstruction constraints, source-gate state, forcing, and horizon
-diagnostics. The Gaussian does not supply constraint-solved reconstruction
-data, so the default `source_mode=constraint_aware` keeps second-order forcing
-off until both gates pass. Useful overrides include:
-
-```bash
-./build/serial/teuk_solver spatial-pipeline \
-  spin=0.999 nr=129 ntheta=7 ellmax=4 modes=-4,-2,0,2,4 \
-  final_time=0.01 steps=200 diagnostic_every=20 \
-  source_start=0.5 source_constraint_tol=1e-10 \
-  checkpoint_every=100 output=run-high-spin
-```
-
-`source_mode=unrestricted` is intentionally available for source-algebra and
-temporal-order experiments. With the default zero reconstruction data it is
-not a physical second-order initial-value problem; the executable and example
-label that mode explicitly.
-
-An output directory receives `diagnostics.csv` and `source_pairs.csv`. The
-latter records RMS and maximum contributions from both inner-source families
-`D` and `T` for every deterministic ordered pair `(m1,m2)->target` at each
-diagnostic sample.
-
-Checkpoint directories contain strict metadata plus an interleaved complex128
-state. Compare states from two backends with:
-
-```bash
-scripts/compare_snapshots.py \
-  run-serial/checkpoint_00000200/state.bin \
-  run-sycl/checkpoint_00000200/state.bin
-```
-
-Resume for another interval with the same numerical configuration and time
-step:
-
-```bash
-./build/serial/teuk_solver spatial-pipeline \
-  spin=0.999 nr=129 ntheta=7 ellmax=4 modes=-4,-2,0,2,4 \
-  final_time=0.01 steps=200 restart=run-high-spin/checkpoint_00000200 \
-  output=run-high-spin-resumed checkpoint_every=200
-```
+The corrected half-factor, ordered-pair oracle, sharp modes, generalized
+Gaunt products, analytic source tangent, transport equations, independent
+Bianchi/reality checks, unrestricted common-stage RK4 convergence,
+activation-event convergence, band invariance, and checkpoint equivalence
+remain direct regressions. The symbolic audit still requires 94/94 checks.
 
 The boundary treatment uses the verified D4-2 SBP closure and zero SAT because
-the characteristic analysis finds no incoming propagating mode at either
-endpoint. There is still no semi-discrete endpoint energy proof. Compatible
-dissipation also adds the documented boundary commutator to the reduction
-constraint; the exact law `C_Q,T=-gamma C_Q` applies only without
-dissipation. Post-audit short runs cover `a/M=0,0.7,0.99,0.999`, but they do
-not qualify long-time stability, fourth horizon derivatives, or an Aretakis
-claim. See `docs/IMPLEMENTATION_STATUS.md`,
-`docs/POST_AUDIT_REMEDIATION.md`, and `docs/FINAL_IMPLEMENTATION_REPORT.md`.
+the continuum characteristic analysis finds no incoming propagating endpoint
+mode. There is no semi-discrete endpoint energy proof. No general
+constraint-solved second-order Gaussian initializer, long-time near-extremal
+qualification, high-order horizon-growth result, CUDA/HIP claim, or Aretakis
+claim is made. See `docs/IMPLEMENTATION_STATUS.md`,
+`docs/POST_AUDIT_REMEDIATION.md`, and `docs/BOUNDARY_SAT_BLOCKER.md`.

@@ -9,7 +9,9 @@ and `equation_spec_v2.yaml`.
 - Use horizon-penetrating hyperboloidal coordinates `(T, R, theta, phi)` with
   `r = L^2 / R`, future null infinity at `R = 0`, and the outer horizon at
   `R_H = L^2 / r_+`.
-- Use `M = 1` internally. Any dimensional conversion belongs at input/output.
+- `M`, `a`, and `L` are runtime parameters in one consistent geometrized unit
+  system. Validation requires `M>0`, `|a|<=M`, and `L>0`; quoted QNM tests use
+  `M=1` and report dimensionless `M omega`.
 - The background tetrad is the rotated Kinnersley tetrad used by the handoff
   derivation, with `gamma = 0`; metric reconstruction uses outgoing radiation
   gauge.
@@ -81,6 +83,11 @@ The evolved last variable is `mu h_ll`, not `h_ll`. Background rescalings are
   it. The final derivative of each of the 13 evolved fields is in its retained
   fixed-`m` spin band: spin `-2` for both Teukolsky triples, `Lambda`, and `B`;
   spin `-1` for `G`, `Pi`, and `C`; spin `0` for `H` and `U`.
+- Every state-entry path obeys the same bands. Generated data are finalized by
+  projection. Restart/import first measures `(I-P)X` and fails closed when the
+  residual is meaningfully above roundoff. Kerr zero-time-derivative data solve
+  the retained `A C_T^{-1} S` Galerkin system for `P`; they are not written
+  pointwise with an uncontrolled `ell_max+1` component.
 - Historical endpoint interpolation is forbidden. Product tangents use
   `d_t(AB) = (d_t A)B + A(d_t B)` at the same RK stage.
 - Compatible dissipation belongs in the method-of-lines RHS. A transformed
@@ -88,13 +95,20 @@ The evolved last variable is `mu h_ll`, not `h_ll`. Background rescalings are
 - The corrected source term is
   `0.5 * (eth + conjugate(pi) + 2*tau) h_l_barm`; the factor `0.5` multiplies
   the entire parenthesis.
-- The default source policy is constraint-aware. It keeps second-order forcing
-  zero until both the configured causal start time and the maximum of the true
-  independent reconstruction residuals satisfy their gates. This is a causal
-  startup approximation, not constraint-solved second-order initial data.
-  `source_mode=unrestricted` exists only for explicit algebra and convergence
-  experiments and must be labelled nonphysical when zero reconstruction data
-  are used.
+- The default source policy is constraint-aware. Eligibility is evaluated only
+  on accepted states and is monotonic once latched. Every RK4 substep uses one
+  fixed activation flag; a prescribed event inside a step creates two exact
+  substeps, and an endpoint event affects only the next step.
+- Each independent constraint family records absolute maximum, normalized
+  maximum, weighted SBP-Gauss RMS, and normalized weighted norm. Denominators
+  are built from the equation's natural left/right terms, not user amplitude.
+  The configured normalized tolerance and optional consecutive-pass count
+  control eligibility. Activation state and time are strict checkpoint data.
+- This gate is a causal startup approximation, not constraint-solved
+  second-order initial data. `source_mode=unrestricted` exists only for
+  explicit algebra and convergence experiments and must be labelled
+  nonphysical when zero reconstruction data are used. Disabling second order
+  is an exact first-order-only evolution: non-first-order RHS slots are zero.
 
 ## Diagnostics and interpretation
 
