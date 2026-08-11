@@ -3,6 +3,7 @@
 #include <Kokkos_Core.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <stdexcept>
 #include <string>
@@ -15,6 +16,19 @@
 #include "teuk/source_tangent_spatial.hpp"
 
 namespace teuk {
+
+struct SpatialPipelineTiming {
+  double first_linear_seconds = 0.0;
+  double reconstruction_seconds = 0.0;
+  double tangent_seconds = 0.0;
+  double source_seconds = 0.0;
+  double second_linear_seconds = 0.0;
+
+  [[nodiscard]] double total_seconds() const {
+    return first_linear_seconds + reconstruction_seconds + tangent_seconds +
+           source_seconds + second_linear_seconds;
+  }
+};
 
 namespace spatial_pipeline_detail {
 
@@ -224,10 +238,26 @@ class SpatialPipeline {
 
   template <class StageView, class OutputView>
   void evaluate_rhs(const ExecutionSpace& execution, const StageView& stage,
-                    const OutputView& output) {
+                    const OutputView& output,
+                    SpatialPipelineTiming* timing = nullptr) {
     static_assert(StageView::rank == 4 && OutputView::rank == 4,
                   "pipeline stages must have rank four");
     validate_stage(stage, output);
+    using Clock = std::chrono::steady_clock;
+    Clock::time_point timing_start;
+    if (timing != nullptr) {
+      *timing = {};
+      execution.fence("begin profiled full spatial RHS");
+      timing_start = Clock::now();
+    }
+    const auto record_timing = [&](double& destination,
+                                   const char* fence_label) {
+      if (timing == nullptr) return;
+      execution.fence(fence_label);
+      const auto now = Clock::now();
+      destination = std::chrono::duration<double>(now - timing_start).count();
+      timing_start = now;
+    };
 
     first_angular_.laplacian(
         execution, stage,
@@ -245,10 +275,18 @@ class SpatialPipeline {
         first_scratch_, output, dissipation_,
         spatial_pipeline_detail::first_fields,
         spatial_pipeline_detail::first_fields);
+    if (timing != nullptr) {
+      record_timing(timing->first_linear_seconds,
+                    "profile first linear spatial RHS");
+    }
 
     evaluate_reconstruction_chain(execution, stage, output,
                                   reconstruction_radial_,
                                   reconstruction_angular_);
+    if (timing != nullptr) {
+      record_timing(timing->reconstruction_seconds,
+                    "profile reconstruction spatial RHS");
+    }
 
     first_angular_.laplacian(
         execution, output,
@@ -269,6 +307,10 @@ class SpatialPipeline {
     evaluate_reconstruction_chain(execution, output, tangent_rhs_,
                                   reconstruction_tangent_radial_,
                                   reconstruction_tangent_angular_);
+    if (timing != nullptr) {
+      record_timing(timing->tangent_seconds,
+                    "profile tangent spatial RHS");
+    }
 
     evaluate_source_angular_derivatives(execution, stage, output,
                                         tangent_rhs_);
@@ -278,6 +320,10 @@ class SpatialPipeline {
         storage_.sin_theta(), source_fields_, source_field_tangents_,
         source_derivatives_, source_derivative_tangents_, inner_source_);
     project_inner_source(execution);
+    if (timing != nullptr) {
+      record_timing(timing->source_seconds,
+                    "profile quadratic spatial source");
+    }
 
     first_angular_.laplacian(
         execution, stage,
@@ -295,6 +341,10 @@ class SpatialPipeline {
         second_scratch_, output, dissipation_,
         spatial_pipeline_detail::second_fields,
         spatial_pipeline_detail::second_fields);
+    if (timing != nullptr) {
+      record_timing(timing->second_linear_seconds,
+                    "profile second linear spatial RHS");
+    }
   }
 
   void step(const ExecutionSpace& execution, const double time,

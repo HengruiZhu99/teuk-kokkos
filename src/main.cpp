@@ -220,18 +220,27 @@ int run_spatial_pipeline(const teuk::Parameters& input) {
       input.dissipation,
       teuk::ReductionEvolution::FreeDamped,
       time_step};
-  const auto start = std::chrono::steady_clock::now();
+  const auto total_start = std::chrono::steady_clock::now();
   double time = 0.0;
   sample(0, time);
+  double evolution_wall_seconds = 0.0;
+  auto evolution_start = std::chrono::steady_clock::now();
   for (int step = 1; step <= input.steps; ++step) {
     pipeline.step(execution, time, time_step);
     time += time_step;
     const bool diagnostic_step =
         step % input.diagnostic_interval == 0 || step == input.steps;
-    if (diagnostic_step) sample(step, time);
     const bool checkpoint_step =
         input.checkpoint_interval > 0 &&
         (step % input.checkpoint_interval == 0 || step == input.steps);
+    if (diagnostic_step || checkpoint_step) {
+      execution.fence("time full spatial pipeline evolution segment");
+      evolution_wall_seconds +=
+          std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                        evolution_start)
+              .count();
+    }
+    if (diagnostic_step) sample(step, time);
     if (checkpoint_step) {
       if (output_directory.empty()) {
         throw std::invalid_argument(
@@ -242,19 +251,41 @@ int run_spatial_pipeline(const teuk::Parameters& input) {
           registry, checkpoint_configuration,
           {time, static_cast<std::uint64_t>(step)});
     }
+    if (diagnostic_step || checkpoint_step) {
+      evolution_start = std::chrono::steady_clock::now();
+    }
   }
   execution.fence("finish full spatial pipeline run");
-  const double wall_seconds =
-      std::chrono::duration<double>(std::chrono::steady_clock::now() - start)
+  const double total_wall_seconds =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                    total_start)
           .count();
   const double point_steps =
       static_cast<double>(input.steps) * registry.size() * radial_grid.size() *
       static_cast<double>(input.theta_points);
+  teuk::SpatialPipelineTiming profile;
+  pipeline.evaluate_rhs(execution, pipeline.storage().state(),
+                        pipeline.storage().rhs(), &profile);
+  const double profile_total = profile.total_seconds();
+  const auto percentage = [&](const double seconds) {
+    return 100.0 * seconds / profile_total;
+  };
   std::cout << "backend=" << teuk::ExecutionSpace::name() << '\n'
             << "boundary_policy=zero-SAT; no incoming propagating modes\n"
-            << "wall_seconds=" << wall_seconds << '\n'
-            << "grid_point_steps_per_second=" << point_steps / wall_seconds
-            << '\n';
+            << "evolution_wall_seconds=" << evolution_wall_seconds << '\n'
+            << "total_wall_seconds=" << total_wall_seconds << '\n'
+            << "grid_point_steps_per_second="
+            << point_steps / evolution_wall_seconds << '\n'
+            << "profile_first_linear_percent="
+            << percentage(profile.first_linear_seconds) << '\n'
+            << "profile_reconstruction_percent="
+            << percentage(profile.reconstruction_seconds) << '\n'
+            << "profile_tangent_percent="
+            << percentage(profile.tangent_seconds) << '\n'
+            << "profile_source_percent="
+            << percentage(profile.source_seconds) << '\n'
+            << "profile_second_linear_percent="
+            << percentage(profile.second_linear_seconds) << '\n';
   return 0;
 }
 
