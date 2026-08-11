@@ -18,6 +18,7 @@ f03ce83 fix: gate second-order source on reconstruction consistency
 fbf7bd4 test: qualify angular quadrature and dissipative constraints
 920ee2c fix: persist and report reconstruction source policy
 5c2ac7a test: enforce band invariance per field and radial line
+92f05c9 fix: label unrestricted source startup in solver output
 ```
 
 All results at or before the audited commit are pre-remediation and are not
@@ -93,9 +94,9 @@ Results:
 
 | Backend | C++ | symbolic | runtime |
 |---|---:|---:|---:|
-| Serial | 133/133 | 94/94 | 0.79 s total CTest |
-| OpenMP | 133/133 | 94/94 | 0.99 s total CTest, 8 threads |
-| Arc B580 SYCL | 133/133 | 94/94 | 1.61 s total CTest |
+| Serial | 133/133 | 94/94 | 0.84 s total CTest |
+| OpenMP | 133/133 | 94/94 | 0.92 s total CTest, 8 threads |
+| Arc B580 SYCL | 133/133 | 94/94 | 1.83 s total CTest |
 
 The C++ ladder includes the corrected half-factor, ordered-pair scalar oracle,
 sharp-mode tests, exact Gaunt/padded products, analytic source tangent,
