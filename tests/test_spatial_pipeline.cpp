@@ -6,6 +6,7 @@
 #include <cmath>
 #include <vector>
 
+#include "teuk/pipeline_initial_data.hpp"
 #include "teuk/spatial_pipeline.hpp"
 
 namespace {
@@ -384,4 +385,80 @@ TEST_CASE("composed nonlinear spatial pipeline retains RK4 stage order") {
   const double fine_error = error(fine);
   CHECK(coarse_error / medium_error > 12.0);
   CHECK(medium_error / fine_error > 12.0);
+}
+
+TEST_CASE("pipeline supports distinct parent target modes and angular bandlimits") {
+  const teuk::ExecutionSpace execution;
+  const teuk::ModeRegistry registry({-4, -2, 0, 2, 4}, {-2, 2},
+                                    {-4, 0, 4});
+  const teuk::UniformRadialGrid radial_grid(9, 0.0, 0.8);
+  const teuk::KerrParameters background{1.0, 0.4, 1.5};
+  teuk::SpatialPipeline pipeline(
+      execution, registry, radial_grid, teuk::PipelineAngularBands{3, 4}, 6,
+      background, 0.1, 0.0, teuk::ReductionEvolution::FreeDamped,
+      "separate_parent_target_bands",
+      teuk::SecondOrderSourcePolicy::unrestricted());
+  teuk::PipelineGaussianPulse pulse;
+  pulse.center = 0.4;
+  pulse.width = 0.14;
+  pulse.modes = {{2, -2, teuk::Complex(1.2e-4, -0.4e-4)},
+                 {2, 2, teuk::Complex(-0.9e-4, 0.7e-4)}};
+  for (std::size_t field = 0; field < pulse.reconstruction_scales.size();
+       ++field) {
+    pulse.reconstruction_scales[field] =
+        teuk::Complex(0.08 + 0.01 * static_cast<double>(field), -0.03);
+  }
+  teuk::initialize_compactified_gaussian_pulse(
+      execution, pipeline, registry, 3, background, pulse);
+  pipeline.evaluate_rhs(execution, pipeline.storage().state(),
+                        pipeline.storage().rhs());
+  execution.fence("evaluate separate parent target bands");
+  const auto state = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, pipeline.storage().state());
+  const auto rhs = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, pipeline.storage().rhs());
+
+  for (const int daughter_only : {-4, 4}) {
+    const std::size_t mode = registry.index(daughter_only);
+    for (std::size_t field = 0;
+         field < static_cast<std::size_t>(teuk::PipelineField::SecondP);
+         ++field) {
+      for (std::size_t radial = 0; radial < radial_grid.size(); ++radial) {
+        for (std::size_t theta = 0; theta < 6; ++theta) {
+          CHECK_COMPLEX_NEAR(state(mode, field, radial, theta),
+                             teuk::Complex(0.0, 0.0), 0.0);
+          CHECK_COMPLEX_NEAR(rhs(mode, field, radial, theta),
+                             teuk::Complex(0.0, 0.0), 0.0);
+        }
+      }
+    }
+  }
+  for (const int parent_only : {-2, 2}) {
+    const std::size_t mode = registry.index(parent_only);
+    for (std::size_t field =
+             static_cast<std::size_t>(teuk::PipelineField::SecondP);
+         field <= static_cast<std::size_t>(teuk::PipelineField::SecondPsi);
+         ++field) {
+      for (std::size_t radial = 0; radial < radial_grid.size(); ++radial) {
+        for (std::size_t theta = 0; theta < 6; ++theta) {
+          CHECK_COMPLEX_NEAR(rhs(mode, field, radial, theta),
+                             teuk::Complex(0.0, 0.0), 0.0);
+        }
+      }
+    }
+  }
+  double daughter_rhs_maximum = 0.0;
+  for (const int target : {-4, 4}) {
+    const std::size_t mode = registry.index(target);
+    for (std::size_t radial = 0; radial < radial_grid.size(); ++radial) {
+      for (std::size_t theta = 0; theta < 6; ++theta) {
+        daughter_rhs_maximum = std::max(
+            daughter_rhs_maximum,
+            static_cast<double>(Kokkos::abs(rhs(
+                mode, static_cast<std::size_t>(teuk::PipelineField::SecondP),
+                radial, theta))));
+      }
+    }
+  }
+  CHECK(daughter_rhs_maximum > 1.0e-16);
 }

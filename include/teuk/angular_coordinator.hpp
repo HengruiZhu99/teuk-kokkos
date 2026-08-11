@@ -3,8 +3,10 @@
 #include <Kokkos_Core.hpp>
 
 #include <cstddef>
+#include <cmath>
 #include <memory>
 #include <stdexcept>
+#include <algorithm>
 #include <vector>
 
 #include "teuk/angular_device.hpp"
@@ -56,6 +58,15 @@ class SignedModeAngularCoordinator {
       const int spin, const int boost, const int ell_max,
       const int node_count, const std::size_t radial_count,
       const KerrParameters& parameters)
+      : SignedModeAngularCoordinator(execution, registry, spin, boost, ell_max,
+                                     node_count, radial_count, parameters,
+                                     registry.modes()) {}
+
+  SignedModeAngularCoordinator(
+      const execution_space& execution, const ModeRegistry& registry,
+      const int spin, const int boost, const int ell_max,
+      const int node_count, const std::size_t radial_count,
+      const KerrParameters& parameters, std::vector<int> active_modes)
       : registry_(registry),
         spin_(spin),
         boost_(boost),
@@ -66,11 +77,26 @@ class SignedModeAngularCoordinator {
       throw std::invalid_argument(
           "angular coordinator requires at least one radial point");
     }
+    std::sort(active_modes.begin(), active_modes.end());
+    if (std::adjacent_find(active_modes.begin(), active_modes.end()) !=
+        active_modes.end()) {
+      throw std::invalid_argument("angular coordinator active modes repeat");
+    }
+    for (const int m : active_modes) {
+      if (!registry_.contains(m) || std::abs(m) > ell_max_) {
+        throw std::invalid_argument(
+            "angular coordinator active mode is outside its stored band");
+      }
+    }
     resources_.reserve(registry_.size());
     for (const int m : registry_.modes()) {
-      resources_.push_back(std::make_unique<ModeResources>(
-          execution, spin, m, boost, ell_max, node_count, radial_count,
-          parameters));
+      if (std::binary_search(active_modes.begin(), active_modes.end(), m)) {
+        resources_.push_back(std::make_unique<ModeResources>(
+            execution, spin, m, boost, ell_max, node_count, radial_count,
+            parameters));
+      } else {
+        resources_.push_back(nullptr);
+      }
     }
   }
 
@@ -107,6 +133,10 @@ class SignedModeAngularCoordinator {
                                         Kokkos::ALL, Kokkos::ALL);
       auto output_mode = Kokkos::subview(output, mode_index, output_field,
                                          Kokkos::ALL, Kokkos::ALL);
+      if (!resources_[mode_index]) {
+        zero_mode(execution, output_mode, "zero_inactive_angular_projection");
+        continue;
+      }
       auto& resource = *resources_[mode_index];
       resource.angular.analyze(execution, input_mode,
                                resource.laplacian_modal);
@@ -129,6 +159,10 @@ class SignedModeAngularCoordinator {
                                         Kokkos::ALL, Kokkos::ALL);
       auto output_mode = Kokkos::subview(output, mode_index, output_field,
                                          Kokkos::ALL, Kokkos::ALL);
+      if (!resources_[mode_index]) {
+        zero_mode(execution, output_mode, "zero_inactive_angular_laplacian");
+        continue;
+      }
       auto& resource = *resources_[mode_index];
       resource.angular.analyze(execution, input_mode,
                                resource.laplacian_modal);
@@ -156,6 +190,10 @@ class SignedModeAngularCoordinator {
                                      Kokkos::ALL, Kokkos::ALL);
       auto output_mode = Kokkos::subview(output, mode_index, output_field,
                                          Kokkos::ALL, Kokkos::ALL);
+      if (!resources_[mode_index]) {
+        zero_mode(execution, output_mode, "zero_inactive_angular_eth");
+        continue;
+      }
       auto& resource = *resources_[mode_index];
       resource.ghp.eth(execution, field_mode, dt_mode, radius, sin_theta,
                        cos_theta, output_mode, resource.ghp_workspace);
@@ -180,6 +218,10 @@ class SignedModeAngularCoordinator {
                                      Kokkos::ALL, Kokkos::ALL);
       auto output_mode = Kokkos::subview(output, mode_index, output_field,
                                          Kokkos::ALL, Kokkos::ALL);
+      if (!resources_[mode_index]) {
+        zero_mode(execution, output_mode, "zero_inactive_angular_ethprime");
+        continue;
+      }
       auto& resource = *resources_[mode_index];
       resource.ghp.ethprime(execution, field_mode, dt_mode, radius, sin_theta,
                             cos_theta, output_mode,
@@ -188,6 +230,20 @@ class SignedModeAngularCoordinator {
   }
 
  private:
+  template <class ViewType>
+  void zero_mode(const execution_space& execution, const ViewType& view,
+                 const char* kernel_name) const {
+    const std::size_t total = view.extent(0) * view.extent(1);
+    Kokkos::parallel_for(
+        kernel_name,
+        Kokkos::RangePolicy<execution_space>(execution, 0, total),
+        KOKKOS_LAMBDA(const std::size_t flat) {
+          const std::size_t row = flat / view.extent(1);
+          const std::size_t column = flat - row * view.extent(1);
+          view(row, column) = Complex(0.0, 0.0);
+        });
+  }
+
   template <class ViewType>
   void validate_field_view(const ViewType& view,
                            const std::size_t field_index) const {

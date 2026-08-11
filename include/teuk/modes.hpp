@@ -5,6 +5,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -31,10 +32,15 @@ struct ModePair {
 class ModeRegistry {
  public:
   explicit ModeRegistry(std::vector<int> modes)
-      : ModeRegistry(modes, modes) {}
+      : ModeRegistry(modes, modes, modes) {}
 
   ModeRegistry(std::vector<int> modes, std::vector<int> targets)
+      : ModeRegistry(modes, modes, std::move(targets)) {}
+
+  ModeRegistry(std::vector<int> modes, std::vector<int> parents,
+               std::vector<int> targets)
       : modes_(sorted_unique(std::move(modes), "mode")),
+        parents_(sorted_unique(std::move(parents), "parent mode")),
         targets_(sorted_unique(std::move(targets), "target mode")) {
     if (modes_.empty()) {
       throw std::invalid_argument("ModeRegistry requires at least one mode");
@@ -42,6 +48,10 @@ class ModeRegistry {
     if (targets_.empty()) {
       throw std::invalid_argument(
           "ModeRegistry requires at least one target mode");
+    }
+    if (parents_.empty()) {
+      throw std::invalid_argument(
+          "ModeRegistry requires at least one parent mode");
     }
 
     min_mode_ = modes_.front();
@@ -55,6 +65,12 @@ class ModeRegistry {
       if (modes_[i] >= 0) representatives_.push_back(modes_[i]);
     }
 
+    for (const int parent : parents_) {
+      if (!contains(parent)) {
+        throw std::invalid_argument("parent mode " + std::to_string(parent) +
+                                    " is not stored");
+      }
+    }
     for (const int target : targets_) {
       if (!contains(target)) {
         throw std::invalid_argument("target mode " + std::to_string(target) +
@@ -71,6 +87,9 @@ class ModeRegistry {
   [[nodiscard]] const std::vector<int>& targets() const noexcept {
     return targets_;
   }
+  [[nodiscard]] const std::vector<int>& parents() const noexcept {
+    return parents_;
+  }
   [[nodiscard]] const std::vector<int>& nonnegative_representatives()
       const noexcept {
     return representatives_;
@@ -83,6 +102,14 @@ class ModeRegistry {
   [[nodiscard]] bool contains(const int mode) const noexcept {
     if (mode < min_mode_ || mode > max_mode_) return false;
     return index_by_offset_[offset(mode)] != missing_index();
+  }
+
+  [[nodiscard]] bool is_parent(const int mode) const noexcept {
+    return std::binary_search(parents_.begin(), parents_.end(), mode);
+  }
+
+  [[nodiscard]] bool is_target(const int mode) const noexcept {
+    return std::binary_search(targets_.begin(), targets_.end(), mode);
   }
 
   [[nodiscard]] std::size_t index(const int mode) const {
@@ -158,7 +185,7 @@ class ModeRegistry {
     pair_offsets_.reserve(targets_.size() + 1);
     for (const int target : targets_) {
       pair_offsets_.push_back(ordered_pairs_.size());
-      for (const int m1 : modes_) {
+      for (const int m1 : parents_) {
         const long long m2_wide =
             static_cast<long long>(target) - static_cast<long long>(m1);
         if (m2_wide < std::numeric_limits<int>::min() ||
@@ -166,7 +193,7 @@ class ModeRegistry {
           continue;
         }
         const int m2 = static_cast<int>(m2_wide);
-        if (!contains(m2)) continue;
+        if (!is_parent(m2)) continue;
         ordered_pairs_.push_back(
             {m1, m2, target, index(m1), index(m2), index(target)});
       }
@@ -175,6 +202,7 @@ class ModeRegistry {
   }
 
   std::vector<int> modes_;
+  std::vector<int> parents_;
   std::vector<int> targets_;
   std::vector<int> representatives_;
   std::vector<std::size_t> index_by_offset_;
@@ -183,5 +211,56 @@ class ModeRegistry {
   int min_mode_ = 0;
   int max_mode_ = 0;
 };
+
+struct DaughterModeCompleteness {
+  std::vector<int> required;
+  std::vector<int> missing;
+
+  [[nodiscard]] bool complete() const noexcept { return missing.empty(); }
+};
+
+inline DaughterModeCompleteness quadratic_daughter_mode_completeness(
+    const std::vector<int>& first_order_modes,
+    const std::vector<int>& second_order_modes) {
+  if (first_order_modes.empty()) {
+    throw std::invalid_argument("first-order mode set must not be empty");
+  }
+  std::set<int> daughters;
+  for (const int left : first_order_modes) {
+    for (const int right : first_order_modes) {
+      const long long sum = static_cast<long long>(left) + right;
+      if (sum < std::numeric_limits<int>::min() ||
+          sum > std::numeric_limits<int>::max()) {
+        throw std::invalid_argument("quadratic daughter mode overflows int");
+      }
+      daughters.insert(static_cast<int>(sum));
+    }
+  }
+  DaughterModeCompleteness report;
+  report.required.assign(daughters.begin(), daughters.end());
+  for (const int daughter : report.required) {
+    if (std::find(second_order_modes.begin(), second_order_modes.end(),
+                  daughter) == second_order_modes.end()) {
+      report.missing.push_back(daughter);
+    }
+  }
+  return report;
+}
+
+inline DaughterModeCompleteness validate_quadratic_daughter_modes(
+    const std::vector<int>& first_order_modes,
+    const std::vector<int>& second_order_modes,
+    const bool allow_truncated_daughter_modes) {
+  auto report = quadratic_daughter_mode_completeness(first_order_modes,
+                                                      second_order_modes);
+  if (!report.complete() && !allow_truncated_daughter_modes) {
+    std::string message = "second-order mode set omits quadratic daughters:";
+    for (const int mode : report.missing) {
+      message += " " + std::to_string(mode);
+    }
+    throw std::invalid_argument(message);
+  }
+  return report;
+}
 
 }  // namespace teuk

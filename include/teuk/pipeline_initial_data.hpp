@@ -93,8 +93,8 @@ inline void validate_gaussian_pulse(
   }
   for (std::size_t i = 0; i < pulse.modes.size(); ++i) {
     const auto& seed = pulse.modes[i];
-    if (!registry.contains(seed.m)) {
-      throw std::invalid_argument("Gaussian seed m is not registered");
+    if (!registry.is_parent(seed.m)) {
+      throw std::invalid_argument("Gaussian seed m is not a first-order mode");
     }
     if (seed.ell < std::max(2, std::abs(seed.m)) || seed.ell > ell_max) {
       throw std::invalid_argument("Gaussian seed ell is outside the band");
@@ -141,6 +141,7 @@ inline double construct_galerkin_zero_time_derivative_p(
   parameters.spin_weight = -2;
   for (std::size_t mode = 0; mode < registry.size(); ++mode) {
     const int m = registry.modes()[mode];
+    if (!registry.is_parent(m)) continue;
     parameters.azimuthal_mode = m;
     const angular::SpinWeightedTransform transform(-2, m, ell_max,
                                                    theta_count);
@@ -226,6 +227,7 @@ inline void initialize_compactified_gaussian_pulse(
   // radial Gaussian.
   for (std::size_t mode = 0; mode < registry.size(); ++mode) {
     const int m = registry.modes()[mode];
+    if (!registry.is_parent(m)) continue;
     const auto angular_values = pipeline_initial_data_detail::angular_seed(
         pulse, -2, m, ell_max, static_cast<int>(theta_count));
     for (std::size_t radial = 0; radial < radial_count; ++radial) {
@@ -292,6 +294,7 @@ inline void initialize_compactified_gaussian_pulse(
     const std::size_t pipeline_field =
         static_cast<std::size_t>(reconstruction_fields[field]);
     for (std::size_t mode = 0; mode < registry.size(); ++mode) {
+      if (!registry.is_parent(registry.modes()[mode])) continue;
       const auto angular_values = pipeline_initial_data_detail::angular_seed(
           pulse, field_spin, registry.modes()[mode], ell_max,
           static_cast<int>(theta_count));
@@ -308,7 +311,7 @@ inline void initialize_compactified_gaussian_pulse(
   }
 
   project_pipeline_state_to_retained_bands(
-      host_state, registry, {ell_max, ell_max});
+      host_state, registry, pipeline.angular_bands());
 
   Kokkos::deep_copy(execution, storage.state(), host_state);
   pipeline.reset_source_activation(execution);

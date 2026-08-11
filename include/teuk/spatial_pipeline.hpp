@@ -15,6 +15,7 @@
 #include "teuk/angular_coordinator.hpp"
 #include "teuk/device_rk4.hpp"
 #include "teuk/full_spatial.hpp"
+#include "teuk/pipeline_bands.hpp"
 #include "teuk/pipeline_storage.hpp"
 #include "teuk/reconstruction_constraints.hpp"
 #include "teuk/source_spatial.hpp"
@@ -145,7 +146,24 @@ class SpatialPipeline {
                       ReductionEvolution::FreeDamped,
                   const std::string& label = "full_pipeline",
                   const SecondOrderSourcePolicy source_policy = {})
+      : SpatialPipeline(execution, registry, radial_grid,
+                        PipelineAngularBands{ell_max, ell_max}, theta_nodes,
+                        background, reduction_damping, dissipation, reduction,
+                        label, source_policy) {}
+
+  SpatialPipeline(const ExecutionSpace& execution,
+                  const ModeRegistry& registry,
+                  const UniformRadialGrid& radial_grid,
+                  const PipelineAngularBands angular_bands,
+                  const int theta_nodes, const KerrParameters& background,
+                  const double reduction_damping = 0.1,
+                  const double dissipation = 0.0,
+                  const ReductionEvolution reduction =
+                      ReductionEvolution::FreeDamped,
+                  const std::string& label = "full_pipeline",
+                  const SecondOrderSourcePolicy source_policy = {})
       : registry_(registry),
+        angular_bands_(angular_bands),
         background_(background),
         teukolsky_{background.mass,
                    background.spin,
@@ -158,24 +176,36 @@ class SpatialPipeline {
         source_policy_(source_policy),
         storage_(registry, radial_grid, angular::gauss_legendre(theta_nodes),
                  label),
-        first_angular_(execution, registry, -2, -2, ell_max, theta_nodes,
-                       radial_grid.size(), background),
-        g_angular_(execution, registry, -1, -1, ell_max, theta_nodes,
-                   radial_grid.size(), background),
-        b_angular_(execution, registry, -2, 0, ell_max, theta_nodes,
-                   radial_grid.size(), background),
-        pi_angular_(execution, registry, -1, 0, ell_max, theta_nodes,
-                    radial_grid.size(), background),
-        c_angular_(execution, registry, -1, 1, ell_max, theta_nodes,
-                   radial_grid.size(), background),
-        scalar_angular_(execution, registry, 0, 0, ell_max, theta_nodes,
-                        radial_grid.size(), background),
-        b_sharp_angular_(execution, registry, 2, 0, ell_max, theta_nodes,
-                         radial_grid.size(), background),
-        c_sharp_angular_(execution, registry, 1, 1, ell_max, theta_nodes,
-                         radial_grid.size(), background),
-        t_angular_(execution, registry, -1, -2, ell_max, theta_nodes,
-                   radial_grid.size(), background),
+        first_angular_(execution, registry, -2, -2,
+                       angular_bands.ell_max_first, theta_nodes,
+                       radial_grid.size(), background, registry.parents()),
+        second_angular_(execution, registry, -2, -2,
+                        angular_bands.ell_max_second, theta_nodes,
+                        radial_grid.size(), background, registry.targets()),
+        g_angular_(execution, registry, -1, -1,
+                   angular_bands.ell_max_first, theta_nodes,
+                   radial_grid.size(), background, registry.parents()),
+        b_angular_(execution, registry, -2, 0,
+                   angular_bands.ell_max_first, theta_nodes,
+                   radial_grid.size(), background, registry.parents()),
+        pi_angular_(execution, registry, -1, 0,
+                    angular_bands.ell_max_first, theta_nodes,
+                    radial_grid.size(), background, registry.parents()),
+        c_angular_(execution, registry, -1, 1,
+                   angular_bands.ell_max_first, theta_nodes,
+                   radial_grid.size(), background, registry.parents()),
+        scalar_angular_(execution, registry, 0, 0,
+                        angular_bands.ell_max_first, theta_nodes,
+                        radial_grid.size(), background, registry.parents()),
+        b_sharp_angular_(execution, registry, 2, 0,
+                         angular_bands.ell_max_first, theta_nodes,
+                         radial_grid.size(), background, registry.parents()),
+        c_sharp_angular_(execution, registry, 1, 1,
+                         angular_bands.ell_max_first, theta_nodes,
+                         radial_grid.size(), background, registry.parents()),
+        t_angular_(execution, registry, -1, -2,
+                   angular_bands.ell_max_second, theta_nodes,
+                   radial_grid.size(), background, registry.targets()),
         linear_angular_(label + "_linear_angular", registry.size(),
                         static_cast<std::size_t>(
                             spatial_pipeline_detail::LinearAngularSlot::Count),
@@ -270,11 +300,18 @@ class SpatialPipeline {
             label + "_source_constraint_max_squared", 1),
         source_active_(label + "_source_active", 1),
         rk_workspace_(storage_.value_count()) {
-    const int exact_product_nodes = (3 * ell_max + 2) / 2;
-    if (ell_max < 3 ||
-        theta_nodes < std::max(ell_max + 1, exact_product_nodes)) {
+    const int exact_product_nodes =
+        (2 * angular_bands.ell_max_first +
+         angular_bands.ell_max_second + 2) /
+        2;
+    if (angular_bands.ell_max_first < 3 ||
+        angular_bands.ell_max_second < 3 ||
+        theta_nodes <
+            std::max({angular_bands.ell_max_first + 1,
+                      angular_bands.ell_max_second + 1,
+                      exact_product_nodes})) {
       throw std::invalid_argument(
-          "full pipeline requires ell_max >= 3 and exact-product padding");
+          "full pipeline angular bands require exact-product padding");
     }
     if (dissipation < 0.0) {
       throw std::invalid_argument("pipeline dissipation must be nonnegative");
@@ -388,6 +425,9 @@ class SpatialPipeline {
     return independent_constraints_;
   }
   [[nodiscard]] KerrParameters background() const { return background_; }
+  [[nodiscard]] PipelineAngularBands angular_bands() const {
+    return angular_bands_;
+  }
 
   template <class StageView, class OutputView>
   void evaluate_rhs(const ExecutionSpace& execution, const StageView& stage,
@@ -493,7 +533,7 @@ class SpatialPipeline {
                     "profile quadratic spatial source");
     }
 
-    first_angular_.laplacian(
+    second_angular_.laplacian(
         execution, stage,
         static_cast<std::size_t>(PipelineField::SecondPsi), linear_angular_,
         static_cast<std::size_t>(
@@ -657,9 +697,12 @@ class SpatialPipeline {
   void project_teukolsky_rhs(
       const ExecutionSpace& execution, const OutputView& output,
       const TeukolskyFullFieldOffsets& fields) {
-    first_angular_.project(execution, output, fields.P, output, fields.P);
-    first_angular_.project(execution, output, fields.Q, output, fields.Q);
-    first_angular_.project(execution, output, fields.Psi, output, fields.Psi);
+    auto& angular = fields.P == spatial_pipeline_detail::second_fields.P
+                        ? second_angular_
+                        : first_angular_;
+    angular.project(execution, output, fields.P, output, fields.P);
+    angular.project(execution, output, fields.Q, output, fields.Q);
+    angular.project(execution, output, fields.Psi, output, fields.Psi);
   }
 
   template <class StageView, class DtView>
@@ -1082,10 +1125,10 @@ class SpatialPipeline {
         static_cast<std::size_t>(SpatialInnerSourceComponent::D);
     constexpr std::size_t T =
         static_cast<std::size_t>(SpatialInnerSourceComponent::T);
-    first_angular_.project(execution, inner_source_.summed_value(), D,
-                           projected_inner_, D);
-    first_angular_.project(execution, inner_source_.summed_tangent(), D,
-                           projected_inner_tangent_, D);
+    second_angular_.project(execution, inner_source_.summed_value(), D,
+                            projected_inner_, D);
+    second_angular_.project(execution, inner_source_.summed_tangent(), D,
+                            projected_inner_tangent_, D);
     t_angular_.project(execution, inner_source_.summed_value(), T,
                        projected_inner_, T);
     t_angular_.project(execution, inner_source_.summed_tangent(), T,
@@ -1206,6 +1249,7 @@ class SpatialPipeline {
   }
 
   ModeRegistry registry_;
+  PipelineAngularBands angular_bands_;
   KerrParameters background_;
   TeukolskyParameters teukolsky_;
   double dissipation_;
@@ -1213,6 +1257,7 @@ class SpatialPipeline {
   SecondOrderSourcePolicy source_policy_;
   SpatialPipelineStorage storage_;
   SignedModeAngularCoordinator<> first_angular_;
+  SignedModeAngularCoordinator<> second_angular_;
   SignedModeAngularCoordinator<> g_angular_;
   SignedModeAngularCoordinator<> b_angular_;
   SignedModeAngularCoordinator<> pi_angular_;

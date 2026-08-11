@@ -2,10 +2,12 @@
 
 #include <Kokkos_Core.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -62,11 +64,14 @@ inline void validate_bands(const ModeRegistry& registry,
                                  bands.ell_max_second) + 1)) {
     throw std::invalid_argument("pipeline angular bands do not fit the theta grid");
   }
-  for (const int m : registry.modes()) {
-    if (std::abs(m) > bands.ell_max_first ||
-        std::abs(m) > bands.ell_max_second) {
-      throw std::invalid_argument(
-          "stored mode lies outside a configured angular bandlimit");
+  for (const int m : registry.parents()) {
+    if (std::abs(m) > bands.ell_max_first) {
+      throw std::invalid_argument("parent mode lies outside ell_max_first");
+    }
+  }
+  for (const int m : registry.targets()) {
+    if (std::abs(m) > bands.ell_max_second) {
+      throw std::invalid_argument("target mode lies outside ell_max_second");
     }
   }
 }
@@ -87,6 +92,13 @@ inline double magnitude_squared(const Complex value) {
   return magnitude * magnitude;
 }
 
+inline bool field_mode_is_active(const ModeRegistry& registry, const int mode,
+                                 const std::size_t field) {
+  return field >= static_cast<std::size_t>(PipelineField::SecondP)
+             ? registry.is_target(mode)
+             : registry.is_parent(mode);
+}
+
 }  // namespace pipeline_band_detail
 
 // Measure the component orthogonal to every declared fixed-(s,m) retained
@@ -104,14 +116,23 @@ PipelineBandReport measure_pipeline_state_off_band(
     const int m = registry.modes()[mode];
     for (std::size_t field = 0; field < point_pipeline_field_count; ++field) {
       const int ell_max = pipeline_field_ell_max(field, bands);
-      const angular::SpinWeightedTransform transform(
-          pipeline_field_spins[field], m, ell_max,
-          static_cast<int>(state.extent(3)));
+      const bool active =
+          pipeline_band_detail::field_mode_is_active(registry, m, field);
+      std::vector<Complex> projected(state.extent(3), Complex(0.0, 0.0));
+      const auto transform = active
+          ? std::make_unique<angular::SpinWeightedTransform>(
+                pipeline_field_spins[field], m, ell_max,
+                static_cast<int>(state.extent(3)))
+          : nullptr;
       for (std::size_t radial = 0; radial < state.extent(2); ++radial) {
         for (std::size_t theta = 0; theta < state.extent(3); ++theta) {
           nodal[theta] = state(mode, field, radial, theta);
         }
-        const auto projected = transform.synthesize(transform.analyze(nodal));
+        if (active) {
+          projected = transform->synthesize(transform->analyze(nodal));
+        } else {
+          std::fill(projected.begin(), projected.end(), Complex(0.0, 0.0));
+        }
         double line_squared = 0.0;
         double residual_squared = 0.0;
         double residual_maximum = 0.0;
@@ -151,15 +172,21 @@ void project_pipeline_state_to_retained_bands(
   for (std::size_t mode = 0; mode < registry.size(); ++mode) {
     const int m = registry.modes()[mode];
     for (std::size_t field = 0; field < point_pipeline_field_count; ++field) {
-      const angular::SpinWeightedTransform transform(
-          pipeline_field_spins[field], m,
-          pipeline_field_ell_max(field, bands),
-          static_cast<int>(state.extent(3)));
+      const bool active =
+          pipeline_band_detail::field_mode_is_active(registry, m, field);
+      const auto transform = active
+          ? std::make_unique<angular::SpinWeightedTransform>(
+                pipeline_field_spins[field], m,
+                pipeline_field_ell_max(field, bands),
+                static_cast<int>(state.extent(3)))
+          : nullptr;
       for (std::size_t radial = 0; radial < state.extent(2); ++radial) {
         for (std::size_t theta = 0; theta < state.extent(3); ++theta) {
           nodal[theta] = state(mode, field, radial, theta);
         }
-        const auto projected = transform.synthesize(transform.analyze(nodal));
+        const auto projected = active
+            ? transform->synthesize(transform->analyze(nodal))
+            : std::vector<Complex>(state.extent(3), Complex(0.0, 0.0));
         for (std::size_t theta = 0; theta < state.extent(3); ++theta) {
           state(mode, field, radial, theta) = projected[theta];
         }

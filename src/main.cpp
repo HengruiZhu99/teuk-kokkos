@@ -137,6 +137,7 @@ int run_spatial_pipeline(const teuk::Parameters& input) {
   const teuk::PipelineCheckpointConfiguration checkpoint_configuration{
       background,
       input.ell_max,
+      input.ell_max,
       input.theta_points,
       input.reduction_damping,
       input.dissipation,

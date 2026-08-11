@@ -49,6 +49,7 @@ class TemporaryTestDirectory {
 teuk::PipelineCheckpointConfiguration checkpoint_configuration() {
   return {{1.0, 0.27, 1.5},
           3,
+          3,
           6,
           0.08,
           0.004,
@@ -150,21 +151,25 @@ TEST_CASE("full spatial pipeline checkpoint resumes the real RK4 trajectory") {
   const teuk::UniformRadialGrid radial_grid(9, 0.0, 0.8);
   const auto configuration = checkpoint_configuration();
   teuk::SpatialPipeline uninterrupted(
-      execution, registry, radial_grid, configuration.ell_max,
+      execution, registry, radial_grid,
+      teuk::PipelineAngularBands{configuration.ell_max_first,
+                                 configuration.ell_max_second},
       configuration.theta_nodes, configuration.background,
       configuration.reduction_damping, configuration.dissipation,
       configuration.reduction, "checkpoint_uninterrupted",
       configuration.source_policy);
   teuk::SpatialPipeline interrupted(
-      execution, registry, radial_grid, configuration.ell_max,
+      execution, registry, radial_grid,
+      teuk::PipelineAngularBands{configuration.ell_max_first,
+                                 configuration.ell_max_second},
       configuration.theta_nodes, configuration.background,
       configuration.reduction_damping, configuration.dissipation,
       configuration.reduction, "checkpoint_interrupted",
       configuration.source_policy);
   initialize_pipeline(execution, uninterrupted, registry,
-                      configuration.ell_max);
+                      configuration.ell_max_first);
   initialize_pipeline(execution, interrupted, registry,
-                      configuration.ell_max);
+                      configuration.ell_max_first);
 
   constexpr std::uint64_t total_steps = 4;
   constexpr std::uint64_t checkpoint_step = 2;
@@ -205,6 +210,7 @@ TEST_CASE("full spatial pipeline checkpoint resumes the real RK4 trajectory") {
         static_cast<std::uint64_t>(configuration.theta_nodes));
   CHECK(metadata.modes == std::vector<int>({-1, 0, 1}));
   CHECK(metadata.targets == std::vector<int>({-1, 0, 1}));
+  CHECK(metadata.parents == std::vector<int>({-1, 0, 1}));
   CHECK(metadata.radial_coordinates.front() == radial_grid.lower_radius());
   CHECK(metadata.radial_coordinates.back() == radial_grid.upper_radius());
   CHECK(metadata.configuration.background.mass ==
@@ -228,13 +234,16 @@ TEST_CASE("full spatial pipeline checkpoint resumes the real RK4 trajectory") {
   CHECK_NEAR(metadata.source_activation.activation_time, 3.0e-5, 0.0);
   CHECK(metadata.source_activation.consecutive_passes == 1);
 
-  const teuk::ModeRegistry restored_registry(metadata.modes, metadata.targets);
+  const teuk::ModeRegistry restored_registry(metadata.modes, metadata.parents,
+                                             metadata.targets);
   const teuk::UniformRadialGrid restored_grid(
       metadata.radial_coordinates.size(), metadata.radial_coordinates.front(),
       metadata.radial_coordinates.back());
   teuk::SpatialPipeline restarted(
       execution, restored_registry, restored_grid,
-      metadata.configuration.ell_max, metadata.configuration.theta_nodes,
+      teuk::PipelineAngularBands{metadata.configuration.ell_max_first,
+                                 metadata.configuration.ell_max_second},
+      metadata.configuration.theta_nodes,
       metadata.configuration.background,
       metadata.configuration.reduction_damping,
       metadata.configuration.dissipation, metadata.configuration.reduction,
@@ -268,12 +277,15 @@ TEST_CASE("pipeline checkpoint rejects malformed truncated and mismatched data")
   const teuk::UniformRadialGrid radial_grid(9, 0.0, 0.8);
   const auto configuration = checkpoint_configuration();
   teuk::SpatialPipeline pipeline(
-      execution, registry, radial_grid, configuration.ell_max,
+      execution, registry, radial_grid,
+      teuk::PipelineAngularBands{configuration.ell_max_first,
+                                 configuration.ell_max_second},
       configuration.theta_nodes, configuration.background,
       configuration.reduction_damping, configuration.dissipation,
       configuration.reduction, "checkpoint_rejection",
       configuration.source_policy);
-  initialize_pipeline(execution, pipeline, registry, configuration.ell_max);
+  initialize_pipeline(execution, pipeline, registry,
+                      configuration.ell_max_first);
 
   TemporaryTestDirectory temporary;
   const auto valid = temporary.path() / "valid";

@@ -35,7 +35,7 @@
 
 namespace teuk {
 
-inline constexpr std::uint64_t pipeline_checkpoint_format_version = 3;
+inline constexpr std::uint64_t pipeline_checkpoint_format_version = 4;
 inline constexpr const char* pipeline_checkpoint_metadata_file =
     "metadata.txt";
 inline constexpr const char* pipeline_checkpoint_state_file = "state.bin";
@@ -45,7 +45,8 @@ inline constexpr const char* pipeline_checkpoint_state_file = "state.bin";
 // requires the caller's expected parameters to match them exactly.
 struct PipelineCheckpointConfiguration {
   KerrParameters background;
-  int ell_max = 0;
+  int ell_max_first = 0;
+  int ell_max_second = 0;
   int theta_nodes = 0;
   double reduction_damping = 0.0;
   double dissipation = 0.0;
@@ -63,6 +64,7 @@ struct PipelineCheckpointMetadata {
   std::uint64_t version = pipeline_checkpoint_format_version;
   SnapshotShape shape;
   std::vector<int> modes;
+  std::vector<int> parents;
   std::vector<int> targets;
   std::vector<double> radial_coordinates;
   std::vector<double> theta_coordinates;
@@ -142,10 +144,14 @@ inline void validate_configuration(
       std::abs(configuration.background.spin) >
           configuration.background.mass ||
       !(configuration.background.compactification_length > 0.0) ||
-      configuration.ell_max < 3 ||
+      configuration.ell_max_first < 3 ||
+      configuration.ell_max_second < 3 ||
       configuration.theta_nodes <
-          std::max(configuration.ell_max + 1,
-                   (3 * configuration.ell_max + 2) / 2) ||
+          std::max({configuration.ell_max_first + 1,
+                    configuration.ell_max_second + 1,
+                    (2 * configuration.ell_max_first +
+                     configuration.ell_max_second + 2) /
+                        2}) ||
       configuration.reduction_damping < 0.0 ||
       configuration.dissipation < 0.0 || !(configuration.time_step > 0.0) ||
       configuration.source_policy.source_start_time < 0.0 ||
@@ -164,7 +170,8 @@ inline bool same_configuration(
          left.background.spin == right.background.spin &&
          left.background.compactification_length ==
              right.background.compactification_length &&
-         left.ell_max == right.ell_max &&
+         left.ell_max_first == right.ell_max_first &&
+         left.ell_max_second == right.ell_max_second &&
          left.theta_nodes == right.theta_nodes &&
          left.reduction_damping == right.reduction_damping &&
          left.dissipation == right.dissipation &&
@@ -301,17 +308,20 @@ std::vector<typename View::non_const_value_type> copy_rank_one_to_host(
 }
 
 inline void validate_sorted_registry(const std::vector<int>& modes,
+                                     const std::vector<int>& parents,
                                      const std::vector<int>& targets) {
-  if (modes.empty() || targets.empty() ||
+  if (modes.empty() || parents.empty() || targets.empty() ||
       !std::is_sorted(modes.begin(), modes.end()) ||
+      !std::is_sorted(parents.begin(), parents.end()) ||
       !std::is_sorted(targets.begin(), targets.end()) ||
       std::adjacent_find(modes.begin(), modes.end()) != modes.end() ||
+      std::adjacent_find(parents.begin(), parents.end()) != parents.end() ||
       std::adjacent_find(targets.begin(), targets.end()) != targets.end()) {
     throw std::runtime_error(
         "checkpoint modes and targets must be nonempty, sorted, and unique");
   }
   try {
-    const ModeRegistry registry(modes, targets);
+    const ModeRegistry registry(modes, parents, targets);
     if (!registry.is_closed_under_sharp()) {
       throw std::runtime_error("checkpoint modes are not sharp closed");
     }
@@ -331,7 +341,7 @@ inline void validate_metadata(const PipelineCheckpointMetadata& metadata) {
     throw std::runtime_error("inconsistent pipeline checkpoint metadata");
   }
   (void)checked_snapshot_value_count(metadata.shape);
-  validate_sorted_registry(metadata.modes, metadata.targets);
+  validate_sorted_registry(metadata.modes, metadata.parents, metadata.targets);
   try {
     validate_configuration(metadata.configuration);
   } catch (const std::invalid_argument&) {
@@ -401,6 +411,8 @@ inline void write_metadata_file(
   write_list(output, metadata.modes);
   output << "target_values=";
   write_list(output, metadata.targets);
+  output << "parent_values=";
+  write_list(output, metadata.parents);
   output << "radial_coordinates=";
   write_list(output, metadata.radial_coordinates);
   output << "theta_coordinates=";
@@ -409,7 +421,8 @@ inline void write_metadata_file(
          << "spin=" << metadata.configuration.background.spin << '\n'
          << "compactification_length="
          << metadata.configuration.background.compactification_length << '\n'
-         << "ell_max=" << metadata.configuration.ell_max << '\n'
+         << "ell_max_first=" << metadata.configuration.ell_max_first << '\n'
+         << "ell_max_second=" << metadata.configuration.ell_max_second << '\n'
          << "theta_nodes=" << metadata.configuration.theta_nodes << '\n'
          << "reduction_damping="
          << metadata.configuration.reduction_damping << '\n'
@@ -506,9 +519,11 @@ inline std::map<std::string, std::string> read_entries(
       "format",          "version",          "ordering",
       "complex_storage", "byte_order",       "state_file",
       "modes",           "fields",           "radial",
-      "theta",           "m_values",         "target_values",
+      "theta",           "m_values",         "parent_values",
+      "target_values",
       "radial_coordinates", "theta_coordinates", "mass",
-      "spin",            "compactification_length", "ell_max",
+      "spin",            "compactification_length", "ell_max_first",
+      "ell_max_second",
       "theta_nodes",     "reduction_damping", "dissipation",
       "reduction",       "time_step",        "source_mode",
       "source_start_time", "source_normalized_constraint_tolerance",
@@ -569,6 +584,7 @@ inline PipelineCheckpointMetadata read_pipeline_checkpoint_metadata(
   metadata.shape.radial = parse_number<std::uint64_t>(entries, "radial");
   metadata.shape.theta = parse_number<std::uint64_t>(entries, "theta");
   metadata.modes = parse_list<int>(entries, "m_values");
+  metadata.parents = parse_list<int>(entries, "parent_values");
   metadata.targets = parse_list<int>(entries, "target_values");
   metadata.radial_coordinates =
       parse_list<double>(entries, "radial_coordinates");
@@ -580,7 +596,10 @@ inline PipelineCheckpointMetadata read_pipeline_checkpoint_metadata(
       parse_number<double>(entries, "spin");
   metadata.configuration.background.compactification_length =
       parse_number<double>(entries, "compactification_length");
-  metadata.configuration.ell_max = parse_number<int>(entries, "ell_max");
+  metadata.configuration.ell_max_first =
+      parse_number<int>(entries, "ell_max_first");
+  metadata.configuration.ell_max_second =
+      parse_number<int>(entries, "ell_max_second");
   metadata.configuration.theta_nodes =
       parse_number<int>(entries, "theta_nodes");
   metadata.configuration.reduction_damping =
@@ -648,6 +667,7 @@ inline void write_pipeline_checkpoint(
   PipelineCheckpointMetadata metadata;
   metadata.shape = pipeline.storage().snapshot_shape();
   metadata.modes = registry.modes();
+  metadata.parents = registry.parents();
   metadata.targets = registry.targets();
   metadata.configuration = configuration;
   metadata.progress = progress;
@@ -692,6 +712,7 @@ inline PipelineCheckpointMetadata load_pipeline_checkpoint(
         "checkpoint source policy does not match the caller pipeline");
   }
   if (metadata.modes != expected_registry.modes() ||
+      metadata.parents != expected_registry.parents() ||
       metadata.targets != expected_registry.targets()) {
     throw std::runtime_error("checkpoint mode registry does not match caller");
   }
@@ -715,7 +736,8 @@ inline PipelineCheckpointMetadata load_pipeline_checkpoint(
   constexpr double restart_band_tolerance = 5.0e-11;
   const auto band_report = measure_pipeline_state_off_band(
       checkpoint_state, expected_registry,
-      {expected_configuration.ell_max, expected_configuration.ell_max});
+      {expected_configuration.ell_max_first,
+       expected_configuration.ell_max_second});
   if (!pipeline_state_is_bandlimited(band_report,
                                      restart_band_tolerance)) {
     throw std::runtime_error(
