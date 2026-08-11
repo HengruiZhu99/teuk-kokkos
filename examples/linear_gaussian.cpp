@@ -1,76 +1,61 @@
 #include <Kokkos_Core.hpp>
 
-#include <cmath>
 #include <iostream>
-#include <vector>
 
 #include "teuk/diagnostics.hpp"
-#include "teuk/grid.hpp"
-#include "teuk/rk4.hpp"
-#include "teuk/teukolsky.hpp"
+#include "teuk/modes.hpp"
+#include "teuk/pipeline_diagnostics.hpp"
+#include "teuk/pipeline_initial_data.hpp"
+#include "teuk/spatial_pipeline.hpp"
 
 int main(int argc, char* argv[]) {
   Kokkos::initialize(argc, argv);
   {
-    constexpr std::size_t point_count = 129;
-    constexpr double mass = 1.0;
-    constexpr double spin = 0.7;
-    constexpr double length = 1.4;
-    const double horizon_R =
-        length * length / teuk::outer_horizon_radius(mass, spin);
-    const teuk::UniformRadialGrid grid(point_count, horizon_R);
-    teuk::TeukolskyParameters parameters;
-    parameters.mass = mass;
-    parameters.spin = spin;
-    parameters.compactification_length = length;
-    parameters.spin_weight = -2;
-    parameters.azimuthal_mode = 2;
-    parameters.reduction_damping = 0.2;
-    constexpr double theta = 0.9;
-    constexpr double angular_eigenvalue = -2.0;
+    const teuk::ExecutionSpace execution;
+    const teuk::ModeRegistry registry({-2, 2});
+    const teuk::KerrParameters background{1.0, 0.7, 1.4};
+    const double horizon = background.compactification_length *
+                           background.compactification_length /
+                           teuk::outer_horizon_radius(background.mass,
+                                                      background.spin);
+    const teuk::UniformRadialGrid radial_grid(65, 0.0, horizon);
+    teuk::SpatialPipeline pipeline(execution, registry, radial_grid, 3, 5,
+                                   background, 0.2, 0.01);
+    teuk::PipelineGaussianPulse pulse;
+    pulse.center = 0.45 * horizon;
+    pulse.width = 0.12 * horizon;
+    pulse.modes = {{2, 2, teuk::Complex(1.0e-3, 2.0e-4)},
+                   {2, -2, teuk::Complex(1.0e-3, -2.0e-4)}};
+    teuk::initialize_compactified_gaussian_pulse(
+        execution, pipeline, registry, 3, background, pulse);
 
-    std::vector<teuk::TeukolskyState> state(point_count);
-    std::vector<teuk::Complex> psi(point_count), derivative(point_count);
-    for (std::size_t i = 0; i < point_count; ++i) {
-      const double R = grid.coordinate(i);
-      const double centered = (R - 0.45 * horizon_R) / (0.12 * horizon_R);
-      psi[i] = std::exp(-centered * centered);
-    }
-    teuk::fourth_order_radial_derivative(grid, psi, derivative);
-    for (std::size_t i = 0; i < point_count; ++i) {
-      const auto coefficients =
-          teuk::teukolsky_coefficients(parameters, grid.coordinate(i), theta);
-      state[i].psi = psi[i];
-      state[i].Q = derivative[i];
-      state[i].P = -2.0 * coefficients.radial_advection * state[i].Q +
-                   coefficients.definition * state[i].psi;
-    }
-
-    std::vector<teuk::Complex> angular(point_count), forcing(point_count, 0.0);
-    teuk::TeukolskyRadialWorkspace radial_workspace(point_count);
-    teuk::RK4Workspace<teuk::TeukolskyState> rk_workspace(point_count);
-    const auto rhs = [&](double, const std::vector<teuk::TeukolskyState>& in,
-                         std::vector<teuk::TeukolskyState>& out) {
-      for (std::size_t i = 0; i < point_count; ++i) {
-        angular[i] = angular_eigenvalue * in[i].psi;
-      }
-      teuk::evaluate_teukolsky_radial_line_rhs(
-          grid, parameters, theta, in, angular, forcing,
-          teuk::ReductionEvolution::FreeDamped, radial_workspace, out);
-    };
-    constexpr double dt = 2.0e-5;
-    constexpr int steps = 50;
+    constexpr double time_step = 1.0e-4;
+    constexpr int steps = 20;
     double time = 0.0;
     for (int step = 0; step < steps; ++step) {
-      teuk::classical_rk4_step(state, time, dt, rhs, rk_workspace);
-      time += dt;
+      pipeline.step(execution, time, time_step);
+      time += time_step;
     }
-    std::cout << "backend=" << Kokkos::DefaultExecutionSpace::name() << '\n'
+    pipeline.evaluate_rhs(execution, pipeline.storage().state(),
+                          pipeline.storage().rhs());
+    teuk::PipelineDiagnostics diagnostics(registry.size(), radial_grid, 5);
+    const auto report = diagnostics.sample_pipeline(execution, pipeline);
+    std::cout << "backend=" << teuk::ExecutionSpace::name() << '\n'
               << "time=" << time << '\n'
-              << "constraint_rms="
-              << teuk::reduction_constraint_rms(grid, state, psi, derivative)
+              << "first_psi4_rms="
+              << report.fields[static_cast<std::size_t>(
+                                    teuk::PipelineField::FirstPsi)]
+                     .state.rms
               << '\n'
-              << "note=reference FD pulse without production SAT boundaries\n";
+              << "first_constraint_rms="
+              << report.first_reduction_constraint.rms << '\n'
+              << "second_psi4_rms="
+              << report.fields[static_cast<std::size_t>(
+                                    teuk::PipelineField::SecondPsi)]
+                     .state.rms
+              << '\n'
+              << "note=no retained daughter modes, so this is the linear "
+                 "full-grid path\n";
   }
   Kokkos::finalize();
   return 0;
