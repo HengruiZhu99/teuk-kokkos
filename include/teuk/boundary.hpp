@@ -99,9 +99,11 @@ propagating_symmetrizer_weights(
   return {1.0, coefficients.time * coefficients.radial_principal};
 }
 
-// For C_Q = Q-partial_R psi, the compact reduction gives exactly
-// partial_T C_Q = -gamma_Q C_Q. It is a stationary damped constraint, not an
-// incoming transport field at either radial endpoint.
+// Without added dissipation, the compact reduction gives exactly
+// partial_T C_Q = -gamma_Q C_Q for C_Q=Q-partial_R psi. Independent
+// dissipation on Q and psi adds Dcal(Q)-D_R(Dcal(psi)); see sbp.hpp and the
+// boundary documentation. The continuum constraint is stationary rather than
+// an incoming transport field at either radial endpoint.
 KOKKOS_INLINE_FUNCTION Complex reduction_constraint_time_derivative(
     const Complex& constraint, const double reduction_damping) {
   return -reduction_damping * constraint;

@@ -48,6 +48,11 @@ The evolved last variable is `mu h_ll`, not `h_ll`. Background rescalings are
   `R_s {}_sY_lm = sqrt((l-s)(l+s+1)) {}_(s+1)Y_lm`.
 - Use the lowering action
   `L_s {}_sY_lm = -sqrt((l+s)(l-s+1)) {}_(s-1)Y_lm`.
+- The Teukolsky angular operator is the lower-after-raise composition,
+  `L_(s+1) R_s`, with eigenvalue
+  `-(l-s)(l+s+1) = s(s+1)-l(l+1)`. The symmetric spin-covariant operator
+  `s^2-l(l+1)` is a separate diagnostic and must not enter either Teukolsky
+  equation.
 - Nonlinear products must preserve `m3 = m1 + m2` and `s3 = s1 + s2` and be
   checked against the generalized spin-weighted Gaunt coefficient in the
   implementer reference.
@@ -72,6 +77,10 @@ The evolved last variable is `mu h_ll`, not `h_ll`. Background rescalings are
   the first-order state and RHS, all seven reconstruction states and RHSs,
   source values and analytic tangents, the outer quadratic source, and finally
   the second-order RHS.
+- Every complete subsystem tangent is projected before its dependents consume
+  it. The final derivative of each of the 13 evolved fields is in its retained
+  fixed-`m` spin band: spin `-2` for both Teukolsky triples, `Lambda`, and `B`;
+  spin `-1` for `G`, `Pi`, and `C`; spin `0` for `H` and `U`.
 - Historical endpoint interpolation is forbidden. Product tangents use
   `d_t(AB) = (d_t A)B + A(d_t B)` at the same RK stage.
 - Compatible dissipation belongs in the method-of-lines RHS. A transformed
@@ -79,11 +88,20 @@ The evolved last variable is `mu h_ll`, not `h_ll`. Background rescalings are
 - The corrected source term is
   `0.5 * (eth + conjugate(pi) + 2*tau) h_l_barm`; the factor `0.5` multiplies
   the entire parenthesis.
+- The default source policy is constraint-aware. It keeps second-order forcing
+  zero until both the configured causal start time and the maximum of the true
+  independent reconstruction residuals satisfy their gates. This is a causal
+  startup approximation, not constraint-solved second-order initial data.
+  `source_mode=unrestricted` exists only for explicit algebra and convergence
+  experiments and must be labelled nonphysical when zero reconstruction data
+  are used.
 
 ## Diagnostics and interpretation
 
-- Record the reduction constraint, reconstruction residuals, total and
-  per-family/per-ordered-pair sources, and horizon transverse derivatives.
+- Record the reduction constraint, seven transport-equation consistency
+  residuals, independent `Psi3`/`Psi2` Bianchi and `h_ll` reality residuals,
+  source-gate state, total and per-family/per-ordered-pair sources, and horizon
+  transverse derivatives.
 - Record `kappa` and `kappa*T` for near-extremal runs.
 - Raw horizon `Psi4^(2)` in this tetrad is convention-fixed, not generally a
   gauge/tetrad-invariant observable. Physical horizon claims require a regular

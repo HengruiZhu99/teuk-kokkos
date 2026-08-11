@@ -35,13 +35,28 @@ so the one nonzero velocity points toward increasing R, out of the upper
 boundary, again with two stationary modes. Thus neither endpoint has a
 continuum incoming propagating mode.
 
-The reduction constraint `C_Q=Q-partial_R psi` satisfies exactly
+Without compatible dissipation, the reduction constraint
+`C_Q=Q-partial_R psi` satisfies exactly
 
 ```text
 partial_T C_Q = -gamma_Q C_Q
 ```
 
 and is stationary and damped rather than incoming.
+
+When the same compatible dissipation operator `Dcal` is added independently
+to `Q` and `psi`, the semi-discrete law is instead
+
+```text
+partial_T C_Q = -gamma_Q C_Q + Dcal(Q) - D_R(Dcal(psi)).
+```
+
+The commutator vanishes in translation-invariant interior rows but is nonzero
+in the D4-2 closures. `tests/test_sbp.cpp` starts with the discrete identity
+`Q=D_R psi` and verifies that this boundary source converges at first order in
+the pointwise maximum and order 3/2 in the SBP norm, as expected for a fixed
+number of boundary points. No exact damped-constraint claim is made when
+dissipation is active.
 
 ## Why a nonzero SAT is blocked
 

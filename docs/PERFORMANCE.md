@@ -1,7 +1,15 @@
-# Performance
+# Historical pre-remediation performance
 
-Measured 2026-08-11 after the correctness gates. These are short focused
-measurements, not vendor-tuned peak benchmarks.
+> **Not a current qualification.** These measurements predate the independent
+> audit remediation. At that time the production Teukolsky angular eigenvalue
+> was wrong and complete RK tangents were not projected into the retained
+> angular bands. The numbers below are retained only as historical throughput
+> data; they do not validate the equations and should not be used to predict
+> current performance. A new benchmark is required after the corrected stage
+> graph is frozen.
+
+Measured 2026-08-11 before the independent-audit corrections. These were short
+focused measurements, not vendor-tuned peak benchmarks.
 
 ## Environment and workload
 
@@ -43,7 +51,7 @@ the B580 were:
 | Quadratic source and projection | 49.30% | 64.74% |
 | Second linear Teukolsky | 3.24% | 3.37% |
 
-The corrected ordered-pair source is the measured optimization target. Further
-work should reduce source kernel launches and memory traffic while retaining
-the readable scalar ledger and exact oracle tests. No equation-specific GPU
-fork is justified by these measurements.
+At the historical commit, the ordered-pair source was the measured
+optimization target. Any new optimization decision must first repeat this
+profile with the remediated pipeline. No equation-specific GPU fork is
+justified by these historical measurements.

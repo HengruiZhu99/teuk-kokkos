@@ -24,7 +24,7 @@ class PipelineTransportEquationDiagnostics {
   PipelineTransportEquationDiagnostics(
       const std::size_t mode_count, const std::size_t radial_count,
       const std::size_t theta_count,
-      const std::string& label = "pipeline_reconstruction_residual")
+      const std::string& label = "pipeline_transport_consistency")
       : mode_count_(mode_count),
         radial_count_(radial_count),
         theta_count_(theta_count),
@@ -36,7 +36,7 @@ class PipelineTransportEquationDiagnostics {
         host_finite_(label + "_host_finite", 1) {
     if (mode_count == 0 || radial_count == 0 || theta_count == 0) {
       throw std::invalid_argument(
-          "reconstruction diagnostics require nonempty extents");
+          "transport consistency diagnostics require nonempty extents");
     }
   }
 
@@ -62,7 +62,7 @@ class PipelineTransportEquationDiagnostics {
         angular.extent(2) != radial_count_ ||
         angular.extent(3) != theta_count_) {
       throw std::invalid_argument(
-          "reconstruction diagnostic pipeline extents mismatch");
+          "transport consistency diagnostic pipeline extents mismatch");
     }
 
     Kokkos::deep_copy(execution, sum_squared_, 0.0);

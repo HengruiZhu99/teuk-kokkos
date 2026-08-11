@@ -97,12 +97,26 @@ angular normalization, layout, and stage semantics. See
 
 ## Current validation status
 
-The symbolic specification audit passes 94/94 checks and the C++ suite passes
-121/121 tests. The complete signed-mode, full-grid common-stage pipeline has
-run on Kokkos Serial, OpenMP, and SYCL on an Intel Arc B580. An identical
-15,015-complex-value checkpoint differs between Serial and B580 by
-`2.69e-18` at maximum (`4.10e-16` relative maximum). CUDA and HIP are supported
-by the backend-neutral source structure but have not been built or tested here.
+The 2026-08-11 independent audit found that the earlier validation used the
+wrong Teukolsky angular eigenvalue, evolved padded off-band nodal directions,
+and drove the second-order equation from inconsistent zero reconstruction
+data. **Results produced before the remediation commits beginning at
+`0151757` are not scientifically qualified.**
+
+The remediated production operator is
+`-(ell-s)(ell+s+1)`, every complete RK stage derivative is projected into its
+retained spin-weighted band, and the default second-order source is gated by a
+causal start time plus genuinely independent reconstruction constraints. The
+post-audit suite passes 133/133 C++ tests and 94/94 symbolic checks on Serial,
+OpenMP, and Kokkos SYCL on an Intel Arc B580. A fresh 7,735-complex-value
+checkpoint is bitwise identical between Serial and OpenMP; Serial and B580
+differ by `2.68e-18` at maximum (`3.12e-16` relative maximum). CUDA and HIP
+remain untested and are not claimed.
+
+The Schwarzschild `ell=m=2` ringdown regression agrees with the trusted
+fundamental frequency and damping to `8e-4`; all 13 RHS fields and a full RK4
+step are bandlimited to relative residual below `3e-12`. See
+`docs/POST_AUDIT_REMEDIATION.md` for the exact evidence and remaining limits.
 
 Run the workstation-sized coupled example directly:
 
@@ -111,15 +125,24 @@ Run the workstation-sized coupled example directly:
 ```
 
 The command initializes a signed-mode, band-limited Gaussian, evolves all 13
-fields, and prints reduction, source, forcing, and horizon diagnostics. Useful
-overrides include:
+fields, and prints reduction, transport consistency, independent
+reconstruction constraints, source-gate state, forcing, and horizon
+diagnostics. The Gaussian does not supply constraint-solved reconstruction
+data, so the default `source_mode=constraint_aware` keeps second-order forcing
+off until both gates pass. Useful overrides include:
 
 ```bash
 ./build/serial/teuk_solver spatial-pipeline \
   spin=0.999 nr=129 ntheta=7 ellmax=4 modes=-4,-2,0,2,4 \
   final_time=0.01 steps=200 diagnostic_every=20 \
+  source_start=0.5 source_constraint_tol=1e-10 \
   checkpoint_every=100 output=run-high-spin
 ```
+
+`source_mode=unrestricted` is intentionally available for source-algebra and
+temporal-order experiments. With the default zero reconstruction data it is
+not a physical second-order initial-value problem; the executable and example
+label that mode explicitly.
 
 An output directory receives `diagnostics.csv` and `source_pairs.csv`. The
 latter records RMS and maximum contributions from both inner-source families
@@ -145,9 +168,12 @@ step:
   output=run-high-spin-resumed checkpoint_every=200
 ```
 
-The boundary treatment currently uses the verified D4-2 SBP closure and zero
-SAT because the implemented characteristic analysis finds no incoming
-propagating mode at either endpoint. A finite `T=1`, `a/M=0.999` pulse run is
-evidence for that tested workload, not a general nonlinear stability theorem.
-See `docs/IMPLEMENTATION_STATUS.md`, `docs/PERFORMANCE.md`, and
-`docs/FINAL_IMPLEMENTATION_REPORT.md` for exact evidence and limitations.
+The boundary treatment uses the verified D4-2 SBP closure and zero SAT because
+the characteristic analysis finds no incoming propagating mode at either
+endpoint. There is still no semi-discrete endpoint energy proof. Compatible
+dissipation also adds the documented boundary commutator to the reduction
+constraint; the exact law `C_Q,T=-gamma C_Q` applies only without
+dissipation. Post-audit short runs cover `a/M=0,0.7,0.99,0.999`, but they do
+not qualify long-time stability, fourth horizon derivatives, or an Aretakis
+claim. See `docs/IMPLEMENTATION_STATUS.md`,
+`docs/POST_AUDIT_REMEDIATION.md`, and `docs/FINAL_IMPLEMENTATION_REPORT.md`.

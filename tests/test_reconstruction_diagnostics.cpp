@@ -170,7 +170,7 @@ TEST_CASE("reconstruction transport residuals vanish for exact derivatives") {
   CHECK(norms.combined.rms < 2.0e-13);
 }
 
-TEST_CASE("all seven reconstruction residuals converge fourth order in space") {
+TEST_CASE("all seven transport consistency residuals converge fourth order in space") {
   const auto coarse = manufactured_residual_norms(17, false);
   const auto medium = manufactured_residual_norms(33, false);
   const auto fine = manufactured_residual_norms(65, false);
@@ -186,7 +186,7 @@ TEST_CASE("all seven reconstruction residuals converge fourth order in space") {
   CHECK(medium.combined.rms / fine.combined.rms > 11.0);
 }
 
-TEST_CASE("reconstruction residual norms report per-field and combined scales") {
+TEST_CASE("transport consistency norms report per-field and combined scales") {
   const std::vector<teuk::ReconstructionResiduals> residuals{
       {Complex(3.0, 4.0), Complex(0.0, 0.0), Complex(0.0, 0.0),
        Complex(0.0, 0.0), Complex(0.0, 0.0), Complex(0.0, 0.0),
@@ -203,7 +203,7 @@ TEST_CASE("reconstruction residual norms report per-field and combined scales") 
   CHECK_NEAR(norms.combined.rms, 13.0 / std::sqrt(14.0), 1.0e-14);
 }
 
-TEST_CASE("reconstruction residual norms reject an empty sample") {
+TEST_CASE("transport consistency norms reject an empty sample") {
   bool threw = false;
   try {
     static_cast<void>(teuk::reconstruction_residual_norms({}));
