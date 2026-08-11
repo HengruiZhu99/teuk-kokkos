@@ -235,6 +235,14 @@ class SpatialPipeline {
   [[nodiscard]] SpatialPairSourceView per_pair_source() const {
     return inner_source_.per_pair_value();
   }
+  [[nodiscard]] FullSpatialStateView reconstruction_radial_derivatives()
+      const {
+    return reconstruction_radial_;
+  }
+  [[nodiscard]] FullSpatialStateView reconstruction_angular_inputs() const {
+    return reconstruction_angular_;
+  }
+  [[nodiscard]] KerrParameters background() const { return background_; }
 
   template <class StageView, class OutputView>
   void evaluate_rhs(const ExecutionSpace& execution, const StageView& stage,

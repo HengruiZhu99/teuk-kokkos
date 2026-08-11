@@ -21,6 +21,7 @@
 #include "teuk/pipeline_checkpoint.hpp"
 #include "teuk/pipeline_diagnostics.hpp"
 #include "teuk/pipeline_initial_data.hpp"
+#include "teuk/pipeline_reconstruction_diagnostics.hpp"
 #include "teuk/rk4.hpp"
 #include "teuk/spatial_pipeline.hpp"
 
@@ -164,6 +165,9 @@ int run_spatial_pipeline(const teuk::Parameters& input) {
   teuk::HorizonTransverseDiagnostics horizon_diagnostics(
       radial_grid, registry.size(),
       static_cast<std::size_t>(input.theta_points));
+  teuk::PipelineReconstructionDiagnostics reconstruction_diagnostics(
+      registry.size(), radial_grid.size(),
+      static_cast<std::size_t>(input.theta_points));
 
   std::ofstream diagnostic_file;
   std::filesystem::path output_directory;
@@ -203,6 +207,7 @@ int run_spatial_pipeline(const teuk::Parameters& input) {
   const char* header =
       "step,time,kappa_time,first_psi_rms,second_psi_rms,"
       "first_constraint_rms,second_constraint_rms,source_rms,forcing_rms,"
+      "reconstruction_residual_rms,"
       "first_horizon_d0,first_horizon_d1,first_horizon_d2,"
       "first_horizon_d3,first_horizon_d4,second_horizon_d0,"
       "second_horizon_d1,second_horizon_d2,second_horizon_d3,"
@@ -214,6 +219,8 @@ int run_spatial_pipeline(const teuk::Parameters& input) {
     pipeline.evaluate_rhs(execution, pipeline.storage().state(),
                           pipeline.storage().rhs());
     const auto report = diagnostics.sample_pipeline(execution, pipeline);
+    const auto reconstruction =
+        reconstruction_diagnostics.sample(execution, pipeline);
     const auto first_horizon = horizon_maxima(first_psi);
     const auto second_horizon = horizon_maxima(second_psi);
     std::ostringstream line;
@@ -222,7 +229,8 @@ int run_spatial_pipeline(const teuk::Parameters& input) {
          << report.fields[second_psi].state.rms << ','
          << report.first_reduction_constraint.rms << ','
          << report.second_reduction_constraint.rms << ','
-         << report.source_over_r3.rms << ',' << report.forcing.rms;
+         << report.source_over_r3.rms << ',' << report.forcing.rms << ','
+         << reconstruction.combined.rms;
     for (const double value : first_horizon) line << ',' << value;
     for (const double value : second_horizon) line << ',' << value;
     std::cout << line.str() << '\n';
