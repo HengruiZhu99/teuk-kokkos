@@ -98,7 +98,7 @@ double maximum_coordinate_speed(const teuk::Parameters& input,
 }
 
 std::filesystem::path checkpoint_path(const std::filesystem::path& output,
-                                      const int step) {
+                                      const std::uint64_t step) {
   std::ostringstream name;
   name << "checkpoint_" << std::setw(8) << std::setfill('0') << step;
   return output / name.str();
@@ -118,20 +118,6 @@ int run_spatial_pipeline(const teuk::Parameters& input) {
       execution, registry, radial_grid, input.ell_max, input.theta_points,
       background, input.reduction_damping, input.dissipation);
 
-  teuk::PipelineGaussianPulse pulse;
-  pulse.center = input.pulse_center_fraction * horizon;
-  pulse.width = input.pulse_width_fraction * horizon;
-  const teuk::Complex seed_amplitude(input.pulse_amplitude,
-                                     0.25 * input.pulse_amplitude);
-  pulse.modes.push_back(
-      {input.seed_ell, input.seed_mode, seed_amplitude});
-  if (input.seed_mode != 0) {
-    pulse.modes.push_back(
-        {input.seed_ell, -input.seed_mode, Kokkos::conj(seed_amplitude)});
-  }
-  teuk::initialize_compactified_gaussian_pulse(
-      execution, pipeline, registry, input.ell_max, background, pulse);
-
   const double time_step =
       input.final_time / static_cast<double>(input.steps);
   const double maximum_speed = maximum_coordinate_speed(input, radial_grid);
@@ -139,6 +125,37 @@ int run_spatial_pipeline(const teuk::Parameters& input) {
   if (time_step > cfl_limit) {
     throw std::invalid_argument(
         "steps are too small for the requested spatial-pipeline CFL limit");
+  }
+  const teuk::PipelineCheckpointConfiguration checkpoint_configuration{
+      background,
+      input.ell_max,
+      input.theta_points,
+      input.reduction_damping,
+      input.dissipation,
+      teuk::ReductionEvolution::FreeDamped,
+      time_step};
+  double time = 0.0;
+  std::uint64_t completed_steps = 0;
+  if (input.restart_directory.empty()) {
+    teuk::PipelineGaussianPulse pulse;
+    pulse.center = input.pulse_center_fraction * horizon;
+    pulse.width = input.pulse_width_fraction * horizon;
+    const teuk::Complex seed_amplitude(input.pulse_amplitude,
+                                       0.25 * input.pulse_amplitude);
+    pulse.modes.push_back(
+        {input.seed_ell, input.seed_mode, seed_amplitude});
+    if (input.seed_mode != 0) {
+      pulse.modes.push_back(
+          {input.seed_ell, -input.seed_mode, Kokkos::conj(seed_amplitude)});
+    }
+    teuk::initialize_compactified_gaussian_pulse(
+        execution, pipeline, registry, input.ell_max, background, pulse);
+  } else {
+    const auto metadata = teuk::load_pipeline_checkpoint(
+        execution, input.restart_directory, pipeline, registry,
+        checkpoint_configuration);
+    time = metadata.progress.time;
+    completed_steps = metadata.progress.step;
   }
 
   teuk::PipelineDiagnostics diagnostics(
@@ -193,7 +210,7 @@ int run_spatial_pipeline(const teuk::Parameters& input) {
   std::cout << header << '\n';
   if (diagnostic_file) diagnostic_file << header << '\n';
   const double kappa = teuk::surface_gravity(input.mass, input.spin);
-  const auto sample = [&](const int step, const double time) {
+  const auto sample = [&](const std::uint64_t step, const double time) {
     pipeline.evaluate_rhs(execution, pipeline.storage().state(),
                           pipeline.storage().rhs());
     const auto report = diagnostics.sample_pipeline(execution, pipeline);
@@ -212,27 +229,22 @@ int run_spatial_pipeline(const teuk::Parameters& input) {
     if (diagnostic_file) diagnostic_file << line.str() << '\n';
   };
 
-  const teuk::PipelineCheckpointConfiguration checkpoint_configuration{
-      background,
-      input.ell_max,
-      input.theta_points,
-      input.reduction_damping,
-      input.dissipation,
-      teuk::ReductionEvolution::FreeDamped,
-      time_step};
   const auto total_start = std::chrono::steady_clock::now();
-  double time = 0.0;
-  sample(0, time);
+  sample(completed_steps, time);
   double evolution_wall_seconds = 0.0;
   auto evolution_start = std::chrono::steady_clock::now();
-  for (int step = 1; step <= input.steps; ++step) {
+  for (int local_step = 1; local_step <= input.steps; ++local_step) {
+    const std::uint64_t step =
+        completed_steps + static_cast<std::uint64_t>(local_step);
     pipeline.step(execution, time, time_step);
     time += time_step;
     const bool diagnostic_step =
-        step % input.diagnostic_interval == 0 || step == input.steps;
+        local_step % input.diagnostic_interval == 0 ||
+        local_step == input.steps;
     const bool checkpoint_step =
         input.checkpoint_interval > 0 &&
-        (step % input.checkpoint_interval == 0 || step == input.steps);
+        (local_step % input.checkpoint_interval == 0 ||
+         local_step == input.steps);
     if (diagnostic_step || checkpoint_step) {
       execution.fence("time full spatial pipeline evolution segment");
       evolution_wall_seconds +=
@@ -249,7 +261,7 @@ int run_spatial_pipeline(const teuk::Parameters& input) {
       teuk::write_pipeline_checkpoint(
           execution, checkpoint_path(output_directory, step), pipeline,
           registry, checkpoint_configuration,
-          {time, static_cast<std::uint64_t>(step)});
+          {time, step});
     }
     if (diagnostic_step || checkpoint_step) {
       evolution_start = std::chrono::steady_clock::now();
@@ -297,7 +309,7 @@ void print_help() {
       << "  teuk_solver spatial-pipeline [key=value ...]\n\n"
       << "Keys: mass spin L nr ntheta ellmax modes seed_ell seed_m cfl\n"
       << "      final_time steps gamma_q dissipation amplitude pulse_center\n"
-      << "      pulse_width diagnostic_every checkpoint_every output\n";
+      << "      pulse_width diagnostic_every checkpoint_every output restart\n";
 }
 
 }  // namespace

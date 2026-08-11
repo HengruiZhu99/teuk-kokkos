@@ -31,6 +31,7 @@ struct Parameters {
   int checkpoint_interval = 0;
   std::vector<int> modes{-4, -2, 0, 2, 4};
   std::string output_directory;
+  std::string restart_directory;
 };
 
 inline double parse_double(std::string_view text, const char* key) {
@@ -96,6 +97,7 @@ inline void apply_key_value(Parameters& parameters, std::string_view argument) {
   else if (key == "checkpoint_every") parameters.checkpoint_interval = parse_int(value, "checkpoint_every");
   else if (key == "modes") parameters.modes = parse_modes(value);
   else if (key == "output") parameters.output_directory = std::string(value);
+  else if (key == "restart") parameters.restart_directory = std::string(value);
   else throw std::invalid_argument(std::string("unknown parameter: ") + std::string(key));
 }
 
@@ -113,8 +115,8 @@ inline void validate(const Parameters& parameters) {
     throw std::invalid_argument(
         "ntheta is too small for the retained nonlinear angular band");
   }
-  if (parameters.cfl <= 0.0 || parameters.final_time < 0.0)
-    throw std::invalid_argument("cfl must be positive and final_time nonnegative");
+  if (parameters.cfl <= 0.0 || parameters.final_time <= 0.0)
+    throw std::invalid_argument("cfl and final_time must be positive");
   if (parameters.steps <= 0) throw std::invalid_argument("steps must be positive");
   if (parameters.diagnostic_interval <= 0)
     throw std::invalid_argument("diagnostic_every must be positive");
@@ -148,8 +150,10 @@ inline void validate(const Parameters& parameters) {
     throw std::invalid_argument("seed (ell,m) is outside the stored band");
   }
   if (parameters.output_directory.find_first_of("\r\n") !=
-      std::string::npos) {
-    throw std::invalid_argument("output path contains a newline");
+          std::string::npos ||
+      parameters.restart_directory.find_first_of("\r\n") !=
+          std::string::npos) {
+    throw std::invalid_argument("output or restart path contains a newline");
   }
 }
 

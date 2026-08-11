@@ -27,6 +27,7 @@ TEST_CASE("key value parameters are strict and validated") {
   teuk::apply_key_value(parameters, "seed_m=-2");
   teuk::apply_key_value(parameters, "seed_ell=3");
   teuk::apply_key_value(parameters, "output=test-run");
+  teuk::apply_key_value(parameters, "restart=checkpoint-4");
   teuk::validate(parameters);
   CHECK_NEAR(parameters.spin, 0.99, 1.0e-15);
   CHECK(parameters.radial_points == 256);
@@ -36,6 +37,7 @@ TEST_CASE("key value parameters are strict and validated") {
   CHECK(parameters.seed_mode == -2);
   CHECK(parameters.seed_ell == 3);
   CHECK(parameters.output_directory == "test-run");
+  CHECK(parameters.restart_directory == "checkpoint-4");
 
   bool rejected = false;
   try {
