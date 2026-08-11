@@ -119,6 +119,40 @@ KOKKOS_INLINE_FUNCTION Value d42_first_derivative_at(
           12.0);
 }
 
+// Strided form for LayoutRight multidimensional fields whose theta index is
+// contiguous and radial index has a fixed stride. This retains the compact
+// closure/interior work of the contiguous point kernel.
+template <class Value>
+KOKKOS_INLINE_FUNCTION Value d42_first_derivative_strided_at(
+    const Value* const values, const std::size_t point_count,
+    const std::size_t row, const double inverse_spacing,
+    const std::size_t stride) {
+  if (row < 4) {
+    Value result = 0.0;
+    for (std::size_t column = 0; column < 6; ++column) {
+      result += d42_derivative_coefficient(point_count, row, column) *
+                values[column * stride];
+    }
+    return inverse_spacing * result;
+  }
+  if (row + 4 >= point_count) {
+    const std::size_t reflected_row = point_count - 1 - row;
+    Value result = 0.0;
+    for (std::size_t reflected_column = 0; reflected_column < 6;
+         ++reflected_column) {
+      result -=
+          d42_derivative_coefficient(point_count, reflected_row,
+                                     reflected_column) *
+          values[(point_count - 1 - reflected_column) * stride];
+    }
+    return inverse_spacing * result;
+  }
+  return inverse_spacing *
+         ((values[(row - 2) * stride] - 8.0 * values[(row - 1) * stride] +
+           8.0 * values[(row + 1) * stride] - values[(row + 2) * stride]) /
+          12.0);
+}
+
 template <class Value>
 void d42_first_derivative(const UniformRadialGrid& grid,
                           const Value* const values,
