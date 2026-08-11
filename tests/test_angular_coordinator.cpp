@@ -141,6 +141,17 @@ TEST_CASE("signed-mode angular coordinator matches every host plan") {
   Kokkos::Tools::Experimental::set_begin_deep_copy_callback(nullptr);
   CHECK(coordinator_copies > 0);
 
+  // The SYCL backend reserves a reusable indirect-kernel functor pool on the
+  // first submission. Treat that cold-start reservation as initialization and
+  // measure the repeated production launch path below.
+  coordinator.project(execution, fields, 6, fields, 5);
+  coordinator.laplacian(execution, fields, 0, fields, 2);
+  coordinator.eth(execution, fields, 0, fields, 1, radius, sin_theta,
+                  cos_theta, fields, 3);
+  coordinator.ethprime(execution, fields, 0, fields, 1, radius, sin_theta,
+                       cos_theta, fields, 4);
+  execution.fence("warm signed-mode angular coordinator launches");
+
   coordinator_allocations = 0;
   coordinator_copies = 0;
   Kokkos::Tools::Experimental::set_allocate_data_callback(

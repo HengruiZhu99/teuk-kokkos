@@ -91,19 +91,21 @@ KOKKOS_INLINE_FUNCTION Complex full_strided_dissipation_at(
 }
 
 template <class CallerExecutionSpace, class ThetaView, class ModeView,
-          class StageView, class ValueView, class ScratchView, class OutputView>
+          class StageView, class AngularView, class ForcingView,
+          class ScratchView, class OutputView>
 inline void evaluate_sbp_teukolsky_full_stage_rhs(
     const CallerExecutionSpace& execution, const UniformRadialGrid& grid,
     const TeukolskyParameters& base_parameters,
     const ThetaView& theta_coordinates, const ModeView& signed_modes,
-    const StageView& stage_state, const ValueView& angular_laplacian,
-    const ValueView& forcing, const ReductionEvolution reduction,
+    const StageView& stage_state, const AngularView& angular_laplacian,
+    const ForcingView& forcing, const ReductionEvolution reduction,
     const ScratchView& scratch, const OutputView& output_rhs,
     const double dissipation_strength = 0.0,
     const TeukolskyFullFieldOffsets stage_fields = {},
     const TeukolskyFullFieldOffsets output_fields = {}) {
   static_assert(StageView::rank == 4 && ScratchView::rank == 4 &&
-                    OutputView::rank == 4 && ValueView::rank == 3,
+                    OutputView::rank == 4 && AngularView::rank == 3 &&
+                    ForcingView::rank == 3,
                 "full Teukolsky kernels require rank-4 state and rank-3 values");
   const std::size_t mode_count = stage_state.extent(0);
   const std::size_t point_count = grid.size();

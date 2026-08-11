@@ -108,8 +108,26 @@ void evaluate_spatial_inner_source_tangent(
   const auto summed_tangent = workspace.summed_tangent();
   const auto per_pair_value = workspace.per_pair_value();
   const auto per_pair_tangent = workspace.per_pair_tangent();
-  Kokkos::deep_copy(execution, summed_value, Complex(0.0, 0.0));
-  Kokkos::deep_copy(execution, summed_tangent, Complex(0.0, 0.0));
+  const std::size_t summed_points =
+      modes * static_cast<std::size_t>(SpatialInnerSourceComponent::Count) *
+      radial_points * theta_points;
+  Kokkos::parallel_for(
+      "teuk_zero_spatial_inner_source_tangent",
+      Kokkos::RangePolicy<ExecutionSpace>(execution, 0, summed_points),
+      KOKKOS_LAMBDA(const std::size_t flat) {
+        const std::size_t radial_theta = radial_points * theta_points;
+        const std::size_t component_count =
+            static_cast<std::size_t>(SpatialInnerSourceComponent::Count);
+        const std::size_t mode_component = flat / radial_theta;
+        const std::size_t within = flat - mode_component * radial_theta;
+        const std::size_t mode = mode_component / component_count;
+        const std::size_t component =
+            mode_component - mode * component_count;
+        const std::size_t radial = within / theta_points;
+        const std::size_t theta = within - radial * theta_points;
+        summed_value(mode, component, radial, theta) = Complex(0.0, 0.0);
+        summed_tangent(mode, component, radial, theta) = Complex(0.0, 0.0);
+      });
 
   const std::size_t target_points =
       value_workspace.target_count() * radial_points * theta_points;
