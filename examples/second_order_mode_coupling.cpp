@@ -6,6 +6,7 @@
 
 #include "teuk/diagnostics.hpp"
 #include "teuk/modes.hpp"
+#include "teuk/pipeline_diagnostics.hpp"
 #include "teuk/pipeline_initial_data.hpp"
 #include "teuk/spatial_pipeline.hpp"
 
@@ -21,8 +22,11 @@ int main(int argc, char* argv[]) {
                                                       background.spin);
     const teuk::UniformRadialGrid radial_grid(65, 0.0, horizon);
     constexpr int theta_nodes = 7;
-    teuk::SpatialPipeline pipeline(execution, registry, radial_grid, 4,
-                                   theta_nodes, background, 0.15, 0.01);
+    teuk::SpatialPipeline pipeline(
+        execution, registry, radial_grid, 4, theta_nodes, background, 0.15,
+        0.01, teuk::ReductionEvolution::FreeDamped,
+        "unrestricted_mode_coupling_example",
+        teuk::SecondOrderSourcePolicy::unrestricted());
     teuk::PipelineGaussianPulse pulse;
     pulse.center = 0.42 * horizon;
     pulse.width = 0.11 * horizon;
@@ -38,13 +42,22 @@ int main(int argc, char* argv[]) {
       pipeline.step(execution, time, time_step);
       time += time_step;
     }
+    pipeline.evaluate_rhs_at_time(execution, pipeline.storage().state(),
+                                  pipeline.storage().rhs(), time);
     execution.fence("finish daughter-mode example");
     const auto state = Kokkos::create_mirror_view_and_copy(
         Kokkos::HostSpace{}, pipeline.storage().state());
     const std::size_t second_psi =
         static_cast<std::size_t>(teuk::PipelineField::SecondPsi);
+    teuk::PipelineDiagnostics diagnostics(registry.size(), radial_grid,
+                                          theta_nodes);
+    const auto report = diagnostics.sample_pipeline(execution, pipeline);
     std::cout << "backend=" << teuk::ExecutionSpace::name() << '\n'
               << "time=" << time << '\n'
+              << "source_policy=unrestricted_development_only\n"
+              << "source_active=" << report.second_order_source_active << '\n'
+              << "independent_constraint_max="
+              << report.independent_reconstruction_constraint_maximum << '\n'
               << "m,second_psi4_rms\n";
     for (std::size_t mode = 0; mode < registry.size(); ++mode) {
       double sum = 0.0;
@@ -61,7 +74,9 @@ int main(int argc, char* argv[]) {
       std::cout << registry.modes()[mode] << ',' << std::sqrt(sum / count)
                 << '\n';
     }
-    std::cout << "expected_daughters=-4,0,4\n";
+    std::cout << "expected_daughters=-4,0,4\n"
+              << "limitation=source-algebra demonstration; unrestricted "
+                 "startup is not physical second-order initial data\n";
   }
   Kokkos::finalize();
   return 0;

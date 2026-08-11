@@ -174,6 +174,14 @@ inline bool same_configuration(
              right.source_policy.independent_constraint_tolerance;
 }
 
+inline bool same_source_policy(const SecondOrderSourcePolicy& left,
+                               const SecondOrderSourcePolicy& right) {
+  return left.mode == right.mode &&
+         left.source_start_time == right.source_start_time &&
+         left.independent_constraint_tolerance ==
+             right.independent_constraint_tolerance;
+}
+
 template <class Value>
 Value parse_number(const std::map<std::string, std::string>& entries,
                    const char* key) {
@@ -576,6 +584,11 @@ inline void write_pipeline_checkpoint(
     throw std::runtime_error("checkpoint destination already exists");
   }
   validate_configuration(configuration);
+  if (!same_source_policy(pipeline.source_policy(),
+                          configuration.source_policy)) {
+    throw std::invalid_argument(
+        "checkpoint source policy does not match the pipeline");
+  }
   validate_finite(progress.time, "checkpoint time");
   if (progress.time < 0.0) {
     throw std::invalid_argument("checkpoint time must be nonnegative");
@@ -621,6 +634,11 @@ inline PipelineCheckpointMetadata load_pipeline_checkpoint(
   const PipelineCheckpointMetadata metadata =
       read_pipeline_checkpoint_metadata(directory);
   validate_configuration(expected_configuration);
+  if (!same_source_policy(pipeline.source_policy(),
+                          expected_configuration.source_policy)) {
+    throw std::runtime_error(
+        "checkpoint source policy does not match the caller pipeline");
+  }
   if (metadata.modes != expected_registry.modes() ||
       metadata.targets != expected_registry.targets()) {
     throw std::runtime_error("checkpoint mode registry does not match caller");

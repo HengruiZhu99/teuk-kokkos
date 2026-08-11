@@ -54,7 +54,7 @@ teuk::PipelineCheckpointConfiguration checkpoint_configuration() {
           0.004,
           teuk::ReductionEvolution::FreeDamped,
           2.0e-5,
-          {}};
+          {teuk::SecondOrderSourceMode::ConstraintAware, 0.04, 2.0e-8}};
 }
 
 void initialize_pipeline(const teuk::ExecutionSpace& execution,
@@ -149,12 +149,14 @@ TEST_CASE("full spatial pipeline checkpoint resumes the real RK4 trajectory") {
       execution, registry, radial_grid, configuration.ell_max,
       configuration.theta_nodes, configuration.background,
       configuration.reduction_damping, configuration.dissipation,
-      configuration.reduction, "checkpoint_uninterrupted");
+      configuration.reduction, "checkpoint_uninterrupted",
+      configuration.source_policy);
   teuk::SpatialPipeline interrupted(
       execution, registry, radial_grid, configuration.ell_max,
       configuration.theta_nodes, configuration.background,
       configuration.reduction_damping, configuration.dissipation,
-      configuration.reduction, "checkpoint_interrupted");
+      configuration.reduction, "checkpoint_interrupted",
+      configuration.source_policy);
   initialize_pipeline(execution, uninterrupted);
   initialize_pipeline(execution, interrupted);
 
@@ -205,6 +207,12 @@ TEST_CASE("full spatial pipeline checkpoint resumes the real RK4 trajectory") {
         configuration.background.spin);
   CHECK(metadata.configuration.reduction == configuration.reduction);
   CHECK(metadata.configuration.time_step == configuration.time_step);
+  CHECK(metadata.configuration.source_policy.mode ==
+        configuration.source_policy.mode);
+  CHECK(metadata.configuration.source_policy.source_start_time ==
+        configuration.source_policy.source_start_time);
+  CHECK(metadata.configuration.source_policy.independent_constraint_tolerance ==
+        configuration.source_policy.independent_constraint_tolerance);
   CHECK(metadata.progress.step == checkpoint_step);
   CHECK(metadata.progress.time ==
         checkpoint_step * configuration.time_step);
@@ -219,7 +227,7 @@ TEST_CASE("full spatial pipeline checkpoint resumes the real RK4 trajectory") {
       metadata.configuration.background,
       metadata.configuration.reduction_damping,
       metadata.configuration.dissipation, metadata.configuration.reduction,
-      "checkpoint_restarted");
+      "checkpoint_restarted", metadata.configuration.source_policy);
   const auto loaded = teuk::load_pipeline_checkpoint(
       execution, checkpoint, restarted, restored_registry,
       metadata.configuration);
@@ -249,7 +257,8 @@ TEST_CASE("pipeline checkpoint rejects malformed truncated and mismatched data")
       execution, registry, radial_grid, configuration.ell_max,
       configuration.theta_nodes, configuration.background,
       configuration.reduction_damping, configuration.dissipation,
-      configuration.reduction, "checkpoint_rejection");
+      configuration.reduction, "checkpoint_rejection",
+      configuration.source_policy);
   initialize_pipeline(execution, pipeline);
 
   TemporaryTestDirectory temporary;
@@ -289,6 +298,14 @@ TEST_CASE("pipeline checkpoint rejects malformed truncated and mismatched data")
 
   auto wrong_configuration = configuration;
   wrong_configuration.dissipation += 0.01;
+  CHECK(rejects([&] {
+    (void)teuk::load_pipeline_checkpoint(execution, valid, pipeline, registry,
+                                         wrong_configuration);
+  }));
+  CHECK(pipeline_state(execution, pipeline) == before_rejections);
+
+  wrong_configuration = configuration;
+  wrong_configuration.source_policy.source_start_time += 0.01;
   CHECK(rejects([&] {
     (void)teuk::load_pipeline_checkpoint(execution, valid, pipeline, registry,
                                          wrong_configuration);

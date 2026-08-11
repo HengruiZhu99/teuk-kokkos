@@ -26,6 +26,9 @@ TEST_CASE("key value parameters are strict and validated") {
   teuk::apply_key_value(parameters, "modes=2,-2,0");
   teuk::apply_key_value(parameters, "seed_m=-2");
   teuk::apply_key_value(parameters, "seed_ell=3");
+  teuk::apply_key_value(parameters, "source_start=0.75");
+  teuk::apply_key_value(parameters, "source_constraint_tol=2e-8");
+  teuk::apply_key_value(parameters, "source_mode=unrestricted");
   teuk::apply_key_value(parameters, "output=test-run");
   teuk::apply_key_value(parameters, "restart=checkpoint-4");
   teuk::validate(parameters);
@@ -36,6 +39,9 @@ TEST_CASE("key value parameters are strict and validated") {
   CHECK(parameters.modes == std::vector<int>({2, -2, 0}));
   CHECK(parameters.seed_mode == -2);
   CHECK(parameters.seed_ell == 3);
+  CHECK_NEAR(parameters.source_start_time, 0.75, 1.0e-15);
+  CHECK_NEAR(parameters.source_constraint_tolerance, 2.0e-8, 1.0e-20);
+  CHECK(parameters.allow_inconsistent_source);
   CHECK(parameters.output_directory == "test-run");
   CHECK(parameters.restart_directory == "checkpoint-4");
 

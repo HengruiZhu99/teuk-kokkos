@@ -341,8 +341,8 @@ int run_spatial_pipeline(const teuk::Parameters& input) {
       static_cast<double>(input.steps) * registry.size() * radial_grid.size() *
       static_cast<double>(input.theta_points);
   teuk::SpatialPipelineTiming profile;
-  pipeline.evaluate_rhs(execution, pipeline.storage().state(),
-                        pipeline.storage().rhs(), &profile);
+  pipeline.evaluate_rhs_at_time(execution, pipeline.storage().state(),
+                                pipeline.storage().rhs(), time, &profile);
   const double profile_total = profile.total_seconds();
   const auto percentage = [&](const double seconds) {
     return 100.0 * seconds / profile_total;
@@ -374,7 +374,8 @@ void print_help() {
       << "  teuk_solver spatial-pipeline [key=value ...]\n\n"
       << "Keys: mass spin L nr ntheta ellmax modes seed_ell seed_m cfl\n"
       << "      final_time steps gamma_q dissipation amplitude pulse_center\n"
-      << "      pulse_width diagnostic_every checkpoint_every output restart\n";
+      << "      pulse_width source_start source_constraint_tol source_mode\n"
+      << "      diagnostic_every checkpoint_every output restart\n";
 }
 
 }  // namespace

@@ -41,8 +41,8 @@ int main(int argc, char* argv[]) {
       pipeline.step(execution, time, time_step);
       time += time_step;
     }
-    pipeline.evaluate_rhs(execution, pipeline.storage().state(),
-                          pipeline.storage().rhs());
+    pipeline.evaluate_rhs_at_time(execution, pipeline.storage().state(),
+                                  pipeline.storage().rhs(), time);
     teuk::PipelineDiagnostics diagnostics(registry.size(), radial_grid,
                                           theta_nodes);
     const auto report = diagnostics.sample_pipeline(execution, pipeline);
@@ -74,6 +74,9 @@ int main(int argc, char* argv[]) {
               << "time=" << time << '\n'
               << "kappa_time=" << kappa * time << '\n'
               << "source_rms=" << report.source_over_r3.rms << '\n'
+              << "source_active=" << report.second_order_source_active << '\n'
+              << "independent_constraint_max="
+              << report.independent_reconstruction_constraint_maximum << '\n'
               << "first_constraint_rms="
               << report.first_reduction_constraint.rms << '\n';
     for (std::size_t derivative = 0;

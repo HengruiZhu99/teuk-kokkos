@@ -36,8 +36,8 @@ int main(int argc, char* argv[]) {
       pipeline.step(execution, time, time_step);
       time += time_step;
     }
-    pipeline.evaluate_rhs(execution, pipeline.storage().state(),
-                          pipeline.storage().rhs());
+    pipeline.evaluate_rhs_at_time(execution, pipeline.storage().state(),
+                                  pipeline.storage().rhs(), time);
     teuk::PipelineDiagnostics diagnostics(registry.size(), radial_grid, 5);
     const auto report = diagnostics.sample_pipeline(execution, pipeline);
     std::cout << "backend=" << teuk::ExecutionSpace::name() << '\n'
@@ -49,13 +49,16 @@ int main(int argc, char* argv[]) {
               << '\n'
               << "first_constraint_rms="
               << report.first_reduction_constraint.rms << '\n'
+              << "source_active=" << report.second_order_source_active << '\n'
+              << "independent_constraint_max="
+              << report.independent_reconstruction_constraint_maximum << '\n'
               << "second_psi4_rms="
               << report.fields[static_cast<std::size_t>(
                                     teuk::PipelineField::SecondPsi)]
                      .state.rms
               << '\n'
-              << "note=no retained daughter modes, so this is the linear "
-                 "full-grid path\n";
+              << "note=constraint-aware startup suppresses unqualified "
+                 "second-order forcing; this is the linear full-grid path\n";
   }
   Kokkos::finalize();
   return 0;
