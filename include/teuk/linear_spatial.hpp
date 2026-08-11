@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 
 #include "teuk/fields.hpp"
 #include "teuk/grid.hpp"
@@ -89,17 +90,35 @@ class TeukolskyRadialLines {
   TeukolskyRadialScratchView scratch_;
 };
 
-// D4-2 method-of-lines RHS over all signed modes at one theta point.  The
-// three launches share one execution-space instance and therefore preserve
-// their data dependencies without host copies or timestep allocations.
+// Core D4-2 method-of-lines RHS over all signed modes at one theta point. The
+// caller owns every View and the execution-space instance, so RK stage Views
+// and a queue shared by a larger pipeline can be supplied directly. The three
+// launches preserve their data dependencies without host copies or timestep
+// allocations.
 // No physical SAT penalty is applied. The endpoint audit in boundary.hpp finds
 // one outgoing and two stationary modes at each end, with no incoming mode;
 // its natural continuum symmetrizer is endpoint-degenerate, so a nonzero SAT
 // remains blocked pending a full semi-discrete energy/normal-mode analysis.
-inline void evaluate_sbp_teukolsky_radial_lines_rhs(
-    TeukolskyRadialLines& lines, const TeukolskyParameters& base_parameters,
-    const double theta, const ReductionEvolution reduction,
+template <class SpatialExecutionSpace, class ModeView, class StateView,
+          class OutputView, class ScratchView, class AngularView,
+          class ForcingView>
+void evaluate_sbp_teukolsky_radial_lines_rhs(
+    const SpatialExecutionSpace& execution, const UniformRadialGrid& grid,
+    const ModeView modes, const StateView state, const OutputView rhs,
+    const ScratchView scratch, const AngularView angular_laplacian,
+    const ForcingView forcing,
+    const TeukolskyParameters& base_parameters, const double theta,
+    const ReductionEvolution reduction,
     const double dissipation_strength = 0.0) {
+  static_assert(
+      std::is_same_v<typename StateView::array_layout, Kokkos::LayoutRight>,
+      "SBP stage state must have contiguous radial LayoutRight storage");
+  static_assert(
+      std::is_same_v<typename OutputView::array_layout, Kokkos::LayoutRight>,
+      "SBP stage output must have contiguous radial LayoutRight storage");
+  static_assert(
+      std::is_same_v<typename ScratchView::array_layout, Kokkos::LayoutRight>,
+      "SBP scratch must have contiguous radial LayoutRight storage");
   if (!(base_parameters.compactification_length > 0.0)) {
     throw std::invalid_argument("compactification length must be positive");
   }
@@ -107,16 +126,25 @@ inline void evaluate_sbp_teukolsky_radial_lines_rhs(
     throw std::invalid_argument("dissipation strength must be nonnegative");
   }
 
-  const auto grid = lines.grid();
   const std::size_t point_count = grid.size();
-  const std::size_t total_points = lines.mode_count() * point_count;
+  const std::size_t mode_count = modes.extent(0);
+  if (point_count < d42_minimum_points || state.extent(0) != mode_count ||
+      rhs.extent(0) != mode_count || scratch.extent(0) != mode_count ||
+      angular_laplacian.extent(0) != mode_count ||
+      forcing.extent(0) != mode_count ||
+      state.extent(1) != static_cast<std::size_t>(TeukolskyField::Count) ||
+      rhs.extent(1) != static_cast<std::size_t>(TeukolskyField::Count) ||
+      scratch.extent(1) !=
+          static_cast<std::size_t>(TeukolskyRadialScratch::Count) ||
+      state.extent(2) != point_count || rhs.extent(2) != point_count ||
+      scratch.extent(2) != point_count ||
+      angular_laplacian.extent(1) != point_count ||
+      forcing.extent(1) != point_count) {
+    throw std::invalid_argument(
+        "SBP Teukolsky stage Views do not match modes, fields, and grid");
+  }
+  const std::size_t total_points = mode_count * point_count;
   const double inverse_spacing = 1.0 / grid.spacing();
-  const auto modes = lines.modes();
-  const auto state = lines.state();
-  const auto rhs = lines.rhs();
-  const auto angular_laplacian = lines.angular_laplacian();
-  const auto forcing = lines.forcing();
-  const auto scratch = lines.scratch();
   constexpr std::size_t p_field =
       static_cast<std::size_t>(TeukolskyField::P);
   constexpr std::size_t q_field =
@@ -134,9 +162,9 @@ inline void evaluate_sbp_teukolsky_radial_lines_rhs(
   constexpr std::size_t dr_psi_velocity = static_cast<std::size_t>(
       TeukolskyRadialScratch::RadialDerivativePsiVelocity);
 
-  ExecutionSpace execution;
-  const Kokkos::RangePolicy<ExecutionSpace> policy(
-      execution, 0, static_cast<typename ExecutionSpace::size_type>(total_points));
+  const Kokkos::RangePolicy<SpatialExecutionSpace> policy(
+      execution, 0,
+      static_cast<typename SpatialExecutionSpace::size_type>(total_points));
   Kokkos::parallel_for(
       "teuk_sbp_prepare_reduction", policy,
       KOKKOS_LAMBDA(const std::size_t flat_index) {
@@ -214,6 +242,19 @@ inline void evaluate_sbp_teukolsky_radial_lines_rhs(
               dissipation_strength);
         }
       });
+}
+
+// Existing owning-container convenience wrapper. It delegates to the explicit
+// stage-View core and preserves the original API.
+inline void evaluate_sbp_teukolsky_radial_lines_rhs(
+    TeukolskyRadialLines& lines, const TeukolskyParameters& base_parameters,
+    const double theta, const ReductionEvolution reduction,
+    const double dissipation_strength = 0.0) {
+  ExecutionSpace execution;
+  evaluate_sbp_teukolsky_radial_lines_rhs(
+      execution, lines.grid(), lines.modes(), lines.state(), lines.rhs(),
+      lines.scratch(), lines.angular_laplacian(), lines.forcing(),
+      base_parameters, theta, reduction, dissipation_strength);
 }
 
 }  // namespace teuk
