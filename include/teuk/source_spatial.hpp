@@ -346,4 +346,74 @@ void evaluate_spatial_outer_source(
       });
 }
 
+// Variant for a caller that already applied the complete stage-local GHP
+// eth-prime operator to projected T. This is the natural composition point for
+// SignedModeAngularCoordinator::ethprime and avoids exposing its intermediate
+// lowered modal field.
+template <class ExecutionSpace>
+void evaluate_spatial_outer_source_from_ethprime(
+    const ExecutionSpace& execution, const UniformRadialGrid& radial_grid,
+    const KerrParameters& parameters, const SpatialThetaView& cos_theta,
+    const SpatialThetaView& sin_theta,
+    const SpatialInnerSourceView& inner_source,
+    const SpatialInnerSourceView& inner_source_dt,
+    const SpatialOuterSourceView& ethprime3_T,
+    const SpatialOuterSourceView& source_over_r3,
+    const SpatialOuterSourceView& forcing) {
+  const std::size_t mode_count = inner_source.extent(0);
+  const std::size_t radial_points = radial_grid.size();
+  const std::size_t theta_points = cos_theta.extent(0);
+  const auto valid_inner = [&](const SpatialInnerSourceView& view) {
+    return view.extent(0) == mode_count &&
+           view.extent(1) == static_cast<std::size_t>(
+                                  SpatialInnerSourceComponent::Count) &&
+           view.extent(2) == radial_points &&
+           view.extent(3) == theta_points;
+  };
+  const auto valid_outer = [&](const SpatialOuterSourceView& view) {
+    return view.extent(0) == mode_count && view.extent(1) == radial_points &&
+           view.extent(2) == theta_points;
+  };
+  if (sin_theta.extent(0) != theta_points || !valid_inner(inner_source) ||
+      !valid_inner(inner_source_dt) || !valid_outer(ethprime3_T) ||
+      !valid_outer(source_over_r3) || !valid_outer(forcing)) {
+    throw std::invalid_argument("spatial outer source view extents do not match");
+  }
+  constexpr std::size_t D =
+      static_cast<std::size_t>(SpatialInnerSourceComponent::D);
+  constexpr std::size_t T =
+      static_cast<std::size_t>(SpatialInnerSourceComponent::T);
+  const double inverse_spacing = 1.0 / radial_grid.spacing();
+  const std::size_t total = mode_count * radial_points * theta_points;
+  Kokkos::parallel_for(
+      "teuk_spatial_outer_source_from_ethprime",
+      Kokkos::RangePolicy<ExecutionSpace>(execution, 0, total),
+      KOKKOS_LAMBDA(const std::size_t flat) {
+        const std::size_t mode_plane = radial_points * theta_points;
+        const std::size_t mode = flat / mode_plane;
+        const std::size_t within_mode = flat - mode * mode_plane;
+        const std::size_t radial = within_mode / theta_points;
+        const std::size_t theta = within_mode - radial * theta_points;
+        const double radius = radial_grid.coordinate(radial);
+        const Complex D_value = inner_source(mode, D, radial, theta);
+        const Complex T_value = inner_source(mode, T, radial, theta);
+        const Complex radial_D = d42_first_derivative_strided_at(
+            &inner_source(mode, D, 0, theta), radial_points, radial,
+            inverse_spacing, theta_points);
+        const Complex delta3_D = delta_n_point(
+            D_value, inner_source_dt(mode, D, radial, theta), radial_D, 3,
+            radius, parameters.mass, parameters.compactification_length);
+        const KerrBackgroundPoint background = kerr_background_point(
+            parameters, radius, cos_theta(theta), sin_theta(theta));
+        const Complex source = outer_source_over_r3(
+            radius, background, InnerSource{D_value, T_value},
+            OuterSourceDerivatives{delta3_D,
+                                   ethprime3_T(mode, radial, theta)});
+        source_over_r3(mode, radial, theta) = source;
+        forcing(mode, radial, theta) = coordinate_second_order_forcing(
+            radius, cos_theta(theta), parameters.spin,
+            parameters.compactification_length, source);
+      });
+}
+
 }  // namespace teuk

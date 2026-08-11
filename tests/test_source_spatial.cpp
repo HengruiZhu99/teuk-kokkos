@@ -207,11 +207,20 @@ TEST_CASE("device spatial outer source includes radial angular and tangent terms
                                       radial_grid.size(), theta_grid.size());
   teuk::SpatialOuterSourceView forcing("outer_forcing", mode_count,
                                        radial_grid.size(), theta_grid.size());
+  teuk::SpatialOuterSourceView ethprime("outer_ethprime", mode_count,
+                                        radial_grid.size(), theta_grid.size());
+  teuk::SpatialOuterSourceView source_from_ethprime(
+      "outer_source_precomputed", mode_count, radial_grid.size(),
+      theta_grid.size());
+  teuk::SpatialOuterSourceView forcing_from_ethprime(
+      "outer_forcing_precomputed", mode_count, radial_grid.size(),
+      theta_grid.size());
   auto host_cos = Kokkos::create_mirror_view(cos_theta);
   auto host_sin = Kokkos::create_mirror_view(sin_theta);
   auto host_inner = Kokkos::create_mirror_view(inner);
   auto host_dt = Kokkos::create_mirror_view(inner_dt);
   auto host_lowered = Kokkos::create_mirror_view(lowered);
+  auto host_ethprime = Kokkos::create_mirror_view(ethprime);
   for (std::size_t theta = 0; theta < theta_grid.size(); ++theta) {
     host_cos(theta) = theta_grid.x[theta];
     host_sin(theta) =
@@ -232,6 +241,11 @@ TEST_CASE("device spatial outer source includes radial angular and tangent terms
             teuk::Complex(-0.08 + 0.02 * mode, 0.05 * r * x);
         host_lowered(mode, radial, theta) =
             teuk::Complex(0.17 * (mode + 1) * x, -0.09 + 0.01 * r);
+        host_ethprime(mode, radial, theta) = teuk::ethprime_n_point(
+            host_inner(mode, 1, radial, theta),
+            host_dt(mode, 1, radial, theta),
+            host_lowered(mode, radial, theta), -1, -2, r,
+            host_sin(theta), host_cos(theta), 0.58, 1.6);
       }
     }
   }
@@ -240,16 +254,24 @@ TEST_CASE("device spatial outer source includes radial angular and tangent terms
   Kokkos::deep_copy(inner, host_inner);
   Kokkos::deep_copy(inner_dt, host_dt);
   Kokkos::deep_copy(lowered, host_lowered);
+  Kokkos::deep_copy(ethprime, host_ethprime);
   const teuk::KerrParameters parameters{1.0, 0.58, 1.6};
   const teuk::ExecutionSpace execution;
   teuk::evaluate_spatial_outer_source(
       execution, radial_grid, parameters, cos_theta, sin_theta, inner,
       inner_dt, lowered, source, forcing);
+  teuk::evaluate_spatial_outer_source_from_ethprime(
+      execution, radial_grid, parameters, cos_theta, sin_theta, inner,
+      inner_dt, ethprime, source_from_ethprime, forcing_from_ethprime);
   execution.fence();
   const auto host_source = Kokkos::create_mirror_view_and_copy(
       Kokkos::HostSpace{}, source);
   const auto host_forcing = Kokkos::create_mirror_view_and_copy(
       Kokkos::HostSpace{}, forcing);
+  const auto host_source_from_ethprime = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, source_from_ethprime);
+  const auto host_forcing_from_ethprime = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, forcing_from_ethprime);
 
   const std::size_t mode = 2;
   const std::size_t theta = 4;
@@ -279,11 +301,15 @@ TEST_CASE("device spatial outer source includes radial angular and tangent terms
                           host_inner(mode, 1, radial, theta)},
         teuk::OuterSourceDerivatives{delta_D, ethprime_T});
     CHECK_COMPLEX_NEAR(host_source(mode, radial, theta), expected, 2.0e-12);
+    CHECK_COMPLEX_NEAR(host_source_from_ethprime(mode, radial, theta),
+                       expected, 2.0e-12);
     CHECK_COMPLEX_NEAR(
         host_forcing(mode, radial, theta),
         teuk::coordinate_second_order_forcing(
             radius, host_cos(theta), parameters.spin,
             parameters.compactification_length, expected),
         2.0e-12);
+    CHECK_COMPLEX_NEAR(host_forcing_from_ethprime(mode, radial, theta),
+                       host_forcing(mode, radial, theta), 2.0e-12);
   }
 }

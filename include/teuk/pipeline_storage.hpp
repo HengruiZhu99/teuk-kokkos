@@ -62,6 +62,7 @@ class SpatialPipelineStorage {
         modes_(label + "_modes", registry.size()),
         sharp_indices_(label + "_sharp_indices", registry.size()),
         radius_(label + "_radius", radial_grid.size()),
+        theta_(label + "_theta", angular_grid.size()),
         cos_theta_(label + "_cos_theta", angular_grid.size()),
         sin_theta_(label + "_sin_theta", angular_grid.size()),
         state_(label + "_state", registry.size(), point_pipeline_field_count,
@@ -79,6 +80,7 @@ class SpatialPipelineStorage {
     auto host_modes = Kokkos::create_mirror_view(modes_);
     auto host_sharp = Kokkos::create_mirror_view(sharp_indices_);
     auto host_radius = Kokkos::create_mirror_view(radius_);
+    auto host_theta = Kokkos::create_mirror_view(theta_);
     auto host_cos = Kokkos::create_mirror_view(cos_theta_);
     auto host_sin = Kokkos::create_mirror_view(sin_theta_);
     for (std::size_t mode = 0; mode < registry.size(); ++mode) {
@@ -90,12 +92,14 @@ class SpatialPipelineStorage {
     }
     for (std::size_t theta = 0; theta < angular_grid.size(); ++theta) {
       host_cos(theta) = angular_grid.x[theta];
+      host_theta(theta) = angular_grid.theta(theta);
       host_sin(theta) =
           Kokkos::sqrt(1.0 - angular_grid.x[theta] * angular_grid.x[theta]);
     }
     Kokkos::deep_copy(modes_, host_modes);
     Kokkos::deep_copy(sharp_indices_, host_sharp);
     Kokkos::deep_copy(radius_, host_radius);
+    Kokkos::deep_copy(theta_, host_theta);
     Kokkos::deep_copy(cos_theta_, host_cos);
     Kokkos::deep_copy(sin_theta_, host_sin);
   }
@@ -119,6 +123,7 @@ class SpatialPipelineStorage {
     return sharp_indices_;
   }
   [[nodiscard]] PipelineCoordinateView radius() const { return radius_; }
+  [[nodiscard]] PipelineCoordinateView theta() const { return theta_; }
   [[nodiscard]] PipelineCoordinateView cos_theta() const { return cos_theta_; }
   [[nodiscard]] PipelineCoordinateView sin_theta() const { return sin_theta_; }
 
@@ -148,6 +153,7 @@ class SpatialPipelineStorage {
   PipelineModeView modes_;
   PipelineIndexView sharp_indices_;
   PipelineCoordinateView radius_;
+  PipelineCoordinateView theta_;
   PipelineCoordinateView cos_theta_;
   PipelineCoordinateView sin_theta_;
   FieldView state_;
