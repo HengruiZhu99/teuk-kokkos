@@ -57,10 +57,17 @@ endforeach()
 
 if(BUILD_TESTING)
   file(GLOB TEUK_TEST_SOURCES CONFIGURE_DEPENDS tests/test_*.cpp)
+  list(REMOVE_ITEM TEUK_TEST_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_qnm.cpp")
   add_executable(teuk_tests ${TEUK_TEST_SOURCES})
   target_include_directories(teuk_tests PRIVATE tests)
   target_link_libraries(teuk_tests PRIVATE teuk)
   add_test(NAME teuk.unit COMMAND teuk_tests)
+
+  add_executable(teuk_qnm_tests tests/test_main.cpp tests/test_qnm.cpp)
+  target_include_directories(teuk_qnm_tests PRIVATE tests)
+  target_link_libraries(teuk_qnm_tests PRIVATE teuk)
+  add_test(NAME teuk.qnm COMMAND teuk_qnm_tests)
 
   add_test(
     NAME teuk.config_integration
