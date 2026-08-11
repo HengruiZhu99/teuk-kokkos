@@ -1,0 +1,205 @@
+#include <Kokkos_Core.hpp>
+
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <vector>
+
+#include "test_harness.hpp"
+#include "teuk/angular.hpp"
+#include "teuk/pipeline_initial_data.hpp"
+#include "teuk/sbp.hpp"
+#include "teuk/spatial_pipeline.hpp"
+
+namespace {
+
+int initial_data_copies = 0;
+
+void count_initial_data_copy(Kokkos::Tools::SpaceHandle, const char*,
+                             const void*, Kokkos::Tools::SpaceHandle,
+                             const char*, const void*, std::uint64_t) {
+  ++initial_data_copies;
+}
+
+}  // namespace
+
+TEST_CASE("pipeline Gaussian initial data are bandlimited consistent and scalable") {
+  constexpr int ell_max = 3;
+  constexpr int theta_nodes = 6;
+  const teuk::ModeRegistry registry({2, -2, 0});
+  const teuk::UniformRadialGrid radial_grid(9, 0.0, 0.8);
+  const teuk::KerrParameters background{1.0, 0.6, 1.2};
+  const teuk::ExecutionSpace execution;
+  teuk::SpatialPipeline pipeline(execution, registry, radial_grid, ell_max,
+                                 theta_nodes, background, 0.1, 0.0,
+                                 teuk::ReductionEvolution::FreeDamped,
+                                 "initial_data_pipeline");
+  teuk::PipelineGaussianPulse pulse;
+  pulse.center = 0.4;
+  pulse.width = 0.14;
+  pulse.modes = {{2, 2, teuk::Complex(0.7, -0.2)},
+                 {3, -2, teuk::Complex(-0.35, 0.5)}};
+
+  initial_data_copies = 0;
+  Kokkos::Tools::Experimental::set_begin_deep_copy_callback(
+      count_initial_data_copy);
+  teuk::initialize_compactified_gaussian_pulse(
+      execution, pipeline, registry, ell_max, background, pulse);
+  Kokkos::Tools::Experimental::set_begin_deep_copy_callback(nullptr);
+  CHECK(initial_data_copies == 1);
+  // Use an owning host snapshot even on Serial, where
+  // create_mirror_view_and_copy may legally return an alias.
+  Kokkos::View<teuk::Complex****, Kokkos::LayoutRight, Kokkos::HostSpace>
+      initial("initial_data_snapshot", registry.size(),
+              teuk::point_pipeline_field_count, radial_grid.size(),
+              theta_nodes);
+  Kokkos::deep_copy(initial, pipeline.storage().state());
+
+  const auto psi = static_cast<std::size_t>(teuk::PipelineField::FirstPsi);
+  const auto q = static_cast<std::size_t>(teuk::PipelineField::FirstQ);
+  const auto p = static_cast<std::size_t>(teuk::PipelineField::FirstP);
+  const std::size_t center_index = 4;
+  for (std::size_t mode_index = 0; mode_index < registry.size(); ++mode_index) {
+    const int m = registry.modes()[mode_index];
+    const teuk::angular::SpinWeightedTransform transform(
+        -2, m, ell_max, theta_nodes);
+    std::vector<teuk::Complex> nodal(theta_nodes);
+    for (int node = 0; node < theta_nodes; ++node) {
+      nodal[static_cast<std::size_t>(node)] =
+          initial(mode_index, psi, center_index,
+                  static_cast<std::size_t>(node));
+    }
+    const auto modal = transform.analyze(nodal);
+    for (int ell = transform.ell_min(); ell <= ell_max; ++ell) {
+      teuk::Complex expected(0.0, 0.0);
+      for (const auto& seed : pulse.modes) {
+        if (seed.m == m && seed.ell == ell) expected = seed.amplitude;
+      }
+      CHECK_COMPLEX_NEAR(
+          modal[static_cast<std::size_t>(ell - transform.ell_min())], expected,
+          2e-12);
+    }
+
+    for (int node = 0; node < theta_nodes; ++node) {
+      const auto theta = static_cast<std::size_t>(node);
+      std::vector<teuk::Complex> psi_line(radial_grid.size());
+      std::vector<teuk::Complex> derivative(radial_grid.size());
+      for (std::size_t radial = 0; radial < radial_grid.size(); ++radial) {
+        psi_line[radial] = initial(mode_index, psi, radial, theta);
+      }
+      teuk::d42_first_derivative(radial_grid, psi_line, derivative);
+      for (std::size_t radial = 0; radial < radial_grid.size(); ++radial) {
+        CHECK_COMPLEX_NEAR(initial(mode_index, q, radial, theta),
+                           derivative[radial], 2e-14);
+        teuk::TeukolskyParameters parameters;
+        parameters.mass = background.mass;
+        parameters.spin = background.spin;
+        parameters.compactification_length =
+            background.compactification_length;
+        parameters.spin_weight = -2;
+        parameters.azimuthal_mode = m;
+        const auto coefficients = teuk::teukolsky_coefficients(
+            parameters, radial_grid.coordinate(radial),
+            teuk::angular::gauss_legendre(theta_nodes).theta(theta));
+        const teuk::TeukolskyState point{
+            initial(mode_index, p, radial, theta),
+            initial(mode_index, q, radial, theta),
+            initial(mode_index, psi, radial, theta)};
+        CHECK_COMPLEX_NEAR(teuk::teukolsky_psi_rhs(coefficients, point),
+                           teuk::Complex(0.0, 0.0), 3e-14);
+      }
+    }
+  }
+
+  for (std::size_t mode = 0; mode < registry.size(); ++mode) {
+    for (std::size_t field =
+             static_cast<std::size_t>(teuk::PipelineField::G);
+         field <= static_cast<std::size_t>(teuk::PipelineField::SecondPsi);
+         ++field) {
+      if (field == static_cast<std::size_t>(teuk::PipelineField::SecondP) ||
+          field == static_cast<std::size_t>(teuk::PipelineField::SecondQ) ||
+          field == static_cast<std::size_t>(teuk::PipelineField::SecondPsi) ||
+          (field >= static_cast<std::size_t>(teuk::PipelineField::G) &&
+           field <= static_cast<std::size_t>(teuk::PipelineField::U))) {
+        for (std::size_t radial = 0; radial < radial_grid.size(); ++radial) {
+          for (int node = 0; node < theta_nodes; ++node) {
+            CHECK_COMPLEX_NEAR(
+                initial(mode, field, radial, static_cast<std::size_t>(node)),
+                teuk::Complex(0.0, 0.0), 0.0);
+          }
+        }
+      }
+    }
+  }
+
+  // Reinitialize in place with scaled amplitudes and optional nonlinear seeds.
+  const double amplitude_scale = 2.5;
+  for (auto& seed : pulse.modes) seed.amplitude *= amplitude_scale;
+  pulse.second_order_scale = teuk::Complex(0.4, -0.1);
+  pulse.reconstruction_scales[static_cast<std::size_t>(
+      teuk::ReconstructionField::B)] = teuk::Complex(0.2, 0.0);
+  teuk::initialize_compactified_gaussian_pulse(
+      execution, pipeline, registry, ell_max, background, pulse);
+  const auto scaled = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, pipeline.storage().state());
+  for (std::size_t mode = 0; mode < registry.size(); ++mode) {
+    for (std::size_t radial = 0; radial < radial_grid.size(); ++radial) {
+      for (int node = 0; node < theta_nodes; ++node) {
+        const auto theta = static_cast<std::size_t>(node);
+        for (const std::size_t first_field : {p, q, psi}) {
+          CHECK_COMPLEX_NEAR(
+              scaled(mode, first_field, radial, theta),
+              amplitude_scale *
+                  initial(mode, first_field, radial, theta),
+              8e-13);
+        }
+        CHECK_COMPLEX_NEAR(
+            scaled(mode,
+                   static_cast<std::size_t>(teuk::PipelineField::SecondPsi),
+                   radial, theta),
+            pulse.second_order_scale * scaled(mode, psi, radial, theta),
+            3e-13);
+      }
+    }
+  }
+  CHECK(Kokkos::abs(scaled(
+            registry.index(2),
+            static_cast<std::size_t>(teuk::PipelineField::B), center_index,
+            0)) > 1e-6);
+}
+
+TEST_CASE("pipeline Gaussian initial data reject invalid modes and sharp storage") {
+  const teuk::UniformRadialGrid radial_grid(9, 0.0, 0.8);
+  const teuk::KerrParameters background{1.0, 0.4, 1.1};
+  teuk::PipelineGaussianPulse pulse;
+  pulse.center = 0.4;
+  pulse.width = 0.1;
+  pulse.modes = {{2, 2, teuk::Complex(1.0, 0.0)}};
+
+  bool sharp_rejected = false;
+  try {
+    const teuk::ModeRegistry incomplete({0, 2});
+    teuk::SpatialPipelineStorage storage(
+        incomplete, radial_grid, teuk::angular::gauss_legendre(6));
+    static_cast<void>(storage);
+  } catch (const std::invalid_argument&) {
+    sharp_rejected = true;
+  }
+  CHECK(sharp_rejected);
+
+  const teuk::ModeRegistry registry({-2, 0, 2});
+  const teuk::ExecutionSpace execution;
+  teuk::SpatialPipeline pipeline(execution, registry, radial_grid, 3, 6,
+                                 background, 0.1, 0.0,
+                                 teuk::ReductionEvolution::FreeDamped,
+                                 "invalid_initial_data_pipeline");
+  pulse.modes[0].ell = 4;
+  bool ell_rejected = false;
+  try {
+    teuk::initialize_compactified_gaussian_pulse(
+        execution, pipeline, registry, 3, background, pulse);
+  } catch (const std::invalid_argument&) {
+    ell_rejected = true;
+  }
+  CHECK(ell_rejected);
+}
