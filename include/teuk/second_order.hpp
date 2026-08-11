@@ -68,94 +68,98 @@ using ReferenceOrderedPairDerivatives =
     OrderedPairDerivativesT<std::complex<double>>;
 using ReferenceInnerSource = InnerSourceT<std::complex<double>>;
 
-// Correct compact source for one ordered pair (m1,m2)->m1+m2. The caller is
-// responsible for deterministic enumeration and summing both orderings.
-KOKKOS_INLINE_FUNCTION
-InnerSource corrected_ordered_pair_source(
+// Correct compact source for one ordered pair (m1,m2)->m1+m2. The scalar can
+// be Complex for values or Jet1<Complex> for an analytic stage tangent. The
+// caller is responsible for deterministic enumeration and both orderings.
+template <class Scalar>
+KOKKOS_INLINE_FUNCTION InnerSourceT<Scalar> corrected_ordered_pair_source(
     const double radius, const KerrBackgroundPoint& background,
-    const OrderedPairFields& fields,
-    const OrderedPairDerivatives& derivatives) {
+    const OrderedPairFieldsT<Scalar>& fields,
+    const OrderedPairDerivativesT<Scalar>& derivatives) {
   const Complex mu0_bar = Kokkos::conj(background.mu0);
   const Complex pi0_bar = Kokkos::conj(background.pi0);
   const Complex tau0_bar = Kokkos::conj(background.tau0);
   const double radius2 = radius * radius;
 
   // D terms sd01--sd15 in SOURCE_TERM_LEDGER.csv.
-  const Complex sd01_sd02 =
+  const Scalar sd01_sd02 =
       0.5 * fields.U1 *
       (derivatives.delta1_F2 / background.mu0 + radius * fields.F2);
 
-  const Complex sd03 =
+  const Scalar sd03 =
       fields.F1 * (0.5 * radius * derivatives.eth2_C2);
   // Critical correction: 0.5 multiplies the connection term as well as eth.
-  const Complex sd04 =
+  const Scalar sd04 =
       fields.F1 *
       (0.5 * radius2 * (pi0_bar + 2.0 * background.tau0) * fields.C2);
-  const Complex sd05 =
+  const Scalar sd05 =
       fields.F1 *
       (derivatives.delta3_U2 / background.mu0 +
        radius * fields.U2_sharp);
-  const Complex sd06 =
+  const Scalar sd06 =
       fields.F1 * (-0.5 * radius * derivatives.ethprime2_C2_sharp);
-  const Complex sd07 =
+  const Scalar sd07 =
       fields.F1 *
       (0.5 * radius2 * (5.0 * background.pi0 + 4.0 * tau0_bar) *
        fields.C2_sharp);
 
-  const Complex sd08 =
+  const Scalar sd08 =
       -0.5 * fields.G1 * (radius * derivatives.eth1_B2);
-  const Complex sd09 =
+  const Scalar sd09 =
       -0.5 * fields.G1 *
       (radius2 * (pi0_bar + background.tau0) * fields.B2);
-  const Complex sd10 =
+  const Scalar sd10 =
       -0.5 * fields.G1 * (radius * derivatives.delta2_C2);
-  const Complex sd11 =
+  const Scalar sd11 =
       -0.5 * fields.G1 *
       (radius2 * (-2.0 * background.mu0 + mu0_bar) * fields.C2);
-  const Complex sd12 =
+  const Scalar sd12 =
       -radius * fields.C1 * derivatives.delta2_G2;
-  const Complex sd13 =
+  const Scalar sd13 =
       0.5 * radius * fields.B1 * derivatives.eth2_G2;
-  const Complex sd14 = 4.0 * radius * fields.Pi1 * fields.G2;
-  const Complex sd15 = -3.0 * radius * fields.Lambda1 * fields.H2;
+  const Scalar sd14 = 4.0 * radius * fields.Pi1 * fields.G2;
+  const Scalar sd15 = -3.0 * radius * fields.Lambda1 * fields.H2;
 
   // T terms st01--st07 in SOURCE_TERM_LEDGER.csv.
-  const Complex st01_st02 =
+  const Scalar st01_st02 =
       -fields.C1_sharp *
       (derivatives.delta1_F2 +
        radius * (background.mu0 + 2.0 * mu0_bar) * fields.F2);
-  const Complex st03 =
+  const Scalar st03 =
       0.5 * fields.B1_sharp * derivatives.ethprime1_F2;
-  const Complex st04 = fields.F1 * fields.Pi2_sharp;
-  const Complex st05 = -fields.F1 * derivatives.delta2_C2_sharp;
-  const Complex st06 = fields.F1 * derivatives.ethprime1_B2_sharp;
-  const Complex st07 =
+  const Scalar st04 = fields.F1 * fields.Pi2_sharp;
+  const Scalar st05 = -fields.F1 * derivatives.delta2_C2_sharp;
+  const Scalar st06 = fields.F1 * derivatives.ethprime1_B2_sharp;
+  const Scalar st07 =
       fields.F1 *
       (-0.5 * radius * (background.pi0 + tau0_bar) * fields.B2_sharp);
 
-  InnerSource source;
+  InnerSourceT<Scalar> source;
   source.D = sd01_sd02 + sd03 + sd04 + sd05 + sd06 + sd07 + sd08 +
              sd09 + sd10 + sd11 + sd12 + sd13 + sd14 + sd15;
   source.T = st01_st02 + st03 + st04 + st05 + st06 + st07;
   return source;
 }
 
-struct OuterSourceDerivatives {
-  Complex delta3_D;
-  Complex ethprime3_T;
+template <class Scalar>
+struct OuterSourceDerivativesT {
+  Scalar delta3_D;
+  Scalar ethprime3_T;
 };
 
-KOKKOS_INLINE_FUNCTION
-Complex outer_source_over_r3(const double radius,
-                             const KerrBackgroundPoint& background,
-                             const InnerSource& summed_inner_source,
-                             const OuterSourceDerivatives& derivatives) {
-  const Complex s01 = derivatives.delta3_D;
-  const Complex s02 =
+using OuterSourceDerivatives = OuterSourceDerivativesT<Complex>;
+
+template <class Scalar>
+KOKKOS_INLINE_FUNCTION Scalar outer_source_over_r3(
+    const double radius, const KerrBackgroundPoint& background,
+    const InnerSourceT<Scalar>& summed_inner_source,
+    const OuterSourceDerivativesT<Scalar>& derivatives) {
+  const Scalar s01 = derivatives.delta3_D;
+  const Scalar s02 =
       radius * (4.0 * background.mu0 + Kokkos::conj(background.mu0)) *
       summed_inner_source.D;
-  const Complex s03 = radius * derivatives.ethprime3_T;
-  const Complex s04 =
+  const Scalar s03 = radius * derivatives.ethprime3_T;
+  const Scalar s04 =
       radius * radius *
       (4.0 * background.pi0 - Kokkos::conj(background.tau0)) *
       summed_inner_source.T;
