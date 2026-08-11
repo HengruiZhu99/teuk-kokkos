@@ -40,12 +40,15 @@ struct DeviceRK4Workspace {
 // instance. This keeps stage ordering explicit and permits a multi-kernel RHS
 // (radial derivatives, angular transforms, reconstruction, source, forcing)
 // without a host fence between operations. The caller chooses when to fence.
-template <class Value, class ExecutionSpace, class RightHandSide>
+template <class Value, class ExecutionSpace, class StateView,
+          class RightHandSide>
 void device_classical_rk4_step(
     const ExecutionSpace& execution_space,
-    const Kokkos::View<Value*, typename ExecutionSpace::memory_space>& state,
-    const double time, const double step, RightHandSide&& rhs,
+    const StateView& state, const double time, const double step,
+    RightHandSide&& rhs,
     DeviceRK4Workspace<Value, ExecutionSpace>& workspace) {
+  static_assert(StateView::rank == 1,
+                "device RK4 state must be a rank-one View");
   const std::size_t size = state.extent(0);
   if (workspace.size() != size) {
     throw std::invalid_argument("device RK4 workspace does not match state");
@@ -87,11 +90,10 @@ void device_classical_rk4_step(
       });
 }
 
-template <class Value, class RightHandSide>
+template <class Value, class StateView, class RightHandSide>
 void device_classical_rk4_step(
-    const Kokkos::View<Value*, Kokkos::DefaultExecutionSpace::memory_space>&
-        state,
-    const double time, const double step, RightHandSide&& rhs,
+    const StateView& state, const double time, const double step,
+    RightHandSide&& rhs,
     DeviceRK4Workspace<Value>& workspace) {
   device_classical_rk4_step(Kokkos::DefaultExecutionSpace{}, state, time, step,
                             std::forward<RightHandSide>(rhs), workspace);
