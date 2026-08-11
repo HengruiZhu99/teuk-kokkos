@@ -10,6 +10,7 @@
 
 #include "teuk/pipeline_storage.hpp"
 #include "teuk/sbp.hpp"
+#include "teuk/source_activation.hpp"
 #include "teuk/types.hpp"
 
 namespace teuk {
@@ -34,6 +35,8 @@ struct PipelineDiagnosticsReport {
   PipelineNorm source_over_r3;
   PipelineNorm forcing;
   double independent_reconstruction_constraint_maximum = 0.0;
+  SourceConstraintNorms normalized_source_constraints;
+  SourceActivationState source_activation;
   bool second_order_source_active = false;
   std::size_t point_count = 0;
   bool scri_finite = false;
@@ -346,6 +349,8 @@ class PipelineDiagnostics {
     report.independent_reconstruction_constraint_maximum =
         std::sqrt(host_source_constraint_max_squared_(0));
     report.second_order_source_active = host_source_active_(0) != 0;
+    report.normalized_source_constraints = pipeline.source_constraint_norms();
+    report.source_activation = pipeline.source_activation_state();
     return report;
   }
 

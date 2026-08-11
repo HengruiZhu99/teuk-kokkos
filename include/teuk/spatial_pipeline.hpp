@@ -3,9 +3,12 @@
 #include <Kokkos_Core.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <limits>
+#include <span>
 #include <stdexcept>
 #include <string>
 
@@ -15,6 +18,7 @@
 #include "teuk/pipeline_storage.hpp"
 #include "teuk/reconstruction_constraints.hpp"
 #include "teuk/source_spatial.hpp"
+#include "teuk/source_activation.hpp"
 #include "teuk/source_tangent_spatial.hpp"
 
 namespace teuk {
@@ -45,10 +49,11 @@ enum class SecondOrderSourceMode {
 struct SecondOrderSourcePolicy {
   SecondOrderSourceMode mode = SecondOrderSourceMode::ConstraintAware;
   double source_start_time = 0.0;
-  double independent_constraint_tolerance = 1.0e-10;
+  double normalized_constraint_tolerance = 1.0e-10;
+  int required_consecutive_passes = 1;
 
   [[nodiscard]] static SecondOrderSourcePolicy unrestricted() {
-    return {SecondOrderSourceMode::Unrestricted, 0.0, 0.0};
+    return {SecondOrderSourceMode::Unrestricted, 0.0, 0.0, 1};
   }
 };
 
@@ -107,6 +112,16 @@ enum class IndependentConstraintSlot : std::size_t {
   Psi2Bianchi = 1,
   HllReality = 2,
   Count = 3,
+};
+
+enum class IndependentConstraintTermSlot : std::size_t {
+  Psi3Left = 0,
+  Psi3Right = 1,
+  Psi2Left = 2,
+  Psi2Right = 3,
+  HllLeft = 4,
+  HllRight = 5,
+  Count = 6,
 };
 
 inline constexpr ReconstructionFullFieldOffsets compact_reconstruction_fields{
@@ -183,6 +198,14 @@ class SpatialPipeline {
             static_cast<std::size_t>(
                 spatial_pipeline_detail::IndependentConstraintSlot::Count),
             radial_grid.size(), theta_nodes),
+        independent_constraint_terms_(
+            label + "_independent_constraint_terms", registry.size(),
+            static_cast<std::size_t>(spatial_pipeline_detail::
+                                         IndependentConstraintTermSlot::Count),
+            radial_grid.size(), theta_nodes),
+        source_constraint_evaluator_(
+            registry.size(), radial_grid, angular::gauss_legendre(theta_nodes),
+            label + "_source_constraint_evaluator"),
         source_extra_(
             label + "_source_extra", registry.size(),
             static_cast<std::size_t>(
@@ -258,13 +281,23 @@ class SpatialPipeline {
     }
     if (!std::isfinite(source_policy_.source_start_time) ||
         source_policy_.source_start_time < 0.0 ||
-        !std::isfinite(source_policy_.independent_constraint_tolerance) ||
-        source_policy_.independent_constraint_tolerance < 0.0) {
+        !std::isfinite(source_policy_.normalized_constraint_tolerance) ||
+        source_policy_.normalized_constraint_tolerance < 0.0 ||
+        source_policy_.required_consecutive_passes < 1) {
       throw std::invalid_argument("pipeline source policy is invalid");
     }
     Kokkos::deep_copy(execution, storage_.state(), Complex(0.0, 0.0));
     Kokkos::deep_copy(execution, storage_.rhs(), Complex(0.0, 0.0));
     Kokkos::deep_copy(execution, zero_forcing_, Complex(0.0, 0.0));
+    Kokkos::deep_copy(execution, source_constraint_max_squared_, 0.0);
+    if (source_policy_.mode == SecondOrderSourceMode::Unrestricted &&
+        source_policy_.source_start_time == 0.0) {
+      source_activation_.active = true;
+      source_activation_.activation_time = 0.0;
+      source_activation_.consecutive_passes =
+          source_policy_.required_consecutive_passes;
+    }
+    sync_source_activation(execution);
     execution.fence("initialize full spatial pipeline");
     // Pinned Kokkos SYCL lazily reserves a four-entry round-robin indirect
     // kernel-functor pool. Four zero-state graph submissions populate every
@@ -293,6 +326,46 @@ class SpatialPipeline {
   }
   [[nodiscard]] SecondOrderSourcePolicy source_policy() const {
     return source_policy_;
+  }
+  [[nodiscard]] SourceActivationState source_activation_state() const {
+    return source_activation_;
+  }
+  [[nodiscard]] const SourceConstraintNorms& source_constraint_norms() const {
+    return source_constraint_norms_;
+  }
+  [[nodiscard]] std::span<const int> last_step_stage_source_states() const {
+    return {last_step_stage_source_states_.data(),
+            last_step_stage_source_state_count_};
+  }
+  [[nodiscard]] FullSpatialStateView independent_reconstruction_constraint_terms()
+      const {
+    return independent_constraint_terms_;
+  }
+
+  void reset_source_activation(const ExecutionSpace& execution) {
+    source_activation_ = {};
+    source_constraint_norms_ = {};
+    if (source_policy_.mode == SecondOrderSourceMode::Unrestricted &&
+        source_policy_.source_start_time == 0.0) {
+      source_activation_.active = true;
+      source_activation_.activation_time = 0.0;
+      source_activation_.consecutive_passes =
+          source_policy_.required_consecutive_passes;
+    }
+    Kokkos::deep_copy(execution, source_constraint_max_squared_, 0.0);
+    sync_source_activation(execution);
+  }
+
+  void restore_source_activation(const ExecutionSpace& execution,
+                                 const SourceActivationState& state) {
+    validate_source_activation_state(state);
+    source_activation_ = state;
+    sync_source_activation(execution);
+  }
+
+  bool evaluate_source_activation_on_accepted_state(
+      const ExecutionSpace& execution, const double accepted_time) {
+    return consider_source_activation(execution, accepted_time);
   }
   [[nodiscard]] SpatialInnerSourceView inner_source() const {
     return projected_inner_;
@@ -328,6 +401,7 @@ class SpatialPipeline {
                             const StageView& stage, const OutputView& output,
                             const double stage_time,
                             SpatialPipelineTiming* timing = nullptr) {
+    (void)stage_time;
     static_assert(StageView::rank == 4 && OutputView::rank == 4,
                   "pipeline stages must have rank four");
     validate_stage(stage, output);
@@ -413,7 +487,7 @@ class SpatialPipeline {
         storage_.sin_theta(), source_fields_, source_field_tangents_,
         source_derivatives_, source_derivative_tangents_, inner_source_);
     project_inner_source(execution);
-    apply_source_policy(execution, stage_time);
+    apply_source_activation(execution);
     if (timing != nullptr) {
       record_timing(timing->source_seconds,
                     "profile quadratic spatial source");
@@ -445,15 +519,34 @@ class SpatialPipeline {
 
   void step(const ExecutionSpace& execution, const double time,
             const double time_step) {
-    auto flat_state = storage_.flat_state();
-    const auto rhs = [this](const ExecutionSpace& stage_execution,
-                            const double stage_time, const auto& flat_stage,
-                            const auto& flat_output) {
-      evaluate_rhs_at_time(stage_execution, storage_.reshape(flat_stage),
-                           storage_.reshape(flat_output), stage_time);
-    };
-    device_classical_rk4_step(execution, flat_state, time, time_step, rhs,
-                              rk_workspace_);
+    if (!std::isfinite(time) || !std::isfinite(time_step) ||
+        time < 0.0 || !(time_step > 0.0)) {
+      throw std::invalid_argument("pipeline step requires finite positive time data");
+    }
+    last_step_stage_source_state_count_ = 0;
+    const double end_time = time + time_step;
+    if (!std::isfinite(end_time)) {
+      throw std::invalid_argument("pipeline step end time is not finite");
+    }
+    const double start_time = source_policy_.source_start_time;
+    if (!source_activation_.active && time >= start_time) {
+      consider_source_activation(execution, time);
+    }
+    if (!source_activation_.active && time < start_time &&
+        start_time < end_time) {
+      advance_fixed_source_step(execution, time, start_time - time);
+      consider_source_activation(execution, start_time);
+      advance_fixed_source_step(execution, start_time,
+                                end_time - start_time);
+    } else {
+      advance_fixed_source_step(execution, time, time_step);
+    }
+    // Accepted endpoint decisions affect only the following step. In
+    // particular, an event at end_time contributes nothing to the preceding
+    // RK4 update.
+    if (!source_activation_.active && end_time >= start_time) {
+      consider_source_activation(execution, end_time);
+    }
   }
 
  private:
@@ -586,6 +679,7 @@ class SpatialPipeline {
         static_cast<std::size_t>(IndependentAngularSlot::EthPrime3H));
 
     const auto constraints = independent_constraints_;
+    const auto constraint_terms = independent_constraint_terms_;
     const auto angular_values = independent_angular_;
     const auto first_scratch = first_scratch_;
     const auto reconstruction_radial = reconstruction_radial_;
@@ -632,7 +726,7 @@ class SpatialPipeline {
               2, -1, -1, modes(mode), coordinate, cos_theta(theta),
               parameters.mass, parameters.spin,
               parameters.compactification_length, background.epsilon0);
-          const auto residuals = independent_reconstruction_constraints_point(
+          const auto terms = independent_reconstruction_constraint_terms_point(
               coordinate, background, F, G, H,
               stage(mode, reconstruction_fields.Lambda, radial, theta),
               stage(mode, reconstruction_fields.Pi, radial, theta),
@@ -652,6 +746,10 @@ class SpatialPipeline {
                   static_cast<std::size_t>(
                       IndependentAngularSlot::EthPrime3H),
                   radial, theta));
+          IndependentReconstructionConstraints residuals{
+              terms.psi3_bianchi.left - terms.psi3_bianchi.right,
+              terms.psi2_bianchi.left - terms.psi2_bianchi.right,
+              terms.hll_reality.left - terms.hll_reality.right};
           constraints(mode,
                       static_cast<std::size_t>(
                           IndependentConstraintSlot::Psi3Bianchi),
@@ -664,6 +762,30 @@ class SpatialPipeline {
                       static_cast<std::size_t>(
                           IndependentConstraintSlot::HllReality),
                       radial, theta) = residuals.hll_reality;
+          constraint_terms(
+              mode, static_cast<std::size_t>(
+                        IndependentConstraintTermSlot::Psi3Left),
+              radial, theta) = terms.psi3_bianchi.left;
+          constraint_terms(
+              mode, static_cast<std::size_t>(
+                        IndependentConstraintTermSlot::Psi3Right),
+              radial, theta) = terms.psi3_bianchi.right;
+          constraint_terms(
+              mode, static_cast<std::size_t>(
+                        IndependentConstraintTermSlot::Psi2Left),
+              radial, theta) = terms.psi2_bianchi.left;
+          constraint_terms(
+              mode, static_cast<std::size_t>(
+                        IndependentConstraintTermSlot::Psi2Right),
+              radial, theta) = terms.psi2_bianchi.right;
+          constraint_terms(
+              mode, static_cast<std::size_t>(
+                        IndependentConstraintTermSlot::HllLeft),
+              radial, theta) = terms.hll_reality.left;
+          constraint_terms(
+              mode, static_cast<std::size_t>(
+                        IndependentConstraintTermSlot::HllRight),
+              radial, theta) = terms.hll_reality.right;
         });
   }
 
@@ -983,55 +1105,104 @@ class SpatialPipeline {
         ethprime_t_, source_over_r3_, forcing_);
   }
 
-  void apply_source_policy(const ExecutionSpace& execution,
-                           const double stage_time) {
-    const auto constraint_max_squared = source_constraint_max_squared_;
-    const auto source_active = source_active_;
-    const auto constraints = independent_constraints_;
+  void apply_source_activation(const ExecutionSpace& execution) {
     const auto forcing = forcing_;
-    const std::size_t constraint_points = constraints.size();
     const std::size_t forcing_points = forcing.size();
-    const double tolerance_squared =
-        source_policy_.independent_constraint_tolerance *
-        source_policy_.independent_constraint_tolerance;
-    const double source_start_time = source_policy_.source_start_time;
-    const bool constraint_aware =
-        source_policy_.mode == SecondOrderSourceMode::ConstraintAware;
+    const bool active = source_activation_.active;
     Kokkos::parallel_for(
-        "reset_second_order_source_gate",
-        Kokkos::RangePolicy<ExecutionSpace>(execution, 0, 1),
-        KOKKOS_LAMBDA(const int) {
-          constraint_max_squared(0) = 0.0;
-          source_active(0) = 0;
-        });
-    Kokkos::parallel_for(
-        "reduce_second_order_source_constraint",
-        Kokkos::RangePolicy<ExecutionSpace>(execution, 0, constraint_points),
-        KOKKOS_LAMBDA(const std::size_t flat) {
-          const Complex value = constraints.data()[flat];
-          const double magnitude = Kokkos::abs(value);
-          const double magnitude_squared =
-              Kokkos::isfinite(magnitude) ? magnitude * magnitude : 1.0e300;
-          Kokkos::atomic_max(&constraint_max_squared(0), magnitude_squared);
-        });
-    Kokkos::parallel_for(
-        "decide_second_order_source_gate",
-        Kokkos::RangePolicy<ExecutionSpace>(execution, 0, 1),
-        KOKKOS_LAMBDA(const int) {
-          const bool causal_time_reached = stage_time >= source_start_time;
-          const bool constraints_satisfied =
-              !constraint_aware ||
-              constraint_max_squared(0) <= tolerance_squared;
-          source_active(0) = causal_time_reached && constraints_satisfied;
-        });
-    Kokkos::parallel_for(
-        "apply_second_order_source_gate",
+        "apply_latched_second_order_source_state",
         Kokkos::RangePolicy<ExecutionSpace>(execution, 0, forcing_points),
         KOKKOS_LAMBDA(const std::size_t flat) {
-          if (source_active(0) == 0) {
+          if (!active) {
             forcing.data()[flat] = Complex(0.0, 0.0);
           }
         });
+  }
+
+  static void validate_source_activation_state(
+      const SourceActivationState& state) {
+    if (state.consecutive_passes < 0 ||
+        !std::isfinite(state.activation_time) ||
+        !std::isfinite(state.last_eligibility_time) ||
+        (state.active && state.activation_time < 0.0) ||
+        (!state.active && state.activation_time != -1.0) ||
+        state.last_eligibility_time < -1.0) {
+      throw std::invalid_argument("invalid second-order source activation state");
+    }
+  }
+
+  void sync_source_activation(const ExecutionSpace& execution) {
+    Kokkos::deep_copy(execution, source_active_,
+                      source_activation_.active ? 1 : 0);
+  }
+
+  bool consider_source_activation(const ExecutionSpace& execution,
+                                  const double accepted_time) {
+    if (!std::isfinite(accepted_time) || accepted_time < 0.0) {
+      throw std::invalid_argument(
+          "source activation requires a finite accepted-state time");
+    }
+    if (source_activation_.active ||
+        accepted_time < source_policy_.source_start_time ||
+        accepted_time <= source_activation_.last_eligibility_time) {
+      return source_activation_.active;
+    }
+    bool passed = true;
+    if (source_policy_.mode == SecondOrderSourceMode::Unrestricted) {
+      source_activation_.last_eligibility_time = accepted_time;
+      source_activation_.consecutive_passes =
+          source_policy_.required_consecutive_passes;
+      source_activation_.active = true;
+      source_activation_.activation_time = accepted_time;
+      sync_source_activation(execution);
+      return true;
+    }
+    evaluate_rhs_at_time(execution, storage_.state(), storage_.rhs(),
+                         accepted_time);
+    source_constraint_norms_ = source_constraint_evaluator_.sample(
+        execution, independent_constraints_, independent_constraint_terms_);
+    passed = source_constraint_norms_.all_finite &&
+             source_constraint_norms_.controlling_normalized <=
+                 source_policy_.normalized_constraint_tolerance;
+    const double maximum = std::max(
+        {source_constraint_norms_.psi3_bianchi.absolute_maximum,
+         source_constraint_norms_.psi2_bianchi.absolute_maximum,
+         source_constraint_norms_.hll_reality.absolute_maximum});
+    Kokkos::deep_copy(execution, source_constraint_max_squared_,
+                      maximum * maximum);
+    source_activation_.last_eligibility_time = accepted_time;
+    source_activation_.consecutive_passes = passed
+        ? std::min(source_activation_.consecutive_passes + 1,
+                   source_policy_.required_consecutive_passes)
+        : 0;
+    if (source_activation_.consecutive_passes >=
+        source_policy_.required_consecutive_passes) {
+      source_activation_.active = true;
+      source_activation_.activation_time = accepted_time;
+      sync_source_activation(execution);
+    }
+    return source_activation_.active;
+  }
+
+  void advance_fixed_source_step(const ExecutionSpace& execution,
+                                 const double time,
+                                 const double time_step) {
+    if (!(time_step > 0.0)) return;
+    auto flat_state = storage_.flat_state();
+    const auto rhs = [this](const ExecutionSpace& stage_execution,
+                            const double stage_time, const auto& flat_stage,
+                            const auto& flat_output) {
+      if (last_step_stage_source_state_count_ >=
+          last_step_stage_source_states_.size()) {
+        throw std::runtime_error("source-event split exceeded RK stage capacity");
+      }
+      last_step_stage_source_states_[last_step_stage_source_state_count_++] =
+          source_activation_.active ? 1 : 0;
+      evaluate_rhs_at_time(stage_execution, storage_.reshape(flat_stage),
+                           storage_.reshape(flat_output), stage_time);
+    };
+    device_classical_rk4_step(execution, flat_state, time, time_step, rhs,
+                              rk_workspace_);
   }
 
   ModeRegistry registry_;
@@ -1055,6 +1226,10 @@ class SpatialPipeline {
   FullSpatialStateView reconstruction_tangent_angular_;
   FullSpatialStateView independent_angular_;
   FullSpatialStateView independent_constraints_;
+  FullSpatialStateView independent_constraint_terms_;
+  SourceConstraintEvaluator source_constraint_evaluator_;
+  SourceConstraintNorms source_constraint_norms_;
+  SourceActivationState source_activation_;
   FullSpatialStateView source_extra_;
   FullSpatialStateView sharp_work_;
   FullSpatialStateView first_scratch_;
@@ -1077,6 +1252,8 @@ class SpatialPipeline {
   Kokkos::View<double*, MemorySpace> source_constraint_max_squared_;
   Kokkos::View<int*, MemorySpace> source_active_;
   DeviceRK4Workspace<Complex> rk_workspace_;
+  std::array<int, 8> last_step_stage_source_states_{};
+  std::size_t last_step_stage_source_state_count_ = 0;
 };
 
 }  // namespace teuk

@@ -124,7 +124,7 @@ int run_spatial_pipeline(const teuk::Parameters& input) {
           input.allow_inconsistent_source
               ? teuk::SecondOrderSourceMode::Unrestricted
               : teuk::SecondOrderSourceMode::ConstraintAware,
-          input.source_start_time, input.source_constraint_tolerance});
+          input.source_start_time, input.source_constraint_tolerance, 1});
 
   const double time_step =
       input.final_time / static_cast<double>(input.steps);

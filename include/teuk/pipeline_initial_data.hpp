@@ -311,6 +311,7 @@ inline void initialize_compactified_gaussian_pulse(
       host_state, registry, {ell_max, ell_max});
 
   Kokkos::deep_copy(execution, storage.state(), host_state);
+  pipeline.reset_source_activation(execution);
   execution.fence("initialize compactified Gaussian pipeline pulse");
 }
 

@@ -296,6 +296,7 @@ TEST_CASE("default Gaussian exposes inconsistent reconstruction constraints") {
       execution, pipeline, registry, 4, parameters, pulse);
   pipeline.evaluate_rhs(execution, pipeline.storage().state(),
                         pipeline.storage().rhs());
+  pipeline.evaluate_source_activation_on_accepted_state(execution, 0.0);
   teuk::PipelineIndependentReconstructionDiagnostics diagnostics(
       registry.size(), grid.size(), 7);
   const auto report = diagnostics.sample(execution, pipeline);
@@ -316,7 +317,7 @@ TEST_CASE("causal constraint-aware source gate is visible and configurable") {
   const teuk::UniformRadialGrid grid(9, 0.0, 0.8);
   const teuk::KerrParameters parameters{1.0, 0.35, 1.5};
   const teuk::SecondOrderSourcePolicy policy{
-      teuk::SecondOrderSourceMode::ConstraintAware, 0.2, 1.0e6};
+      teuk::SecondOrderSourceMode::ConstraintAware, 0.2, 1.0e6, 1};
   teuk::SpatialPipeline pipeline(
       execution, registry, grid, 3, 6, parameters, 0.1, 0.0,
       teuk::ReductionEvolution::FreeDamped, "causal_source_gate", policy);
@@ -332,20 +333,22 @@ TEST_CASE("causal constraint-aware source gate is visible and configurable") {
       execution, pipeline, registry, 3, parameters, pulse);
   teuk::PipelineDiagnostics diagnostics(registry.size(), grid, 6);
 
+  CHECK(!pipeline.evaluate_source_activation_on_accepted_state(execution,
+                                                               0.1));
   pipeline.evaluate_rhs_at_time(execution, pipeline.storage().state(),
                                 pipeline.storage().rhs(), 0.1);
   const auto before = diagnostics.sample_pipeline(execution, pipeline);
   CHECK(!before.second_order_source_active);
-  CHECK(before.independent_reconstruction_constraint_maximum > 0.0);
+  CHECK(before.independent_reconstruction_constraint_maximum == 0.0);
   CHECK(before.forcing.maximum == 0.0);
   CHECK(before.source_over_r3.maximum > 1.0e-14);
 
+  CHECK(pipeline.evaluate_source_activation_on_accepted_state(execution, 0.3));
   pipeline.evaluate_rhs_at_time(execution, pipeline.storage().state(),
                                 pipeline.storage().rhs(), 0.3);
   const auto after = diagnostics.sample_pipeline(execution, pipeline);
   CHECK(after.second_order_source_active);
-  CHECK(after.independent_reconstruction_constraint_maximum ==
-        before.independent_reconstruction_constraint_maximum);
+  CHECK(after.independent_reconstruction_constraint_maximum > 0.0);
   CHECK(after.forcing.maximum > 1.0e-14);
 }
 

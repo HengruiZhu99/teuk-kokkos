@@ -14,11 +14,12 @@
 namespace {
 
 int initial_data_copies = 0;
+std::uint64_t initial_data_state_bytes = 0;
 
 void count_initial_data_copy(Kokkos::Tools::SpaceHandle, const char*,
                              const void*, Kokkos::Tools::SpaceHandle,
-                             const char*, const void*, std::uint64_t) {
-  ++initial_data_copies;
+                             const char*, const void*, std::uint64_t bytes) {
+  if (bytes == initial_data_state_bytes) ++initial_data_copies;
 }
 
 }  // namespace
@@ -41,6 +42,8 @@ TEST_CASE("pipeline Gaussian initial data are bandlimited consistent and scalabl
                  {3, -2, teuk::Complex(-0.35, 0.5)}};
 
   initial_data_copies = 0;
+  initial_data_state_bytes =
+      pipeline.storage().value_count() * sizeof(teuk::Complex);
   Kokkos::Tools::Experimental::set_begin_deep_copy_callback(
       count_initial_data_copy);
   teuk::initialize_compactified_gaussian_pulse(

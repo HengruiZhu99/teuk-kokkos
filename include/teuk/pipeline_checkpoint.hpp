@@ -35,7 +35,7 @@
 
 namespace teuk {
 
-inline constexpr std::uint64_t pipeline_checkpoint_format_version = 2;
+inline constexpr std::uint64_t pipeline_checkpoint_format_version = 3;
 inline constexpr const char* pipeline_checkpoint_metadata_file =
     "metadata.txt";
 inline constexpr const char* pipeline_checkpoint_state_file = "state.bin";
@@ -68,6 +68,7 @@ struct PipelineCheckpointMetadata {
   std::vector<double> theta_coordinates;
   PipelineCheckpointConfiguration configuration;
   PipelineCheckpointProgress progress;
+  SourceActivationState source_activation;
   std::uint64_t state_checksum = 0;
 };
 
@@ -135,7 +136,7 @@ inline void validate_configuration(
   validate_finite(configuration.source_policy.source_start_time,
                   "checkpoint source start time");
   validate_finite(
-      configuration.source_policy.independent_constraint_tolerance,
+      configuration.source_policy.normalized_constraint_tolerance,
       "checkpoint source constraint tolerance");
   if (!(configuration.background.mass > 0.0) ||
       std::abs(configuration.background.spin) >
@@ -148,7 +149,8 @@ inline void validate_configuration(
       configuration.reduction_damping < 0.0 ||
       configuration.dissipation < 0.0 || !(configuration.time_step > 0.0) ||
       configuration.source_policy.source_start_time < 0.0 ||
-      configuration.source_policy.independent_constraint_tolerance < 0.0) {
+      configuration.source_policy.normalized_constraint_tolerance < 0.0 ||
+      configuration.source_policy.required_consecutive_passes < 1) {
     throw std::invalid_argument("invalid pipeline checkpoint configuration");
   }
   (void)reduction_name(configuration.reduction);
@@ -171,16 +173,34 @@ inline bool same_configuration(
          left.source_policy.mode == right.source_policy.mode &&
          left.source_policy.source_start_time ==
              right.source_policy.source_start_time &&
-         left.source_policy.independent_constraint_tolerance ==
-             right.source_policy.independent_constraint_tolerance;
+         left.source_policy.normalized_constraint_tolerance ==
+             right.source_policy.normalized_constraint_tolerance &&
+         left.source_policy.required_consecutive_passes ==
+             right.source_policy.required_consecutive_passes;
 }
 
 inline bool same_source_policy(const SecondOrderSourcePolicy& left,
                                const SecondOrderSourcePolicy& right) {
   return left.mode == right.mode &&
          left.source_start_time == right.source_start_time &&
-         left.independent_constraint_tolerance ==
-             right.independent_constraint_tolerance;
+         left.normalized_constraint_tolerance ==
+             right.normalized_constraint_tolerance &&
+         left.required_consecutive_passes ==
+             right.required_consecutive_passes;
+}
+
+inline void validate_source_activation_state(
+    const SourceActivationState& state, const double progress_time) {
+  if (state.consecutive_passes < 0 ||
+      !std::isfinite(state.activation_time) ||
+      !std::isfinite(state.last_eligibility_time) ||
+      (state.active && (state.activation_time < 0.0 ||
+                        state.activation_time > progress_time)) ||
+      (!state.active && state.activation_time != -1.0) ||
+      state.last_eligibility_time < -1.0 ||
+      state.last_eligibility_time > progress_time) {
+    throw std::runtime_error("invalid checkpoint source activation state");
+  }
 }
 
 template <class Value>
@@ -321,6 +341,8 @@ inline void validate_metadata(const PipelineCheckpointMetadata& metadata) {
   if (metadata.progress.time < 0.0) {
     throw std::runtime_error("checkpoint time must be nonnegative");
   }
+  validate_source_activation_state(metadata.source_activation,
+                                   metadata.progress.time);
   for (const double radius : metadata.radial_coordinates) {
     validate_finite(radius, "checkpoint radial coordinate");
   }
@@ -399,8 +421,20 @@ inline void write_metadata_file(
          << source_mode_name(metadata.configuration.source_policy.mode) << '\n'
          << "source_start_time="
          << metadata.configuration.source_policy.source_start_time << '\n'
-         << "source_constraint_tolerance="
-         << metadata.configuration.source_policy.independent_constraint_tolerance
+         << "source_normalized_constraint_tolerance="
+         << metadata.configuration.source_policy.normalized_constraint_tolerance
+         << '\n'
+         << "source_required_consecutive_passes="
+         << metadata.configuration.source_policy.required_consecutive_passes
+         << '\n'
+         << "source_active=" << (metadata.source_activation.active ? 1 : 0)
+         << '\n'
+         << "source_activation_time="
+         << metadata.source_activation.activation_time << '\n'
+         << "source_consecutive_passes="
+         << metadata.source_activation.consecutive_passes << '\n'
+         << "source_last_eligibility_time="
+         << metadata.source_activation.last_eligibility_time
          << '\n'
          << "time=" << metadata.progress.time << '\n'
          << "step=" << metadata.progress.step << '\n'
@@ -477,7 +511,10 @@ inline std::map<std::string, std::string> read_entries(
       "spin",            "compactification_length", "ell_max",
       "theta_nodes",     "reduction_damping", "dissipation",
       "reduction",       "time_step",        "source_mode",
-      "source_start_time", "source_constraint_tolerance", "time",
+      "source_start_time", "source_normalized_constraint_tolerance",
+      "source_required_consecutive_passes", "source_active",
+      "source_activation_time", "source_consecutive_passes",
+      "source_last_eligibility_time", "time",
       "step",            "state_checksum_fnv1a64"};
   if (entries.size() != expected.size()) {
     throw std::runtime_error("checkpoint metadata key set does not match format");
@@ -558,8 +595,21 @@ inline PipelineCheckpointMetadata read_pipeline_checkpoint_metadata(
       parse_source_mode(require_text(entries, "source_mode"));
   metadata.configuration.source_policy.source_start_time =
       parse_number<double>(entries, "source_start_time");
-  metadata.configuration.source_policy.independent_constraint_tolerance =
-      parse_number<double>(entries, "source_constraint_tolerance");
+  metadata.configuration.source_policy.normalized_constraint_tolerance =
+      parse_number<double>(entries, "source_normalized_constraint_tolerance");
+  metadata.configuration.source_policy.required_consecutive_passes =
+      parse_number<int>(entries, "source_required_consecutive_passes");
+  const int source_active = parse_number<int>(entries, "source_active");
+  if (source_active != 0 && source_active != 1) {
+    throw std::runtime_error("invalid checkpoint source-active flag");
+  }
+  metadata.source_activation.active = source_active != 0;
+  metadata.source_activation.activation_time =
+      parse_number<double>(entries, "source_activation_time");
+  metadata.source_activation.consecutive_passes =
+      parse_number<int>(entries, "source_consecutive_passes");
+  metadata.source_activation.last_eligibility_time =
+      parse_number<double>(entries, "source_last_eligibility_time");
   metadata.progress.time = parse_number<double>(entries, "time");
   metadata.progress.step = parse_number<std::uint64_t>(entries, "step");
   metadata.state_checksum =
@@ -601,6 +651,7 @@ inline void write_pipeline_checkpoint(
   metadata.targets = registry.targets();
   metadata.configuration = configuration;
   metadata.progress = progress;
+  metadata.source_activation = pipeline.source_activation_state();
   metadata.radial_coordinates = copy_rank_one_to_host(
       execution, pipeline.storage().radius(), "checkpoint_write_radius");
   metadata.theta_coordinates = copy_rank_one_to_host(
@@ -675,6 +726,7 @@ inline PipelineCheckpointMetadata load_pipeline_checkpoint(
                                                   values.size());
   for (std::size_t i = 0; i < values.size(); ++i) host(i) = values[i];
   Kokkos::deep_copy(execution, pipeline.storage().flat_state(), host);
+  pipeline.restore_source_activation(execution, metadata.source_activation);
   execution.fence("restore pipeline checkpoint state");
   return metadata;
 }

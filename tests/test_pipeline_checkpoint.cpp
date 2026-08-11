@@ -54,7 +54,7 @@ teuk::PipelineCheckpointConfiguration checkpoint_configuration() {
           0.004,
           teuk::ReductionEvolution::FreeDamped,
           2.0e-5,
-          {teuk::SecondOrderSourceMode::ConstraintAware, 0.04, 2.0e-8}};
+          {teuk::SecondOrderSourceMode::Unrestricted, 3.0e-5, 0.0, 1}};
 }
 
 void initialize_pipeline(const teuk::ExecutionSpace& execution,
@@ -217,11 +217,16 @@ TEST_CASE("full spatial pipeline checkpoint resumes the real RK4 trajectory") {
         configuration.source_policy.mode);
   CHECK(metadata.configuration.source_policy.source_start_time ==
         configuration.source_policy.source_start_time);
-  CHECK(metadata.configuration.source_policy.independent_constraint_tolerance ==
-        configuration.source_policy.independent_constraint_tolerance);
+  CHECK(metadata.configuration.source_policy.normalized_constraint_tolerance ==
+        configuration.source_policy.normalized_constraint_tolerance);
+  CHECK(metadata.configuration.source_policy.required_consecutive_passes ==
+        configuration.source_policy.required_consecutive_passes);
   CHECK(metadata.progress.step == checkpoint_step);
   CHECK(metadata.progress.time ==
         checkpoint_step * configuration.time_step);
+  CHECK(metadata.source_activation.active);
+  CHECK_NEAR(metadata.source_activation.activation_time, 3.0e-5, 0.0);
+  CHECK(metadata.source_activation.consecutive_passes == 1);
 
   const teuk::ModeRegistry restored_registry(metadata.modes, metadata.targets);
   const teuk::UniformRadialGrid restored_grid(
@@ -239,6 +244,9 @@ TEST_CASE("full spatial pipeline checkpoint resumes the real RK4 trajectory") {
       metadata.configuration);
   const auto loaded_state = pipeline_state(execution, restarted);
   CHECK(loaded_state == state_at_checkpoint);
+  CHECK(restarted.source_activation_state().active);
+  CHECK_NEAR(restarted.source_activation_state().activation_time, 3.0e-5,
+             0.0);
 
   for (std::uint64_t step = loaded.progress.step; step < total_steps; ++step) {
     restarted.step(execution, static_cast<double>(step) *
