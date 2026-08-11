@@ -32,42 +32,45 @@ KOKKOS_INLINE_FUNCTION double d42_norm_weight(
 KOKKOS_INLINE_FUNCTION double d42_derivative_coefficient(
     const std::size_t point_count, const std::size_t row,
     const std::size_t column) {
-  if (row == 0) {
-    if (column == 0) return -24.0 / 17.0;
-    if (column == 1) return 59.0 / 34.0;
-    if (column == 2) return -4.0 / 17.0;
-    if (column == 3) return -3.0 / 34.0;
-    return 0.0;
+  // Express the odd-reflected right closure without recursion: SYCL device
+  // compilation rejects even statically bounded recursive call graphs.
+  const bool reflected = row + 4 >= point_count;
+  const std::size_t local_row = reflected ? point_count - 1 - row : row;
+  const std::size_t local_column =
+      reflected ? point_count - 1 - column : column;
+  double coefficient = 0.0;
+
+  if (local_row == 0) {
+    if (local_column == 0) coefficient = -24.0 / 17.0;
+    else if (local_column == 1) coefficient = 59.0 / 34.0;
+    else if (local_column == 2) coefficient = -4.0 / 17.0;
+    else if (local_column == 3) coefficient = -3.0 / 34.0;
+    return reflected ? -coefficient : coefficient;
   }
-  if (row == 1) {
-    if (column == 0) return -0.5;
-    if (column == 2) return 0.5;
-    return 0.0;
+  if (local_row == 1) {
+    if (local_column == 0) coefficient = -0.5;
+    else if (local_column == 2) coefficient = 0.5;
+    return reflected ? -coefficient : coefficient;
   }
-  if (row == 2) {
-    if (column == 0) return 4.0 / 43.0;
-    if (column == 1) return -59.0 / 86.0;
-    if (column == 3) return 59.0 / 86.0;
-    if (column == 4) return -4.0 / 43.0;
-    return 0.0;
+  if (local_row == 2) {
+    if (local_column == 0) coefficient = 4.0 / 43.0;
+    else if (local_column == 1) coefficient = -59.0 / 86.0;
+    else if (local_column == 3) coefficient = 59.0 / 86.0;
+    else if (local_column == 4) coefficient = -4.0 / 43.0;
+    return reflected ? -coefficient : coefficient;
   }
-  if (row == 3) {
-    if (column == 0) return 3.0 / 98.0;
-    if (column == 2) return -59.0 / 98.0;
-    if (column == 4) return 32.0 / 49.0;
-    if (column == 5) return -4.0 / 49.0;
-    return 0.0;
+  if (local_row == 3) {
+    if (local_column == 0) coefficient = 3.0 / 98.0;
+    else if (local_column == 2) coefficient = -59.0 / 98.0;
+    else if (local_column == 4) coefficient = 32.0 / 49.0;
+    else if (local_column == 5) coefficient = -4.0 / 49.0;
+    return reflected ? -coefficient : coefficient;
   }
 
-  if (row + 4 >= point_count) {
-    return -d42_derivative_coefficient(
-        point_count, point_count - 1 - row, point_count - 1 - column);
-  }
-
-  if (column + 2 == row) return 1.0 / 12.0;
-  if (column + 1 == row) return -2.0 / 3.0;
-  if (column == row + 1) return 2.0 / 3.0;
-  if (column == row + 2) return -1.0 / 12.0;
+  if (local_column + 2 == local_row) return 1.0 / 12.0;
+  if (local_column + 1 == local_row) return -2.0 / 3.0;
+  if (local_column == local_row + 1) return 2.0 / 3.0;
+  if (local_column == local_row + 2) return -1.0 / 12.0;
   return 0.0;
 }
 

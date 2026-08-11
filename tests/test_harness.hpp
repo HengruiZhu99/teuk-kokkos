@@ -67,7 +67,8 @@ inline void check_complex_near(Complex actual, Complex expected,
 #define TEUK_CONCAT(a, b) TEUK_CONCAT_INNER(a, b)
 #define TEST_CASE(name)                                                        \
   static void TEUK_CONCAT(teuk_test_, __LINE__)();                            \
-  static ::teuk::test::Register TEUK_CONCAT(teuk_register_, __LINE__)(        \
+  [[maybe_unused]] static ::teuk::test::Register                              \
+      TEUK_CONCAT(teuk_register_, __LINE__)(                                  \
       name, TEUK_CONCAT(teuk_test_, __LINE__));                               \
   static void TEUK_CONCAT(teuk_test_, __LINE__)()
 #define CHECK(expression)                                                      \
@@ -82,4 +83,3 @@ inline void check_complex_near(Complex actual, Complex expected,
   ::teuk::test::check_complex_near((actual), (expected), (tolerance),         \
                                    #actual " ~= " #expected, __FILE__,       \
                                    __LINE__)
-
