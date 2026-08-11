@@ -1,0 +1,20 @@
+Angular eigenvalue comparison for s=-2
+ell=2: correct= -4, current= -2, current-correct=+2
+ell=3: correct=-10, current= -8, current-correct=+2
+ell=4: correct=-18, current=-16, current-correct=+2
+ell=5: correct=-28, current=-26, current-correct=+2
+ell=6: correct=-40, current=-38, current-correct=+2
+ell=7: correct=-54, current=-52, current-correct=+2
+
+Nullity for ell_max=4, theta_nodes=7, s=-2
+m=-4: retained=1, nodal=7, uncontrolled_nullity=6
+m=-3: retained=2, nodal=7, uncontrolled_nullity=5
+m=-2: retained=3, nodal=7, uncontrolled_nullity=4
+m=-1: retained=3, nodal=7, uncontrolled_nullity=4
+m=+0: retained=3, nodal=7, uncontrolled_nullity=4
+m=+1: retained=3, nodal=7, uncontrolled_nullity=4
+m=+2: retained=3, nodal=7, uncontrolled_nullity=4
+m=+3: retained=2, nodal=7, uncontrolled_nullity=5
+m=+4: retained=1, nodal=7, uncontrolled_nullity=6
+
+Audit assertions passed.
