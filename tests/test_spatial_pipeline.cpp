@@ -33,7 +33,6 @@ double maximum_relative_off_band(const HostView& host,
                                  const int ell_max,
                                  const std::size_t theta_count) {
   double maximum_residual = 0.0;
-  double maximum_value = 0.0;
   std::vector<teuk::Complex> nodal(theta_count);
   for (std::size_t mode = 0; mode < registry.size(); ++mode) {
     for (std::size_t field = 0; field < teuk::point_pipeline_field_count;
@@ -42,22 +41,27 @@ double maximum_relative_off_band(const HostView& host,
           pipeline_spins[field], registry.modes()[mode], ell_max,
           static_cast<int>(theta_count));
       for (std::size_t radial = 0; radial < host.extent(2); ++radial) {
+        double line_maximum = 0.0;
         for (std::size_t theta = 0; theta < theta_count; ++theta) {
           nodal[theta] = host(mode, field, radial, theta);
-          maximum_value =
-              std::max(maximum_value,
+          line_maximum =
+              std::max(line_maximum,
                        static_cast<double>(Kokkos::abs(nodal[theta])));
         }
         const auto projected = transform.synthesize(transform.analyze(nodal));
+        double line_residual = 0.0;
         for (std::size_t theta = 0; theta < theta_count; ++theta) {
-          maximum_residual = std::max(
-              maximum_residual,
+          line_residual = std::max(
+              line_residual,
               static_cast<double>(Kokkos::abs(nodal[theta] - projected[theta])));
         }
+        maximum_residual = std::max(
+            maximum_residual,
+            line_residual / std::max(line_maximum, 1.0e-300));
       }
     }
   }
-  return maximum_residual / std::max(maximum_value, 1.0e-300);
+  return maximum_residual;
 }
 
 }  // namespace
