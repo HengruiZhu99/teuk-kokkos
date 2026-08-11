@@ -92,12 +92,31 @@ template <class Value>
 KOKKOS_INLINE_FUNCTION Value d42_first_derivative_at(
     const Value* const values, const std::size_t point_count,
     const std::size_t row, const double inverse_spacing) {
-  Value result = 0.0;
-  for (std::size_t column = 0; column < point_count; ++column) {
-    result += d42_derivative_coefficient(point_count, row, column) *
-              values[column];
+  // Keep the point kernel compact: production radial-line launches must not
+  // turn a five/six-point stencil into an O(N_R) dense-row traversal.
+  if (row < 4) {
+    Value result = 0.0;
+    for (std::size_t column = 0; column < 6; ++column) {
+      result += d42_derivative_coefficient(point_count, row, column) *
+                values[column];
+    }
+    return inverse_spacing * result;
   }
-  return inverse_spacing * result;
+  if (row + 4 >= point_count) {
+    const std::size_t reflected_row = point_count - 1 - row;
+    Value result = 0.0;
+    for (std::size_t reflected_column = 0; reflected_column < 6;
+         ++reflected_column) {
+      result -= d42_derivative_coefficient(
+                    point_count, reflected_row, reflected_column) *
+                values[point_count - 1 - reflected_column];
+    }
+    return inverse_spacing * result;
+  }
+  return inverse_spacing *
+         ((values[row - 2] - 8.0 * values[row - 1] +
+           8.0 * values[row + 1] - values[row + 2]) /
+          12.0);
 }
 
 template <class Value>
@@ -140,6 +159,30 @@ struct D42DissipationWorkspace {
   std::vector<Value> normal_product;
 };
 
+// Allocation-free point form of the compatible dissipation below.  LayoutRight
+// radial lines can pass a pointer to their first radial entry directly.
+template <class Value>
+KOKKOS_INLINE_FUNCTION Value d42_compatible_dissipation_at(
+    const Value* const values, const std::size_t point_count,
+    const std::size_t index, const double spacing, const double strength) {
+  const std::size_t first_row = index > 3 ? index - 3 : 0;
+  const std::size_t last_row =
+      index < point_count - 3 ? index : point_count - 4;
+  Value normal_product = 0.0;
+  for (std::size_t row = first_row; row <= last_row; ++row) {
+    const Value difference =
+        -values[row] + 3.0 * values[row + 1] -
+        3.0 * values[row + 2] + values[row + 3];
+    const std::size_t position = index - row;
+    const double transpose_coefficient =
+        position == 0 ? -1.0 : (position == 1 ? 3.0
+                                               : (position == 2 ? -3.0 : 1.0));
+    normal_product += transpose_coefficient * difference;
+  }
+  return -strength * normal_product /
+         (spacing * d42_norm_weight(point_count, index));
+}
+
 // Norm-compatible sixth-derivative (KO-like) dissipation reference.
 // Let A be the undivided third difference [-1,3,-3,1].  This applies
 //
@@ -179,9 +222,8 @@ void apply_d42_compatible_dissipation(
   }
 
   for (std::size_t i = 0; i < n; ++i) {
-    dissipation[i] =
-        -strength * workspace.normal_product[i] /
-        (grid.spacing() * d42_norm_weight(n, i));
+    dissipation[i] = -strength * workspace.normal_product[i] /
+                     (grid.spacing() * d42_norm_weight(n, i));
   }
 }
 
