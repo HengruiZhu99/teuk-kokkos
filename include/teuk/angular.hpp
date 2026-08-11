@@ -208,6 +208,87 @@ inline void validate_mode(const int ell, const int spin, const int m) {
          wigner_small_d(ell, m, -spin, theta);
 }
 
+// Integer Wigner 3-j symbol evaluated with the Racah factorial sum. Invalid
+// magnetic or triangle couplings are exact selection-rule zeros. This compact
+// long-double oracle is intended for the modest angular bandlimits used by the
+// readable reference path, not as a large-j special-functions replacement.
+[[nodiscard]] inline Real wigner_3j(const int j1, const int j2, const int j3,
+                                    const int m1, const int m2,
+                                    const int m3) {
+  if (j1 < 0 || j2 < 0 || j3 < 0) {
+    throw std::invalid_argument("Wigner 3-j angular momenta must be nonnegative");
+  }
+  if (m1 + m2 + m3 != 0 || std::abs(m1) > j1 || std::abs(m2) > j2 ||
+      std::abs(m3) > j3 || j3 > j1 + j2 || j3 < std::abs(j1 - j2)) {
+    return 0.0;
+  }
+
+  const long double log_triangle =
+      detail::log_factorial(j1 + j2 - j3) +
+      detail::log_factorial(j1 - j2 + j3) +
+      detail::log_factorial(-j1 + j2 + j3) -
+      detail::log_factorial(j1 + j2 + j3 + 1);
+  const long double log_magnetic_factorials =
+      detail::log_factorial(j1 + m1) + detail::log_factorial(j1 - m1) +
+      detail::log_factorial(j2 + m2) + detail::log_factorial(j2 - m2) +
+      detail::log_factorial(j3 + m3) + detail::log_factorial(j3 - m3);
+  const long double prefactor =
+      (((j1 - j2 - m3) & 1) != 0 ? -1.0L : 1.0L) *
+      std::exp(0.5L * (log_triangle + log_magnetic_factorials));
+
+  const int z_min =
+      std::max({0, j2 - j3 - m1, j1 - j3 + m2});
+  const int z_max =
+      std::min({j1 + j2 - j3, j1 - m1, j2 + m2});
+  long double sum = 0.0L;
+  for (int z = z_min; z <= z_max; ++z) {
+    const long double log_denominator =
+        detail::log_factorial(z) +
+        detail::log_factorial(j1 + j2 - j3 - z) +
+        detail::log_factorial(j1 - m1 - z) +
+        detail::log_factorial(j2 + m2 - z) +
+        detail::log_factorial(j3 - j2 + m1 + z) +
+        detail::log_factorial(j3 - j1 - m2 + z);
+    const long double term = std::exp(-log_denominator);
+    sum += (z & 1) != 0 ? -term : term;
+  }
+  return static_cast<Real>(prefactor * sum);
+}
+
+[[nodiscard]] inline bool gaunt_selection_allowed(
+    const int ell1, const int m1, const int spin1, const int ell2,
+    const int m2, const int spin2, const int ell3, const int m3,
+    const int spin3) noexcept {
+  if (ell1 < 0 || ell2 < 0 || ell3 < 0) return false;
+  if (std::abs(m1) > ell1 || std::abs(spin1) > ell1 ||
+      std::abs(m2) > ell2 || std::abs(spin2) > ell2 ||
+      std::abs(m3) > ell3 || std::abs(spin3) > ell3) {
+    return false;
+  }
+  return m3 == m1 + m2 && spin3 == spin1 + spin2 &&
+         ell3 >= std::abs(ell1 - ell2) && ell3 <= ell1 + ell2;
+}
+
+// Integral of two spin-weighted harmonics against the conjugate of a third,
+// using exactly the convention fixed in the corrected implementer reference.
+[[nodiscard]] inline Real spin_weighted_gaunt(
+    const int ell1, const int m1, const int spin1, const int ell2,
+    const int m2, const int spin2, const int ell3, const int m3,
+    const int spin3) {
+  if (!gaunt_selection_allowed(ell1, m1, spin1, ell2, m2, spin2,
+                               ell3, m3, spin3)) {
+    return 0.0;
+  }
+  const Real phase = ((m3 + spin3) & 1) != 0 ? -1.0 : 1.0;
+  const Real normalization =
+      std::sqrt(static_cast<Real>((2 * ell1 + 1) * (2 * ell2 + 1) *
+                                  (2 * ell3 + 1)) /
+                (4.0 * pi));
+  return phase * normalization *
+         wigner_3j(ell1, ell2, ell3, -spin1, -spin2, spin3) *
+         wigner_3j(ell1, ell2, ell3, m1, m2, -m3);
+}
+
 class DenseRealMatrix {
  public:
   DenseRealMatrix() = default;
@@ -356,5 +437,98 @@ class SpinWeightedTransform {
   DenseRealMatrix synthesis_;
   DenseRealMatrix analysis_;
 };
+
+inline void validate_product_metadata(const SpinWeightedTransform& left,
+                                      const SpinWeightedTransform& right,
+                                      const SpinWeightedTransform& target) {
+  if (target.spin() != left.spin() + right.spin()) {
+    throw std::invalid_argument("product target spin is not s1+s2");
+  }
+  if (target.m() != left.m() + right.m()) {
+    throw std::invalid_argument("product target mode is not m1+m2");
+  }
+}
+
+// Exact truncated modal convolution. Each returned coefficient is the full
+// spherical projection sum over the two supplied bands.
+[[nodiscard]] inline std::vector<Complex> exact_modal_product(
+    const SpinWeightedTransform& left,
+    const std::vector<Complex>& left_modal,
+    const SpinWeightedTransform& right,
+    const std::vector<Complex>& right_modal,
+    const SpinWeightedTransform& target) {
+  validate_product_metadata(left, right, target);
+  if (left_modal.size() != left.mode_count() ||
+      right_modal.size() != right.mode_count()) {
+    throw std::invalid_argument("wrong source modal vector size");
+  }
+
+  std::vector<Complex> result(target.mode_count(), Complex(0.0, 0.0));
+  for (std::size_t target_mode = 0; target_mode < target.mode_count();
+       ++target_mode) {
+    const int ell3 = target.ell_min() + static_cast<int>(target_mode);
+    for (std::size_t left_mode = 0; left_mode < left.mode_count();
+         ++left_mode) {
+      const int ell1 = left.ell_min() + static_cast<int>(left_mode);
+      for (std::size_t right_mode = 0; right_mode < right.mode_count();
+           ++right_mode) {
+        const int ell2 = right.ell_min() + static_cast<int>(right_mode);
+        const Real coefficient = spin_weighted_gaunt(
+            ell1, left.m(), left.spin(), ell2, right.m(), right.spin(), ell3,
+            target.m(), target.spin());
+        result[target_mode] +=
+            coefficient * left_modal[left_mode] * right_modal[right_mode];
+      }
+    }
+  }
+  return result;
+}
+
+// A Gauss-Legendre rule with 2N-1 >= ell1_max+ell2_max+ell3_max integrates
+// every retained triple-harmonic projection in the supplied bands. This is the
+// minimum polynomial-exact padding rule; callers may overcollocate further.
+[[nodiscard]] inline int padded_product_node_count(
+    const SpinWeightedTransform& left, const SpinWeightedTransform& right,
+    const SpinWeightedTransform& target) noexcept {
+  const int polynomial_count =
+      (left.ell_max() + right.ell_max() + target.ell_max() + 2) / 2;
+  const int storage_count = static_cast<int>(
+      std::max({left.mode_count(), right.mode_count(), target.mode_count()}));
+  return std::max(polynomial_count, storage_count);
+}
+
+// Independent nonlinear reference path: resynthesize both factors on a common
+// grid, multiply pointwise, and project into the target band. Passing zero uses
+// the exactness-based padding above; an explicit smaller count is useful only
+// for aliasing tests and diagnostics.
+[[nodiscard]] inline std::vector<Complex> collocation_product(
+    const SpinWeightedTransform& left,
+    const std::vector<Complex>& left_modal,
+    const SpinWeightedTransform& right,
+    const std::vector<Complex>& right_modal,
+    const SpinWeightedTransform& target, int node_count = 0) {
+  validate_product_metadata(left, right, target);
+  if (left_modal.size() != left.mode_count() ||
+      right_modal.size() != right.mode_count()) {
+    throw std::invalid_argument("wrong source modal vector size");
+  }
+  if (node_count == 0) {
+    node_count = padded_product_node_count(left, right, target);
+  }
+
+  const SpinWeightedTransform padded_left(left.spin(), left.m(),
+                                          left.ell_max(), node_count);
+  const SpinWeightedTransform padded_right(right.spin(), right.m(),
+                                           right.ell_max(), node_count);
+  const SpinWeightedTransform padded_target(target.spin(), target.m(),
+                                            target.ell_max(), node_count);
+  const auto left_nodal = padded_left.synthesize(left_modal);
+  const auto right_nodal = padded_right.synthesize(right_modal);
+  std::vector<Complex> product_nodal(left_nodal.size());
+  for (std::size_t node = 0; node < product_nodal.size(); ++node) {
+    product_nodal[node] = left_nodal[node] * right_nodal[node];
+  }
+  return padded_target.analyze(product_nodal);
+}
 
 }  // namespace teuk::angular

@@ -149,3 +149,96 @@ TEST_CASE("raising and lowering obey the unit-sphere adjoint sign") {
   }
   CHECK_COMPLEX_NEAR(left, -right, 2e-14);
 }
+
+TEST_CASE("integer Wigner 3-j oracle obeys exact selection rules") {
+  CHECK_NEAR(angular::wigner_3j(0, 0, 0, 0, 0, 0), 1.0, 1e-15);
+  for (int ell = 1; ell <= 7; ++ell) {
+    for (int m = -ell; m <= ell; ++m) {
+      const double expected =
+          ((ell - m) & 1) != 0 ? -1.0 / std::sqrt(2.0 * ell + 1.0)
+                               : 1.0 / std::sqrt(2.0 * ell + 1.0);
+      CHECK_NEAR(angular::wigner_3j(ell, ell, 0, m, -m, 0), expected,
+                 2e-14);
+    }
+  }
+  CHECK_NEAR(angular::wigner_3j(2, 2, 2, 1, 1, 1), 0.0, 0.0);
+  CHECK_NEAR(angular::wigner_3j(1, 1, 3, 0, 0, 0), 0.0, 0.0);
+  CHECK_NEAR(angular::wigner_3j(2, 2, 2, 3, -3, 0), 0.0, 0.0);
+}
+
+TEST_CASE("generalized Gaunt oracle enforces mode spin and triangle coupling") {
+  CHECK(angular::gaunt_selection_allowed(2, 1, -1, 3, -2, 1, 4, -1,
+                                         0));
+  CHECK(!angular::gaunt_selection_allowed(2, 1, -1, 3, -2, 1, 4, 0,
+                                          0));
+  CHECK(!angular::gaunt_selection_allowed(2, 1, -1, 3, -2, 1, 4, -1,
+                                          -1));
+  CHECK(!angular::gaunt_selection_allowed(1, 0, 0, 1, 0, 0, 3, 0, 0));
+
+  CHECK_NEAR(angular::spin_weighted_gaunt(2, 1, -1, 3, -2, 1, 4,
+                                          0, 0),
+             0.0, 0.0);
+  CHECK_NEAR(angular::spin_weighted_gaunt(1, 0, 0, 1, 0, 0, 1, 0, 0),
+             0.0, 2e-15);  // odd scalar parity
+}
+
+TEST_CASE("Y00 Gaunt coupling preserves every normalized harmonic") {
+  const double inverse_sqrt_four_pi =
+      1.0 / std::sqrt(4.0 * angular::pi);
+  for (int spin = -2; spin <= 2; ++spin) {
+    for (int ell = std::max(2, std::abs(spin)); ell <= 6; ++ell) {
+      for (int m = -ell; m <= ell; ++m) {
+        CHECK_NEAR(angular::spin_weighted_gaunt(
+                       ell, m, spin, 0, 0, 0, ell, m, spin),
+                   inverse_sqrt_four_pi, 5e-14);
+      }
+    }
+  }
+}
+
+TEST_CASE("padded spin-weighted product agrees with exact Gaunt convolution") {
+  const angular::SpinWeightedTransform left(-1, 1, 5, 7);
+  const angular::SpinWeightedTransform right(-1, 1, 5, 7);
+  const angular::SpinWeightedTransform target(-2, 2, 6, 7);
+  const std::vector<teuk::Complex> left_modal = {
+      {0.5, -0.25}, {1.0, 0.125}, {-0.75, 0.5}, {0.25, 0.75},
+      {-0.125, -0.5}};
+  const std::vector<teuk::Complex> right_modal = {
+      {-0.25, 0.5}, {0.75, -0.125}, {0.5, 0.25}, {-1.0, 0.375},
+      {0.125, 0.5}};
+
+  const auto exact = angular::exact_modal_product(
+      left, left_modal, right, right_modal, target);
+  const auto padded = angular::collocation_product(
+      left, left_modal, right, right_modal, target);
+  CHECK(angular::padded_product_node_count(left, right, target) == 9);
+  for (std::size_t i = 0; i < exact.size(); ++i) {
+    CHECK_COMPLEX_NEAR(padded[i], exact[i], 2e-11);
+  }
+}
+
+TEST_CASE("unpadded angular product exposes aliasing that padding removes") {
+  const angular::SpinWeightedTransform factor(0, 0, 4, 5);
+  const angular::SpinWeightedTransform target(0, 0, 4, 5);
+  std::vector<teuk::Complex> pure_ell_four(factor.mode_count(),
+                                          teuk::Complex(0.0, 0.0));
+  pure_ell_four[4] = teuk::Complex(1.0, 0.0);
+
+  const auto exact = angular::exact_modal_product(
+      factor, pure_ell_four, factor, pure_ell_four, target);
+  const auto unpadded = angular::collocation_product(
+      factor, pure_ell_four, factor, pure_ell_four, target, 5);
+  const auto padded = angular::collocation_product(
+      factor, pure_ell_four, factor, pure_ell_four, target);
+
+  double unpadded_error = 0.0;
+  double padded_error = 0.0;
+  for (std::size_t i = 0; i < exact.size(); ++i) {
+    unpadded_error =
+        std::max(unpadded_error, static_cast<double>(Kokkos::abs(unpadded[i] - exact[i])));
+    padded_error =
+        std::max(padded_error, static_cast<double>(Kokkos::abs(padded[i] - exact[i])));
+  }
+  CHECK(unpadded_error > 1e-3);
+  CHECK(padded_error < 2e-12);
+}

@@ -88,7 +88,31 @@ struct TeukolskyState {
   Complex P = 0.0;
   Complex Q = 0.0;
   Complex psi = 0.0;
+
+  KOKKOS_INLINE_FUNCTION TeukolskyState& operator+=(
+      const TeukolskyState& other) {
+    P += other.P;
+    Q += other.Q;
+    psi += other.psi;
+    return *this;
+  }
 };
+
+KOKKOS_INLINE_FUNCTION TeukolskyState operator+(TeukolskyState left,
+                                                 const TeukolskyState& right) {
+  left += right;
+  return left;
+}
+
+KOKKOS_INLINE_FUNCTION TeukolskyState operator*(const double scale,
+                                                 const TeukolskyState& state) {
+  return {scale * state.P, scale * state.Q, scale * state.psi};
+}
+
+KOKKOS_INLINE_FUNCTION TeukolskyState operator*(const TeukolskyState& state,
+                                                 const double scale) {
+  return scale * state;
+}
 
 KOKKOS_INLINE_FUNCTION Complex teukolsky_psi_rhs(
     const TeukolskyCoefficients& coefficients,
