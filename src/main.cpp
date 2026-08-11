@@ -349,6 +349,14 @@ int run_spatial_pipeline(const teuk::Parameters& input) {
   };
   std::cout << "backend=" << teuk::ExecutionSpace::name() << '\n'
             << "boundary_policy=zero-SAT; no incoming propagating modes\n"
+            << "source_policy="
+            << (input.allow_inconsistent_source
+                    ? "unrestricted_development_only"
+                    : "constraint_aware")
+            << '\n'
+            << "source_start_time=" << input.source_start_time << '\n'
+            << "source_constraint_tolerance="
+            << input.source_constraint_tolerance << '\n'
             << "evolution_wall_seconds=" << evolution_wall_seconds << '\n'
             << "total_wall_seconds=" << total_wall_seconds << '\n'
             << "grid_point_steps_per_second="
