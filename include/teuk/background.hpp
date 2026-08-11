@@ -17,10 +17,12 @@ struct KerrParameters {
 // The physical coefficients are mu=R*mu0, tau=R^2*tau0,
 // pi=R^2*pi0, and Psi2=R^3*psi20.
 struct KerrBackgroundPoint {
-  Complex mu0;
-  Complex tau0;
-  Complex pi0;
-  Complex psi20;
+  Complex mu0 = 0.0;
+  Complex tau0 = 0.0;
+  Complex pi0 = 0.0;
+  Complex psi20 = 0.0;
+  Complex rho0 = 0.0;
+  Complex epsilon0 = 0.0;
 };
 
 KOKKOS_INLINE_FUNCTION
@@ -51,6 +53,19 @@ KerrBackgroundPoint kerr_background_point(const KerrParameters& parameters,
                     (sqrt_two * angular_denominator_squared);
   background.pi0 = -imaginary_unit * spin * sin_theta /
                    (sqrt_two * real_pi_denominator);
+  const Complex ingoing_denominator(length2,
+                                     spin * radius * cos_theta);
+  const Complex optical_denominator =
+      angular_denominator_squared * ingoing_denominator;
+  background.rho0 =
+      -0.5 * (length4 - 2.0 * length2 * mass * radius +
+              spin * spin * radius * radius) /
+      optical_denominator;
+  background.epsilon0 =
+      0.5 *
+      Complex(length2 * mass - spin * spin * radius,
+              -spin * (length2 - mass * radius) * cos_theta) /
+      optical_denominator;
   background.psi20 = -mass /
                      (angular_denominator_squared * angular_denominator);
   return background;

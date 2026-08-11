@@ -12,6 +12,7 @@
 #include "teuk/device_rk4.hpp"
 #include "teuk/full_spatial.hpp"
 #include "teuk/pipeline_storage.hpp"
+#include "teuk/reconstruction_constraints.hpp"
 #include "teuk/source_spatial.hpp"
 #include "teuk/source_tangent_spatial.hpp"
 
@@ -72,6 +73,19 @@ enum class SharpSlot : std::size_t {
   BDDt = 4,
   CDDt = 5,
   Count = 6,
+};
+
+enum class IndependentAngularSlot : std::size_t {
+  EthPrime2G = 0,
+  EthPrime3H = 1,
+  Count = 2,
+};
+
+enum class IndependentConstraintSlot : std::size_t {
+  Psi3Bianchi = 0,
+  Psi2Bianchi = 1,
+  HllReality = 2,
+  Count = 3,
 };
 
 inline constexpr ReconstructionFullFieldOffsets compact_reconstruction_fields{
@@ -135,6 +149,16 @@ class SpatialPipeline {
         reconstruction_tangent_angular_(
             label + "_reconstruction_tangent_angular", registry.size(),
             static_cast<std::size_t>(ReconstructionAngularInput::Count),
+            radial_grid.size(), theta_nodes),
+        independent_angular_(
+            label + "_independent_angular", registry.size(),
+            static_cast<std::size_t>(
+                spatial_pipeline_detail::IndependentAngularSlot::Count),
+            radial_grid.size(), theta_nodes),
+        independent_constraints_(
+            label + "_independent_constraints", registry.size(),
+            static_cast<std::size_t>(
+                spatial_pipeline_detail::IndependentConstraintSlot::Count),
             radial_grid.size(), theta_nodes),
         source_extra_(
             label + "_source_extra", registry.size(),
@@ -244,6 +268,10 @@ class SpatialPipeline {
   [[nodiscard]] FullSpatialStateView reconstruction_angular_inputs() const {
     return reconstruction_angular_;
   }
+  [[nodiscard]] FullSpatialStateView independent_reconstruction_constraints()
+      const {
+    return independent_constraints_;
+  }
   [[nodiscard]] KerrParameters background() const { return background_; }
 
   template <class StageView, class OutputView>
@@ -295,6 +323,7 @@ class SpatialPipeline {
     evaluate_reconstruction_chain(execution, stage, output,
                                   reconstruction_radial_,
                                   reconstruction_angular_);
+    evaluate_independent_reconstruction_constraints(execution, stage, output);
     if (timing != nullptr) {
       record_timing(timing->reconstruction_seconds,
                     "profile reconstruction spatial RHS");
@@ -487,6 +516,104 @@ class SpatialPipeline {
     first_angular_.project(execution, output, fields.P, output, fields.P);
     first_angular_.project(execution, output, fields.Q, output, fields.Q);
     first_angular_.project(execution, output, fields.Psi, output, fields.Psi);
+  }
+
+  template <class StageView, class DtView>
+  void evaluate_independent_reconstruction_constraints(
+      const ExecutionSpace& execution, const StageView& stage,
+      const DtView& dt) {
+    using namespace spatial_pipeline_detail;
+    g_angular_.ethprime(
+        execution, stage, reconstruction_fields.G, dt,
+        reconstruction_fields.G, storage_.radius(), storage_.sin_theta(),
+        storage_.cos_theta(), independent_angular_,
+        static_cast<std::size_t>(IndependentAngularSlot::EthPrime2G));
+    scalar_angular_.ethprime(
+        execution, stage, reconstruction_fields.H, dt,
+        reconstruction_fields.H, storage_.radius(), storage_.sin_theta(),
+        storage_.cos_theta(), independent_angular_,
+        static_cast<std::size_t>(IndependentAngularSlot::EthPrime3H));
+
+    const auto constraints = independent_constraints_;
+    const auto angular_values = independent_angular_;
+    const auto first_scratch = first_scratch_;
+    const auto reconstruction_radial = reconstruction_radial_;
+    const auto sharp = storage_.sharp_indices();
+    const auto modes = storage_.modes();
+    const auto radius = storage_.radius();
+    const auto cos_theta = storage_.cos_theta();
+    const auto sin_theta = storage_.sin_theta();
+    const KerrParameters parameters = background_;
+    const std::size_t radial_count = storage_.radial_count();
+    const std::size_t theta_count = storage_.theta_count();
+    const std::size_t total = storage_.mode_count() * radial_count * theta_count;
+    Kokkos::parallel_for(
+        "teuk_independent_reconstruction_constraints",
+        Kokkos::RangePolicy<ExecutionSpace>(execution, 0, total),
+        KOKKOS_LAMBDA(const std::size_t flat) {
+          const std::size_t plane = radial_count * theta_count;
+          const std::size_t mode = flat / plane;
+          const std::size_t within = flat - mode * plane;
+          const std::size_t radial = within / theta_count;
+          const std::size_t theta = within - radial * theta_count;
+          const double coordinate = radius(radial);
+          const auto background = kerr_background_point(
+              parameters, coordinate, cos_theta(theta), sin_theta(theta));
+          const Complex F = stage(mode, first_fields.Psi, radial, theta);
+          const Complex G =
+              stage(mode, reconstruction_fields.G, radial, theta);
+          const Complex H =
+              stage(mode, reconstruction_fields.H, radial, theta);
+          const Complex thorn1_F = thorn_n_point(
+              F, dt(mode, first_fields.Psi, radial, theta),
+              first_scratch(
+                  mode,
+                  static_cast<std::size_t>(
+                      TeukolskyRadialScratch::RadialDerivativePsi),
+                  radial, theta),
+              1, -2, -2, modes(mode), coordinate, cos_theta(theta),
+              parameters.mass, parameters.spin,
+              parameters.compactification_length, background.epsilon0);
+          const Complex thorn2_G = thorn_n_point(
+              G, dt(mode, reconstruction_fields.G, radial, theta),
+              reconstruction_radial(mode, compact_reconstruction_fields.G,
+                                    radial, theta),
+              2, -1, -1, modes(mode), coordinate, cos_theta(theta),
+              parameters.mass, parameters.spin,
+              parameters.compactification_length, background.epsilon0);
+          const auto residuals = independent_reconstruction_constraints_point(
+              coordinate, background, F, G, H,
+              stage(mode, reconstruction_fields.Lambda, radial, theta),
+              stage(mode, reconstruction_fields.Pi, radial, theta),
+              stage(mode, reconstruction_fields.B, radial, theta),
+              stage(mode, reconstruction_fields.C, radial, theta),
+              stage(mode, reconstruction_fields.U, radial, theta),
+              Kokkos::conj(stage(sharp(mode), reconstruction_fields.U, radial,
+                                 theta)),
+              thorn1_F, thorn2_G,
+              angular_values(
+                  mode,
+                  static_cast<std::size_t>(
+                      IndependentAngularSlot::EthPrime2G),
+                  radial, theta),
+              angular_values(
+                  mode,
+                  static_cast<std::size_t>(
+                      IndependentAngularSlot::EthPrime3H),
+                  radial, theta));
+          constraints(mode,
+                      static_cast<std::size_t>(
+                          IndependentConstraintSlot::Psi3Bianchi),
+                      radial, theta) = residuals.psi3_bianchi;
+          constraints(mode,
+                      static_cast<std::size_t>(
+                          IndependentConstraintSlot::Psi2Bianchi),
+                      radial, theta) = residuals.psi2_bianchi;
+          constraints(mode,
+                      static_cast<std::size_t>(
+                          IndependentConstraintSlot::HllReality),
+                      radial, theta) = residuals.hll_reality;
+        });
   }
 
   template <class StageView, class DtView>
@@ -823,6 +950,8 @@ class SpatialPipeline {
   FullSpatialStateView linear_angular_;
   FullSpatialStateView reconstruction_angular_;
   FullSpatialStateView reconstruction_tangent_angular_;
+  FullSpatialStateView independent_angular_;
+  FullSpatialStateView independent_constraints_;
   FullSpatialStateView source_extra_;
   FullSpatialStateView sharp_work_;
   FullSpatialStateView first_scratch_;

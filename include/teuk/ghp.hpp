@@ -23,6 +23,46 @@ Complex delta_n_point(const Complex& value, const Complex& dt_value,
              (radius * dr_value + radial_falloff * value);
 }
 
+// thorn_n X = R^{-n-1} thorn(R^n X) in the regularized rotated-Kinnersley
+// convention used by the independent reconstruction Bianchi constraints.
+KOKKOS_INLINE_FUNCTION
+Complex thorn_n_point(const Complex& value, const Complex& dt_value,
+                      const Complex& dr_value, const int radial_falloff,
+                      const int spin_weight, const int boost_weight,
+                      const int azimuthal_mode, const double radius,
+                      const double cos_theta, const double mass,
+                      const double kerr_spin,
+                      const double compactification_length,
+                      const Complex& epsilon0) {
+  const Complex imaginary_unit(0.0, 1.0);
+  const double length2 =
+      compactification_length * compactification_length;
+  const double length4 = length2 * length2;
+  const double denominator =
+      length4 + kerr_spin * kerr_spin * radius * radius * cos_theta *
+                    cos_theta;
+  const double time_coefficient =
+      radius * 2.0 * mass *
+      (2.0 * mass - kerr_spin * kerr_spin * radius / length2) /
+      denominator;
+  const double radial_coefficient =
+      -0.5 *
+      (length2 - 2.0 * mass * radius +
+       kerr_spin * kerr_spin * radius * radius / length2) /
+      denominator;
+  const int p_weight = spin_weight + boost_weight;
+  const int q_weight = -spin_weight + boost_weight;
+  return time_coefficient * dt_value +
+         radial_coefficient *
+             (radius * dr_value + radial_falloff * value) +
+         radius * imaginary_unit * kerr_spin *
+             static_cast<double>(azimuthal_mode) * value / denominator -
+         radius *
+             (static_cast<double>(p_weight) * epsilon0 +
+              static_cast<double>(q_weight) * Kokkos::conj(epsilon0)) *
+             value;
+}
+
 // eth_n at one point. raised_value is R_s X in the same modal/collocation
 // representation as value. The radial-falloff label n does not appear in the
 // point formula because the angular tetrad vector has no radial derivative.

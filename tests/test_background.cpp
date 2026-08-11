@@ -18,6 +18,9 @@ TEST_CASE("Schwarzschild background coefficients have the exact limit") {
   CHECK_COMPLEX_NEAR(background.mu0, Complex(-0.25, 0.0), 1.0e-14);
   CHECK_COMPLEX_NEAR(background.tau0, Complex(0.0, 0.0), 1.0e-14);
   CHECK_COMPLEX_NEAR(background.pi0, Complex(0.0, 0.0), 1.0e-14);
+  CHECK_COMPLEX_NEAR(background.rho0, Complex(-0.1015625, 0.0), 1.0e-14);
+  CHECK_COMPLEX_NEAR(background.epsilon0, Complex(0.0390625, 0.0),
+                     1.0e-14);
   CHECK_COMPLEX_NEAR(background.psi20, Complex(-1.25 / 64.0, 0.0),
                      1.0e-14);
 }
