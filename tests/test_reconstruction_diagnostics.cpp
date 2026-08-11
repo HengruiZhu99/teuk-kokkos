@@ -161,7 +161,7 @@ std::array<teuk::ResidualNorm, 7> field_norms(
 
 }  // namespace
 
-TEST_CASE("independent reconstruction residuals vanish for exact derivatives") {
+TEST_CASE("reconstruction transport residuals vanish for exact derivatives") {
   const auto norms = manufactured_residual_norms(17, true);
   for (const auto& field : field_norms(norms)) {
     CHECK(field.rms < 2.0e-13);

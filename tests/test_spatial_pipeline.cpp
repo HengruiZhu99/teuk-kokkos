@@ -2,6 +2,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <array>
+#include <cmath>
 #include <vector>
 
 #include "teuk/spatial_pipeline.hpp"
@@ -20,6 +22,42 @@ void count_pipeline_deep_copy(Kokkos::Tools::SpaceHandle, const char*,
 void count_pipeline_allocation(Kokkos::Tools::SpaceHandle, const char*,
                                const void*, std::uint64_t) {
   ++pipeline_allocations;
+}
+
+constexpr std::array<int, teuk::point_pipeline_field_count> pipeline_spins{
+    -2, -2, -2, -1, -2, 0, -2, -1, -1, 0, -2, -2, -2};
+
+template <class HostView>
+double maximum_relative_off_band(const HostView& host,
+                                 const teuk::ModeRegistry& registry,
+                                 const int ell_max,
+                                 const std::size_t theta_count) {
+  double maximum_residual = 0.0;
+  double maximum_value = 0.0;
+  std::vector<teuk::Complex> nodal(theta_count);
+  for (std::size_t mode = 0; mode < registry.size(); ++mode) {
+    for (std::size_t field = 0; field < teuk::point_pipeline_field_count;
+         ++field) {
+      const teuk::angular::SpinWeightedTransform transform(
+          pipeline_spins[field], registry.modes()[mode], ell_max,
+          static_cast<int>(theta_count));
+      for (std::size_t radial = 0; radial < host.extent(2); ++radial) {
+        for (std::size_t theta = 0; theta < theta_count; ++theta) {
+          nodal[theta] = host(mode, field, radial, theta);
+          maximum_value =
+              std::max(maximum_value,
+                       static_cast<double>(Kokkos::abs(nodal[theta])));
+        }
+        const auto projected = transform.synthesize(transform.analyze(nodal));
+        for (std::size_t theta = 0; theta < theta_count; ++theta) {
+          maximum_residual = std::max(
+              maximum_residual,
+              static_cast<double>(Kokkos::abs(nodal[theta] - projected[theta])));
+        }
+      }
+    }
+  }
+  return maximum_residual / std::max(maximum_value, 1.0e-300);
 }
 
 }  // namespace
@@ -99,11 +137,22 @@ TEST_CASE("composed spatial pipeline injects and scales its quadratic source") {
         const auto forcing = forcing_host(mode, radial, theta);
         maximum_forcing =
             std::max(maximum_forcing, static_cast<double>(Kokkos::abs(forcing)));
+        std::vector<teuk::Complex> forcing_line(
+            pipeline.storage().theta_count());
+        for (std::size_t angle = 0; angle < pipeline.storage().theta_count();
+             ++angle) {
+          forcing_line[angle] = forcing_host(mode, radial, angle);
+        }
+        const teuk::angular::SpinWeightedTransform forcing_transform(
+            -2, registry.modes()[mode], 3,
+            static_cast<int>(pipeline.storage().theta_count()));
+        const auto projected_forcing = forcing_transform.synthesize(
+            forcing_transform.analyze(forcing_line));
         CHECK_COMPLEX_NEAR(
             rhs_host(mode,
                      static_cast<std::size_t>(teuk::PipelineField::SecondP),
                      radial, theta),
-            forcing, 2.0e-12);
+            projected_forcing[theta], 2.0e-12);
         CHECK_COMPLEX_NEAR(
             rhs_host(mode,
                      static_cast<std::size_t>(teuk::PipelineField::SecondQ),
@@ -171,6 +220,76 @@ TEST_CASE("composed spatial pipeline injects and scales its quadratic source") {
       }
     }
   }
+}
+
+TEST_CASE("full pipeline RHS and RK updates stay in every retained spin band") {
+  const teuk::ExecutionSpace execution;
+  const teuk::ModeRegistry registry({-4, -3, -2, -1, 0, 1, 2, 3, 4});
+  const teuk::UniformRadialGrid radial_grid(9, 0.0, 0.8);
+  constexpr int ell_max = 4;
+  constexpr std::size_t theta_count = 7;
+  teuk::SpatialPipeline pipeline(
+      execution, registry, radial_grid, ell_max,
+      static_cast<int>(theta_count),
+      teuk::KerrParameters{1.0, 0.71, 1.4}, 0.09, 0.003);
+
+  Kokkos::View<teuk::Complex****, Kokkos::LayoutRight, Kokkos::HostSpace>
+      initial("bandlimited_pipeline_initial", registry.size(),
+              teuk::point_pipeline_field_count, radial_grid.size(),
+              theta_count);
+  for (std::size_t mode = 0; mode < registry.size(); ++mode) {
+    for (std::size_t field = 0; field < teuk::point_pipeline_field_count;
+         ++field) {
+      const teuk::angular::SpinWeightedTransform transform(
+          pipeline_spins[field], registry.modes()[mode], ell_max,
+          static_cast<int>(theta_count));
+      for (std::size_t radial = 0; radial < radial_grid.size(); ++radial) {
+        std::vector<teuk::Complex> modal(transform.mode_count());
+        for (std::size_t ell = 0; ell < modal.size(); ++ell) {
+          const double seed = 1.0 + 0.07 * static_cast<double>(mode) +
+                              0.03 * static_cast<double>(field) +
+                              0.02 * static_cast<double>(radial) +
+                              0.01 * static_cast<double>(ell);
+          modal[ell] = teuk::Complex(2.0e-6 * seed, -1.0e-6 * seed);
+        }
+        const auto nodal = transform.synthesize(modal);
+        for (std::size_t theta = 0; theta < theta_count; ++theta) {
+          initial(mode, field, radial, theta) = nodal[theta];
+        }
+      }
+    }
+  }
+  Kokkos::deep_copy(execution, pipeline.storage().state(), initial);
+  pipeline.evaluate_rhs(execution, pipeline.storage().state(),
+                        pipeline.storage().rhs());
+  execution.fence("evaluate bandlimited pipeline RHS");
+  const auto host_rhs = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, pipeline.storage().rhs());
+  CHECK(maximum_relative_off_band(host_rhs, registry, ell_max, theta_count) <
+        2.0e-12);
+
+  teuk::FieldView stage("bandlimited_pipeline_stage", registry.size(),
+                        teuk::point_pipeline_field_count, radial_grid.size(),
+                        theta_count);
+  const auto state = pipeline.storage().state();
+  const auto rhs = pipeline.storage().rhs();
+  Kokkos::parallel_for(
+      "form_one_bandlimited_rk_stage", pipeline.storage().value_count(),
+      KOKKOS_LAMBDA(const std::size_t i) {
+        stage.data()[i] = state.data()[i] + 1.0e-4 * rhs.data()[i];
+      });
+  execution.fence("form one bandlimited RK stage");
+  const auto host_stage =
+      Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{}, stage);
+  CHECK(maximum_relative_off_band(host_stage, registry, ell_max, theta_count) <
+        2.0e-12);
+
+  pipeline.step(execution, 0.0, 1.0e-4);
+  execution.fence("advance one bandlimited RK step");
+  const auto host_advanced = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, pipeline.storage().state());
+  CHECK(maximum_relative_off_band(host_advanced, registry, ell_max,
+                                  theta_count) < 3.0e-12);
 }
 
 TEST_CASE("composed spatial pipeline rejects an unpadded nonlinear grid") {

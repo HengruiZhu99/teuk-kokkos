@@ -47,10 +47,11 @@ Complex reconstruction_delta_lhs_point(
              (radius * radial_derivative + radial_falloff * value);
 }
 
-// Independently form L_X-R_X for the seven equations Delta_n X=R_X.
-// The right sides are deliberately repeated here rather than obtained from
-// reconstruction_delta_rhs: otherwise a sign or coefficient error in the
-// evolution path would cancel identically in its own diagnostic.
+// Form the strong-form transport-equation consistency residual L_X-R_X for
+// each equation Delta_n X=R_X. The right sides are deliberately repeated here
+// rather than obtained from reconstruction_delta_rhs, so this can catch an
+// implementation mismatch. These are not the independent Bianchi/reality
+// constraints of the reconstruction formalism.
 KOKKOS_INLINE_FUNCTION
 ReconstructionResiduals reconstruction_residuals_point(
     const double radius, const double mass,

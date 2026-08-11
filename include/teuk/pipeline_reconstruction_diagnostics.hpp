@@ -14,13 +14,14 @@
 
 namespace teuk {
 
-// Device reduction of the seven independent reconstruction equation
+// Device reduction of the seven strong-form transport-equation consistency
 // residuals. SpatialPipeline::evaluate_rhs must have been called for the same
 // state immediately before sampling so its stage-local radial and angular
-// diagnostic inputs correspond to the reported RHS.
-class PipelineReconstructionDiagnostics {
+// inputs correspond to the reported RHS. These are implementation checks, not
+// independent Bianchi/reality constraints.
+class PipelineTransportEquationDiagnostics {
  public:
-  PipelineReconstructionDiagnostics(
+  PipelineTransportEquationDiagnostics(
       const std::size_t mode_count, const std::size_t radial_count,
       const std::size_t theta_count,
       const std::string& label = "pipeline_reconstruction_residual")
@@ -199,5 +200,10 @@ class PipelineReconstructionDiagnostics {
   Kokkos::View<double*, Kokkos::HostSpace> host_max_squared_;
   Kokkos::View<int*, Kokkos::HostSpace> host_finite_;
 };
+
+// Compatibility alias for callers predating the independent-constraint audit.
+// New code should use the explicit transport-equation name above.
+using PipelineReconstructionDiagnostics =
+    PipelineTransportEquationDiagnostics;
 
 }  // namespace teuk

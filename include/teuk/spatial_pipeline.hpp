@@ -116,6 +116,8 @@ class SpatialPipeline {
                     radial_grid.size(), background),
         c_angular_(execution, registry, -1, 1, ell_max, theta_nodes,
                    radial_grid.size(), background),
+        scalar_angular_(execution, registry, 0, 0, ell_max, theta_nodes,
+                        radial_grid.size(), background),
         b_sharp_angular_(execution, registry, 2, 0, ell_max, theta_nodes,
                          radial_grid.size(), background),
         c_sharp_angular_(execution, registry, 1, 1, ell_max, theta_nodes,
@@ -283,6 +285,8 @@ class SpatialPipeline {
         first_scratch_, output, dissipation_,
         spatial_pipeline_detail::first_fields,
         spatial_pipeline_detail::first_fields);
+    project_teukolsky_rhs(execution, output,
+                          spatial_pipeline_detail::first_fields);
     if (timing != nullptr) {
       record_timing(timing->first_linear_seconds,
                     "profile first linear spatial RHS");
@@ -312,6 +316,8 @@ class SpatialPipeline {
         first_tangent_scratch_, tangent_rhs_, dissipation_,
         spatial_pipeline_detail::first_fields,
         spatial_pipeline_detail::first_fields);
+    project_teukolsky_rhs(execution, tangent_rhs_,
+                          spatial_pipeline_detail::first_fields);
     evaluate_reconstruction_chain(execution, output, tangent_rhs_,
                                   reconstruction_tangent_radial_,
                                   reconstruction_tangent_angular_);
@@ -349,6 +355,8 @@ class SpatialPipeline {
         second_scratch_, output, dissipation_,
         spatial_pipeline_detail::second_fields,
         spatial_pipeline_detail::second_fields);
+    project_teukolsky_rhs(execution, output,
+                          spatial_pipeline_detail::second_fields);
     if (timing != nullptr) {
       record_timing(timing->second_linear_seconds,
                     "profile second linear spatial RHS");
@@ -410,6 +418,10 @@ class SpatialPipeline {
         storage_.sharp_indices(), stage, psi4, eth1_f, radial_derivatives,
         output, reconstruction_fields, compact_reconstruction_fields,
         reconstruction_fields);
+    g_angular_.project(execution, output, reconstruction_fields.G, output,
+                       reconstruction_fields.G);
+    first_angular_.project(execution, output, reconstruction_fields.Lambda,
+                           output, reconstruction_fields.Lambda);
 
     g_angular_.eth(
         execution, stage, static_cast<std::size_t>(PipelineField::G), output,
@@ -425,6 +437,14 @@ class SpatialPipeline {
         storage_.sharp_indices(), stage, psi4, eth2_g, radial_derivatives,
         output, reconstruction_fields, compact_reconstruction_fields,
         reconstruction_fields);
+    scalar_angular_.project(execution, output, reconstruction_fields.H,
+                            output, reconstruction_fields.H);
+    b_angular_.project(execution, output, reconstruction_fields.B, output,
+                       reconstruction_fields.B);
+    pi_angular_.project(execution, output, reconstruction_fields.Pi, output,
+                        reconstruction_fields.Pi);
+    c_angular_.project(execution, output, reconstruction_fields.C, output,
+                       reconstruction_fields.C);
 
     c_angular_.eth(
         execution, stage, static_cast<std::size_t>(PipelineField::C), output,
@@ -456,6 +476,17 @@ class SpatialPipeline {
         storage_.sharp_indices(), stage, psi4, angular_values,
         radial_derivatives, output, reconstruction_fields,
         compact_reconstruction_fields, reconstruction_fields);
+    scalar_angular_.project(execution, output, reconstruction_fields.U,
+                            output, reconstruction_fields.U);
+  }
+
+  template <class OutputView>
+  void project_teukolsky_rhs(
+      const ExecutionSpace& execution, const OutputView& output,
+      const TeukolskyFullFieldOffsets& fields) {
+    first_angular_.project(execution, output, fields.P, output, fields.P);
+    first_angular_.project(execution, output, fields.Q, output, fields.Q);
+    first_angular_.project(execution, output, fields.Psi, output, fields.Psi);
   }
 
   template <class StageView, class DtView>
@@ -785,6 +816,7 @@ class SpatialPipeline {
   SignedModeAngularCoordinator<> b_angular_;
   SignedModeAngularCoordinator<> pi_angular_;
   SignedModeAngularCoordinator<> c_angular_;
+  SignedModeAngularCoordinator<> scalar_angular_;
   SignedModeAngularCoordinator<> b_sharp_angular_;
   SignedModeAngularCoordinator<> c_sharp_angular_;
   SignedModeAngularCoordinator<> t_angular_;
