@@ -189,6 +189,42 @@ TEST_CASE("Schwarzschild scri pure Y22 sees the separated angular eigenvalue") {
   }
 }
 
+TEST_CASE("Kerr-coefficient modal projection converges independently in theta nodes") {
+  constexpr int spin = -2;
+  constexpr int m = 2;
+  constexpr int ell_max = 6;
+  const auto coefficients = [](const int nodes) {
+    const angular::SpinWeightedTransform transform(spin, m, ell_max, nodes);
+    std::vector<teuk::Complex> nodal(transform.grid().size());
+    for (std::size_t node = 0; node < nodal.size(); ++node) {
+      const double theta = transform.grid().theta(node);
+      const double cosine = std::cos(theta);
+      const double kerr_coefficient =
+          1.0 / (1.0 + 0.47 * cosine + 0.21 * cosine * cosine);
+      nodal[node] =
+          kerr_coefficient *
+          angular::spin_weighted_harmonic_theta(2, m, spin, theta);
+    }
+    return transform.analyze(nodal);
+  };
+  const auto reference = coefficients(64);
+  const auto error = [&](const int nodes) {
+    const auto actual = coefficients(nodes);
+    double squared = 0.0;
+    for (std::size_t mode = 0; mode < actual.size(); ++mode) {
+      const double difference = Kokkos::abs(actual[mode] - reference[mode]);
+      squared += difference * difference;
+    }
+    return std::sqrt(squared);
+  };
+  const double coarse = error(7);
+  const double medium = error(10);
+  const double fine = error(14);
+  CHECK(coarse > medium);
+  CHECK(medium > fine);
+  CHECK(fine < 1.0e-9);
+}
+
 TEST_CASE("raising and lowering obey the unit-sphere adjoint sign") {
   const angular::SpinWeightedTransform spin_minus_one(-1, 2, 5, 9);
   const angular::SpinWeightedTransform spin_zero(0, 2, 5, 9);

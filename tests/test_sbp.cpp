@@ -22,6 +22,11 @@ struct SbpErrors {
   double interior;
 };
 
+struct DissipativeConstraintSourceNorm {
+  double maximum;
+  double sbp_l2;
+};
+
 SbpErrors sbp_errors(const std::size_t point_count) {
   const teuk::UniformRadialGrid grid(point_count, 0.0, 1.2);
   std::vector<double> values(point_count);
@@ -41,6 +46,43 @@ SbpErrors sbp_errors(const std::size_t point_count) {
     }
   }
   return errors;
+}
+
+DissipativeConstraintSourceNorm dissipative_constraint_source_norm(
+    const std::size_t point_count) {
+  const teuk::UniformRadialGrid grid(point_count, 0.0, 1.0);
+  std::vector<double> psi(point_count);
+  std::vector<double> q(point_count);
+  std::vector<double> dissipation_psi(point_count);
+  std::vector<double> dissipation_q(point_count);
+  std::vector<double> derivative_dissipation_psi(point_count);
+  teuk::D42DissipationWorkspace<double> psi_workspace(point_count);
+  teuk::D42DissipationWorkspace<double> q_workspace(point_count);
+  for (std::size_t i = 0; i < point_count; ++i) {
+    psi[i] = sbp_smooth_value(grid.coordinate(i));
+  }
+  // Start from a discretely exact reduction constraint Q=D_R psi.  The only
+  // source below is therefore the commutator introduced by independently
+  // dissipating Q and psi.
+  teuk::d42_first_derivative(grid, psi, q);
+  constexpr double strength = 0.03;
+  teuk::apply_d42_compatible_dissipation(
+      grid, psi, strength, psi_workspace, dissipation_psi);
+  teuk::apply_d42_compatible_dissipation(
+      grid, q, strength, q_workspace, dissipation_q);
+  teuk::d42_first_derivative(
+      grid, dissipation_psi, derivative_dissipation_psi);
+
+  DissipativeConstraintSourceNorm norm{0.0, 0.0};
+  for (std::size_t i = 0; i < point_count; ++i) {
+    const double source =
+        dissipation_q[i] - derivative_dissipation_psi[i];
+    norm.maximum = std::max(norm.maximum, std::abs(source));
+    norm.sbp_l2 += grid.spacing() *
+                   teuk::d42_norm_weight(point_count, i) * source * source;
+  }
+  norm.sbp_l2 = std::sqrt(norm.sbp_l2);
+  return norm;
 }
 
 }  // namespace
@@ -146,6 +188,22 @@ TEST_CASE("D4-2 compatible dissipation annihilates quadratic data") {
   teuk::apply_d42_compatible_dissipation(
       grid, values, 0.2, workspace, dissipation);
   for (const double value : dissipation) CHECK(std::abs(value) < 2.0e-11);
+}
+
+TEST_CASE("compatible dissipation adds the documented reduction-constraint source") {
+  const auto coarse = dissipative_constraint_source_norm(33);
+  const auto medium = dissipative_constraint_source_norm(65);
+  const auto fine = dissipative_constraint_source_norm(129);
+
+  // With dissipation, C_Q,t=-gamma C_Q+D(Q)-D_R D(psi).  The commutator is
+  // nonzero only in the D4-2 boundary closure for a smooth, discretely
+  // constraint-satisfying field.  It is first order pointwise there and
+  // consequently order 3/2 in the SBP L2 norm.
+  CHECK(coarse.maximum > 1.0e-3);
+  CHECK(coarse.maximum / medium.maximum > 1.9);
+  CHECK(medium.maximum / fine.maximum > 1.9);
+  CHECK(coarse.sbp_l2 / medium.sbp_l2 > 2.6);
+  CHECK(medium.sbp_l2 / fine.sbp_l2 > 2.6);
 }
 
 TEST_CASE("D4-2 point derivative executes through active Kokkos space") {
