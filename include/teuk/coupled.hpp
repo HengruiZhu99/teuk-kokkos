@@ -103,6 +103,19 @@ struct PointPipelineDiagnostics {
   Complex forcing = 0.0;
 };
 
+inline PointPipelineState make_point_pipeline_seed(const double amplitude) {
+  PointPipelineState state;
+  state.first.P = amplitude * Complex(0.8, -0.2);
+  state.first.Q = 0.0;
+  state.first.psi = amplitude * Complex(0.3, 0.4);
+  state.reconstruction =
+      amplitude * ReconstructionState{
+                      {0.12, -0.04}, {-0.08, 0.03}, {0.05, 0.07},
+                      {-0.02, 0.09}, {0.04, -0.06}, {0.03, 0.02},
+                      {-0.07, -0.01}};
+  return state;
+}
+
 namespace detail {
 
 inline Complex harmonic_ratio(const int ell, const int m,
@@ -368,4 +381,3 @@ inline PointPipelineState evaluate_point_pipeline_rhs(
 }
 
 }  // namespace teuk
-

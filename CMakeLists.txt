@@ -38,6 +38,11 @@ endif()
 add_executable(teuk_solver src/main.cpp)
 target_link_libraries(teuk_solver PRIVATE teuk)
 
+foreach(example IN ITEMS linear_gaussian second_order_mode_coupling near_extremal)
+  add_executable(teuk_example_${example} examples/${example}.cpp)
+  target_link_libraries(teuk_example_${example} PRIVATE teuk)
+endforeach()
+
 if(BUILD_TESTING)
   file(GLOB TEUK_TEST_SOURCES CONFIGURE_DEPENDS tests/test_*.cpp)
   add_executable(teuk_tests ${TEUK_TEST_SOURCES})

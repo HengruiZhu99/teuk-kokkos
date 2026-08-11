@@ -8,16 +8,7 @@
 namespace {
 
 teuk::PointPipelineState initial_state(const double amplitude) {
-  teuk::PointPipelineState state;
-  state.first.P = amplitude * teuk::Complex(0.8, -0.2);
-  state.first.Q = 0.0;
-  state.first.psi = amplitude * teuk::Complex(0.3, 0.4);
-  state.reconstruction =
-      amplitude * teuk::ReconstructionState{
-                      {0.12, -0.04}, {-0.08, 0.03}, {0.05, 0.07},
-                      {-0.02, 0.09}, {0.04, -0.06}, {0.03, 0.02},
-                      {-0.07, -0.01}};
-  return state;
+  return teuk::make_point_pipeline_seed(amplitude);
 }
 
 teuk::PointPipelineParameters parameters() {

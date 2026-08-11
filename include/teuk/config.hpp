@@ -19,6 +19,7 @@ struct Parameters {
   double final_time = 1.0;
   double reduction_damping = 0.1;
   double dissipation = 0.01;
+  int steps = 100;
   std::vector<int> modes{-2, 2};
 };
 
@@ -57,6 +58,7 @@ inline void apply_key_value(Parameters& parameters, std::string_view argument) {
   else if (key == "final_time") parameters.final_time = parse_double(value, "final_time");
   else if (key == "gamma_q") parameters.reduction_damping = parse_double(value, "gamma_q");
   else if (key == "dissipation") parameters.dissipation = parse_double(value, "dissipation");
+  else if (key == "steps") parameters.steps = parse_int(value, "steps");
   else throw std::invalid_argument(std::string("unknown parameter: ") + std::string(key));
 }
 
@@ -70,6 +72,7 @@ inline void validate(const Parameters& parameters) {
   if (parameters.theta_points < 4) throw std::invalid_argument("ntheta must be at least 4");
   if (parameters.cfl <= 0.0 || parameters.final_time < 0.0)
     throw std::invalid_argument("cfl must be positive and final_time nonnegative");
+  if (parameters.steps <= 0) throw std::invalid_argument("steps must be positive");
 }
 
 }  // namespace teuk
