@@ -99,42 +99,54 @@ class ReconstructionRadialLines {
   ReconstructionRadialStateView radial_derivatives_;
 };
 
-// Evaluate all seven reconstruction time derivatives at one fixed theta.
-// Angular inputs are stage-local values prepared by the angular subsystem.
-// radial_derivatives() is retained after the call and can be passed directly
-// to reconstruction residual diagnostics; callers that do not need it may
-// simply ignore the view.
-inline void evaluate_sbp_reconstruction_radial_lines_rhs(
-    ReconstructionRadialLines& lines, const KerrParameters& parameters,
-    const double theta, const ReconstructionAngularInputView& angular) {
+// Allocation-free core over caller-owned stage views. All launches use the
+// supplied execution-space instance, allowing a coupled RK driver to preserve
+// ordering on its own stream/queue without copying through ReconstructionRadialLines.
+template <class CallerExecutionSpace>
+inline void evaluate_sbp_reconstruction_radial_views_rhs(
+    const CallerExecutionSpace& execution, const UniformRadialGrid& grid,
+    const KerrParameters& parameters, const double theta,
+    const ReconstructionSharpIndexView& sharp_indices,
+    const ReconstructionRadialStateView& stage_state,
+    const ReconstructionRadialValueView& stage_psi4,
+    const ReconstructionAngularInputView& stage_angular,
+    const ReconstructionRadialStateView& output_rhs,
+    const ReconstructionRadialStateView& output_radial_derivatives) {
   if (!(parameters.compactification_length > 0.0)) {
     throw std::invalid_argument("compactification length must be positive");
   }
-  const std::size_t mode_count = lines.mode_count();
-  const std::size_t point_count = lines.radial_point_count();
-  if (angular.extent(0) != mode_count ||
-      angular.extent(1) !=
-          static_cast<std::size_t>(ReconstructionAngularInput::Count) ||
-      angular.extent(2) != point_count) {
+  if (grid.size() < d42_minimum_points) {
     throw std::invalid_argument(
-        "reconstruction angular input extents do not match radial lines");
+        "SBP reconstruction views require at least eight radial points");
   }
-
-  const UniformRadialGrid grid = lines.grid();
-  const double inverse_spacing = 1.0 / grid.spacing();
+  const std::size_t mode_count = stage_state.extent(0);
+  const std::size_t point_count = grid.size();
   const std::size_t field_count =
       static_cast<std::size_t>(ReconstructionField::Count);
-  const auto state = lines.state();
-  const auto radial_derivatives = lines.radial_derivatives();
-  const auto psi4 = lines.psi4();
-  const auto rhs = lines.rhs();
-  const auto sharp_indices = lines.sharp_indices();
+  if (stage_state.extent(1) != field_count ||
+      stage_state.extent(2) != point_count ||
+      stage_psi4.extent(0) != mode_count ||
+      stage_psi4.extent(1) != point_count ||
+      sharp_indices.extent(0) != mode_count ||
+      stage_angular.extent(0) != mode_count ||
+      stage_angular.extent(1) !=
+          static_cast<std::size_t>(ReconstructionAngularInput::Count) ||
+      stage_angular.extent(2) != point_count ||
+      output_rhs.extent(0) != mode_count ||
+      output_rhs.extent(1) != field_count ||
+      output_rhs.extent(2) != point_count ||
+      output_radial_derivatives.extent(0) != mode_count ||
+      output_radial_derivatives.extent(1) != field_count ||
+      output_radial_derivatives.extent(2) != point_count) {
+    throw std::invalid_argument(
+        "reconstruction stage view extents do not match the grid");
+  }
 
-  ExecutionSpace execution;
+  const double inverse_spacing = 1.0 / grid.spacing();
   const std::size_t derivative_points = mode_count * field_count * point_count;
-  const Kokkos::RangePolicy<ExecutionSpace> derivative_policy(
+  const Kokkos::RangePolicy<CallerExecutionSpace> derivative_policy(
       execution, 0,
-      static_cast<typename ExecutionSpace::size_type>(derivative_points));
+      static_cast<typename CallerExecutionSpace::size_type>(derivative_points));
   Kokkos::parallel_for(
       "teuk_sbp_reconstruction_radial_derivatives", derivative_policy,
       KOKKOS_LAMBDA(const std::size_t flat_index) {
@@ -142,14 +154,15 @@ inline void evaluate_sbp_reconstruction_radial_lines_rhs(
         const std::size_t radial = flat_index - mode_field * point_count;
         const std::size_t mode = mode_field / field_count;
         const std::size_t field = mode_field - mode * field_count;
-        radial_derivatives(mode, field, radial) = d42_first_derivative_at(
-            &state(mode, field, 0), point_count, radial, inverse_spacing);
+        output_radial_derivatives(mode, field, radial) =
+            d42_first_derivative_at(&stage_state(mode, field, 0), point_count,
+                                    radial, inverse_spacing);
       });
 
   const std::size_t total_points = mode_count * point_count;
-  const Kokkos::RangePolicy<ExecutionSpace> rhs_policy(
+  const Kokkos::RangePolicy<CallerExecutionSpace> rhs_policy(
       execution, 0,
-      static_cast<typename ExecutionSpace::size_type>(total_points));
+      static_cast<typename CallerExecutionSpace::size_type>(total_points));
   Kokkos::parallel_for(
       "teuk_sbp_reconstruction_rhs", rhs_policy,
       KOKKOS_LAMBDA(const std::size_t flat_index) {
@@ -176,70 +189,91 @@ inline void evaluate_sbp_reconstruction_radial_lines_rhs(
             static_cast<std::size_t>(ReconstructionField::U);
 
         const ReconstructionFields point_fields{
-            psi4(mode, radial),
-            state(mode, G, radial),
-            state(mode, H, radial),
-            state(mode, Lambda, radial),
-            state(mode, Pi, radial),
-            state(mode, B, radial),
-            state(mode, C, radial),
-            state(mode, U, radial),
-            Kokkos::conj(state(sharp_mode, Pi, radial)),
-            Kokkos::conj(state(sharp_mode, B, radial)),
-            Kokkos::conj(state(sharp_mode, C, radial))};
+            stage_psi4(mode, radial),
+            stage_state(mode, G, radial),
+            stage_state(mode, H, radial),
+            stage_state(mode, Lambda, radial),
+            stage_state(mode, Pi, radial),
+            stage_state(mode, B, radial),
+            stage_state(mode, C, radial),
+            stage_state(mode, U, radial),
+            Kokkos::conj(stage_state(sharp_mode, Pi, radial)),
+            Kokkos::conj(stage_state(sharp_mode, B, radial)),
+            Kokkos::conj(stage_state(sharp_mode, C, radial))};
         const ReconstructionAngularDerivatives point_angular{
-            angular(mode,
-                    static_cast<std::size_t>(
-                        ReconstructionAngularInput::Eth1F),
-                    radial),
-            angular(mode,
-                    static_cast<std::size_t>(
-                        ReconstructionAngularInput::Eth2G),
-                    radial),
-            angular(mode,
-                    static_cast<std::size_t>(
-                        ReconstructionAngularInput::Eth2C),
-                    radial),
-            angular(mode,
-                    static_cast<std::size_t>(
-                        ReconstructionAngularInput::Eth2Pi),
-                    radial),
-            angular(mode,
-                    static_cast<std::size_t>(
-                        ReconstructionAngularInput::EthPrime1BSharp),
-                    radial),
-            angular(mode,
-                    static_cast<std::size_t>(
-                        ReconstructionAngularInput::EthPrime2CSharp),
-                    radial)};
+            stage_angular(
+                mode,
+                static_cast<std::size_t>(ReconstructionAngularInput::Eth1F),
+                radial),
+            stage_angular(
+                mode,
+                static_cast<std::size_t>(ReconstructionAngularInput::Eth2G),
+                radial),
+            stage_angular(
+                mode,
+                static_cast<std::size_t>(ReconstructionAngularInput::Eth2C),
+                radial),
+            stage_angular(
+                mode,
+                static_cast<std::size_t>(ReconstructionAngularInput::Eth2Pi),
+                radial),
+            stage_angular(
+                mode,
+                static_cast<std::size_t>(
+                    ReconstructionAngularInput::EthPrime1BSharp),
+                radial),
+            stage_angular(
+                mode,
+                static_cast<std::size_t>(
+                    ReconstructionAngularInput::EthPrime2CSharp),
+                radial)};
         const ReconstructionDeltaRhs delta_rhs =
             reconstruction_delta_rhs(radius, background, point_fields,
                                      point_angular);
 
         // Preserve the transport dependency order G,Lambda,H,B,Pi,C,U.
-        rhs(mode, G, radial) = reconstruction_time_derivative(
-            point_fields.G, radial_derivatives(mode, G, radial), delta_rhs.G, 2,
-            radius, parameters.mass, parameters.compactification_length);
-        rhs(mode, Lambda, radial) = reconstruction_time_derivative(
-            point_fields.Lambda, radial_derivatives(mode, Lambda, radial),
+        output_rhs(mode, G, radial) = reconstruction_time_derivative(
+            point_fields.G, output_radial_derivatives(mode, G, radial),
+            delta_rhs.G, 2, radius, parameters.mass,
+            parameters.compactification_length);
+        output_rhs(mode, Lambda, radial) = reconstruction_time_derivative(
+            point_fields.Lambda,
+            output_radial_derivatives(mode, Lambda, radial),
             delta_rhs.Lambda, 1, radius, parameters.mass,
             parameters.compactification_length);
-        rhs(mode, H, radial) = reconstruction_time_derivative(
-            point_fields.H, radial_derivatives(mode, H, radial), delta_rhs.H, 3,
-            radius, parameters.mass, parameters.compactification_length);
-        rhs(mode, B, radial) = reconstruction_time_derivative(
-            point_fields.B, radial_derivatives(mode, B, radial), delta_rhs.B, 1,
-            radius, parameters.mass, parameters.compactification_length);
-        rhs(mode, Pi, radial) = reconstruction_time_derivative(
-            point_fields.Pi, radial_derivatives(mode, Pi, radial), delta_rhs.Pi,
-            2, radius, parameters.mass, parameters.compactification_length);
-        rhs(mode, C, radial) = reconstruction_time_derivative(
-            point_fields.C, radial_derivatives(mode, C, radial), delta_rhs.C, 2,
-            radius, parameters.mass, parameters.compactification_length);
-        rhs(mode, U, radial) = reconstruction_time_derivative(
-            point_fields.U, radial_derivatives(mode, U, radial), delta_rhs.U, 3,
-            radius, parameters.mass, parameters.compactification_length);
+        output_rhs(mode, H, radial) = reconstruction_time_derivative(
+            point_fields.H, output_radial_derivatives(mode, H, radial),
+            delta_rhs.H, 3, radius, parameters.mass,
+            parameters.compactification_length);
+        output_rhs(mode, B, radial) = reconstruction_time_derivative(
+            point_fields.B, output_radial_derivatives(mode, B, radial),
+            delta_rhs.B, 1, radius, parameters.mass,
+            parameters.compactification_length);
+        output_rhs(mode, Pi, radial) = reconstruction_time_derivative(
+            point_fields.Pi, output_radial_derivatives(mode, Pi, radial),
+            delta_rhs.Pi, 2, radius, parameters.mass,
+            parameters.compactification_length);
+        output_rhs(mode, C, radial) = reconstruction_time_derivative(
+            point_fields.C, output_radial_derivatives(mode, C, radial),
+            delta_rhs.C, 2, radius, parameters.mass,
+            parameters.compactification_length);
+        output_rhs(mode, U, radial) = reconstruction_time_derivative(
+            point_fields.U, output_radial_derivatives(mode, U, radial),
+            delta_rhs.U, 3, radius, parameters.mass,
+            parameters.compactification_length);
       });
+}
+
+// Convenience wrapper retaining the owning-container interface. The core above
+// is the path used by coupled RK stages with external views.
+inline void evaluate_sbp_reconstruction_radial_lines_rhs(
+    ReconstructionRadialLines& lines, const KerrParameters& parameters,
+    const double theta, const ReconstructionAngularInputView& angular) {
+  ExecutionSpace execution;
+  evaluate_sbp_reconstruction_radial_views_rhs(
+      execution, lines.grid(), parameters, theta, lines.sharp_indices(),
+      lines.state(), lines.psi4(), angular, lines.rhs(),
+      lines.radial_derivatives());
 }
 
 }  // namespace teuk
