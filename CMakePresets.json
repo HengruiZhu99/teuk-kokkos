@@ -1,0 +1,73 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Unix Makefiles",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "BUILD_TESTING": "ON"
+      }
+    },
+    {
+      "name": "serial",
+      "displayName": "Kokkos Serial",
+      "inherits": "base",
+      "binaryDir": "${sourceDir}/build/serial",
+      "cacheVariables": {
+        "Kokkos_ENABLE_SERIAL": "ON",
+        "Kokkos_ENABLE_OPENMP": "OFF",
+        "Kokkos_ENABLE_CUDA": "OFF",
+        "Kokkos_ENABLE_HIP": "OFF",
+        "Kokkos_ENABLE_SYCL": "OFF"
+      }
+    },
+    {
+      "name": "openmp",
+      "displayName": "Kokkos OpenMP",
+      "inherits": "base",
+      "binaryDir": "${sourceDir}/build/openmp",
+      "cacheVariables": {
+        "Kokkos_ENABLE_SERIAL": "ON",
+        "Kokkos_ENABLE_OPENMP": "ON",
+        "Kokkos_ENABLE_CUDA": "OFF",
+        "Kokkos_ENABLE_HIP": "OFF",
+        "Kokkos_ENABLE_SYCL": "OFF"
+      }
+    },
+    {
+      "name": "sycl-intel-b580",
+      "displayName": "Kokkos SYCL on Intel Arc B580",
+      "inherits": "base",
+      "binaryDir": "${sourceDir}/build/sycl-intel-b580",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "icpx",
+        "Kokkos_ENABLE_SERIAL": "ON",
+        "Kokkos_ENABLE_OPENMP": "OFF",
+        "Kokkos_ENABLE_CUDA": "OFF",
+        "Kokkos_ENABLE_HIP": "OFF",
+        "Kokkos_ENABLE_SYCL": "ON"
+      },
+      "environment": {
+        "ONEAPI_DEVICE_SELECTOR": "level_zero:gpu"
+      }
+    }
+  ],
+  "buildPresets": [
+    {"name": "serial", "configurePreset": "serial", "jobs": 2},
+    {"name": "openmp", "configurePreset": "openmp", "jobs": 2},
+    {"name": "sycl-intel-b580", "configurePreset": "sycl-intel-b580", "jobs": 2}
+  ],
+  "testPresets": [
+    {"name": "serial", "configurePreset": "serial", "output": {"outputOnFailure": true}},
+    {"name": "openmp", "configurePreset": "openmp", "output": {"outputOnFailure": true}},
+    {"name": "sycl-intel-b580", "configurePreset": "sycl-intel-b580", "output": {"outputOnFailure": true}}
+  ]
+}
+
