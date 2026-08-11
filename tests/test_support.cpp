@@ -24,12 +24,18 @@ TEST_CASE("key value parameters are strict and validated") {
   teuk::apply_key_value(parameters, "ellmax=4");
   teuk::apply_key_value(parameters, "ntheta=7");
   teuk::apply_key_value(parameters, "modes=2,-2,0");
+  teuk::apply_key_value(parameters, "seed_m=-2");
+  teuk::apply_key_value(parameters, "seed_ell=3");
+  teuk::apply_key_value(parameters, "output=test-run");
   teuk::validate(parameters);
   CHECK_NEAR(parameters.spin, 0.99, 1.0e-15);
   CHECK(parameters.radial_points == 256);
   CHECK(parameters.steps == 64);
   CHECK(parameters.ell_max == 4);
   CHECK(parameters.modes == std::vector<int>({2, -2, 0}));
+  CHECK(parameters.seed_mode == -2);
+  CHECK(parameters.seed_ell == 3);
+  CHECK(parameters.output_directory == "test-run");
 
   bool rejected = false;
   try {

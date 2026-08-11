@@ -17,6 +17,8 @@ struct Parameters {
   int radial_points = 128;
   int theta_points = 16;
   int ell_max = 6;
+  int seed_ell = 2;
+  int seed_mode = 2;
   double cfl = 0.1;
   double final_time = 1.0;
   double reduction_damping = 0.1;
@@ -26,7 +28,9 @@ struct Parameters {
   double pulse_width_fraction = 0.12;
   int steps = 100;
   int diagnostic_interval = 10;
+  int checkpoint_interval = 0;
   std::vector<int> modes{-4, -2, 0, 2, 4};
+  std::string output_directory;
 };
 
 inline double parse_double(std::string_view text, const char* key) {
@@ -78,6 +82,8 @@ inline void apply_key_value(Parameters& parameters, std::string_view argument) {
   else if (key == "nr") parameters.radial_points = parse_int(value, "nr");
   else if (key == "ntheta") parameters.theta_points = parse_int(value, "ntheta");
   else if (key == "ellmax") parameters.ell_max = parse_int(value, "ellmax");
+  else if (key == "seed_ell") parameters.seed_ell = parse_int(value, "seed_ell");
+  else if (key == "seed_m") parameters.seed_mode = parse_int(value, "seed_m");
   else if (key == "cfl") parameters.cfl = parse_double(value, "cfl");
   else if (key == "final_time") parameters.final_time = parse_double(value, "final_time");
   else if (key == "gamma_q") parameters.reduction_damping = parse_double(value, "gamma_q");
@@ -87,7 +93,9 @@ inline void apply_key_value(Parameters& parameters, std::string_view argument) {
   else if (key == "pulse_width") parameters.pulse_width_fraction = parse_double(value, "pulse_width");
   else if (key == "steps") parameters.steps = parse_int(value, "steps");
   else if (key == "diagnostic_every") parameters.diagnostic_interval = parse_int(value, "diagnostic_every");
+  else if (key == "checkpoint_every") parameters.checkpoint_interval = parse_int(value, "checkpoint_every");
   else if (key == "modes") parameters.modes = parse_modes(value);
+  else if (key == "output") parameters.output_directory = std::string(value);
   else throw std::invalid_argument(std::string("unknown parameter: ") + std::string(key));
 }
 
@@ -110,6 +118,8 @@ inline void validate(const Parameters& parameters) {
   if (parameters.steps <= 0) throw std::invalid_argument("steps must be positive");
   if (parameters.diagnostic_interval <= 0)
     throw std::invalid_argument("diagnostic_every must be positive");
+  if (parameters.checkpoint_interval < 0)
+    throw std::invalid_argument("checkpoint_every must be nonnegative");
   if (!std::isfinite(parameters.pulse_amplitude) ||
       parameters.pulse_width_fraction <= 0.0 ||
       parameters.pulse_center_fraction < 0.0 ||
@@ -130,6 +140,16 @@ inline void validate(const Parameters& parameters) {
     if (!std::binary_search(sorted_modes.begin(), sorted_modes.end(), -mode)) {
       throw std::invalid_argument("modes must be closed under m -> -m");
     }
+  }
+  if (parameters.seed_ell < std::max(2, std::abs(parameters.seed_mode)) ||
+      parameters.seed_ell > parameters.ell_max ||
+      !std::binary_search(sorted_modes.begin(), sorted_modes.end(),
+                          parameters.seed_mode)) {
+    throw std::invalid_argument("seed (ell,m) is outside the stored band");
+  }
+  if (parameters.output_directory.find_first_of("\r\n") !=
+      std::string::npos) {
+    throw std::invalid_argument("output path contains a newline");
   }
 }
 
