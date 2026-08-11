@@ -17,6 +17,7 @@ f03ce83 fix: gate second-order source on reconstruction consistency
 1aa2d70 test: add QNM and independent-constraint convergence regressions
 fbf7bd4 test: qualify angular quadrature and dissipative constraints
 920ee2c fix: persist and report reconstruction source policy
+5c2ac7a test: enforce band invariance per field and radial line
 ```
 
 All results at or before the audited commit are pre-remediation and are not
@@ -80,21 +81,21 @@ cmake --build --preset serial
 ctest --preset serial
 
 cmake --build --preset openmp
-ctest --preset openmp
+OMP_NUM_THREADS=8 ctest --preset openmp
 
 source scripts/source_oneapi_level_zero_gpu.sh
 teuk_source_oneapi_level_zero_gpu
 cmake --build --preset sycl-intel-b580
-ctest --preset sycl-intel-b580 -V
+UR_LOG_LOADER=level:info ctest --preset sycl-intel-b580
 ```
 
 Results:
 
 | Backend | C++ | symbolic | runtime |
 |---|---:|---:|---:|
-| Serial | 133/133 | 94/94 | 0.80 s total CTest |
-| OpenMP | 133/133 | 94/94 | 111.80 s total CTest, 32 threads |
-| Arc B580 SYCL | 133/133 | 94/94 | 11.33 s total CTest |
+| Serial | 133/133 | 94/94 | 0.79 s total CTest |
+| OpenMP | 133/133 | 94/94 | 0.99 s total CTest, 8 threads |
+| Arc B580 SYCL | 133/133 | 94/94 | 1.61 s total CTest |
 
 The C++ ladder includes the corrected half-factor, ordered-pair scalar oracle,
 sharp-mode tests, exact Gaunt/padded products, analytic source tangent,
