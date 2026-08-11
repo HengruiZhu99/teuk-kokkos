@@ -21,6 +21,8 @@ Evidence last updated: 2026-08-11.
 - [x] One device-resident 13-field common-stage RK4 pipeline.
 - [x] Band-limited Gaussian setup, production diagnostics, horizon derivatives
       through fourth order, and strict atomic checkpoint/restart.
+- [x] Diagnostic-time `D`/`T` RMS and maxima for every deterministic ordered
+      source pair.
 - [x] Full-pipeline fourth-order temporal refinement: ratios 16.31 and 16.16.
 - [x] Serial/OpenMP/B580 state parity and runtime tests.
 - [x] Full-grid linear, daughter-mode, and near-extremal examples.
@@ -28,7 +30,7 @@ Evidence last updated: 2026-08-11.
 
 ## Current hard evidence
 
-- C++ tests: 120/120 on Serial, OpenMP, and SYCL.
+- C++ tests: 121/121 on Serial, OpenMP, and SYCL.
 - Symbolic audit: 94/94 on all configured CTest trees.
 - Reconstruction combined residual RMS at `N_R=17,33,65`:
   `2.26466e-7`, `9.12223e-9`, `4.44894e-10` (ratios 24.83, 20.50).

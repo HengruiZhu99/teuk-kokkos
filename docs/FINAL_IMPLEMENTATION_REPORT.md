@@ -18,14 +18,15 @@ physics kernels for Serial, OpenMP, and SYCL.
 
 Production support includes a band-limited compactified Gaussian initializer,
 all-field and reduction diagnostics, per-pair source retention, horizon radial
-derivatives through fourth order, simple CSV diagnostics, strict binary
-checkpoint/restart, three full-grid examples, and backend snapshot comparison.
-No mandatory production dependency besides pinned Kokkos was added.
+derivatives through fourth order, CSV diagnostics including per-pair `D`/`T`
+source RMS and maxima, strict binary checkpoint/restart, three full-grid
+examples, and backend snapshot comparison. No mandatory production dependency
+besides pinned Kokkos was added.
 
 ## Verification
 
 - Mathematical audit: 94/94 with SymPy 1.14.0.
-- C++ suite: 120/120 on Serial, OpenMP, and Intel Arc B580 SYCL.
+- C++ suite: 121/121 on Serial, OpenMP, and Intel Arc B580 SYCL.
 - The explicit legacy `0.5` connection-factor regression passes.
 - Reconstruction residuals refine with combined ratios 24.83 and 20.50.
 - The composed nonlinear pipeline has RK4 ratios 16.31 and 16.16.

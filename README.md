@@ -98,7 +98,7 @@ angular normalization, layout, and stage semantics. See
 ## Current validation status
 
 The symbolic specification audit passes 94/94 checks and the C++ suite passes
-120/120 tests. The complete signed-mode, full-grid common-stage pipeline has
+121/121 tests. The complete signed-mode, full-grid common-stage pipeline has
 run on Kokkos Serial, OpenMP, and SYCL on an Intel Arc B580. An identical
 15,015-complex-value checkpoint differs between Serial and B580 by
 `2.69e-18` at maximum (`4.10e-16` relative maximum). CUDA and HIP are supported
@@ -120,6 +120,11 @@ overrides include:
   final_time=0.01 steps=200 diagnostic_every=20 \
   checkpoint_every=100 output=run-high-spin
 ```
+
+An output directory receives `diagnostics.csv` and `source_pairs.csv`. The
+latter records RMS and maximum contributions from both inner-source families
+`D` and `T` for every deterministic ordered pair `(m1,m2)->target` at each
+diagnostic sample.
 
 Checkpoint directories contain strict metadata plus an interleaved complex128
 state. Compare states from two backends with:

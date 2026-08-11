@@ -170,6 +170,7 @@ int run_spatial_pipeline(const teuk::Parameters& input) {
       static_cast<std::size_t>(input.theta_points));
 
   std::ofstream diagnostic_file;
+  std::ofstream source_pair_file;
   std::filesystem::path output_directory;
   if (!input.output_directory.empty()) {
     output_directory = input.output_directory;
@@ -178,6 +179,12 @@ int run_spatial_pipeline(const teuk::Parameters& input) {
     if (!diagnostic_file) {
       throw std::runtime_error("cannot open spatial diagnostic output");
     }
+    source_pair_file.open(output_directory / "source_pairs.csv");
+    if (!source_pair_file) {
+      throw std::runtime_error("cannot open spatial pair-source output");
+    }
+    source_pair_file
+        << "step,time,pair,m1,m2,target,D_rms,D_max,T_rms,T_max\n";
   }
 
   constexpr std::size_t first_psi =
@@ -235,6 +242,38 @@ int run_spatial_pipeline(const teuk::Parameters& input) {
     for (const double value : second_horizon) line << ',' << value;
     std::cout << line.str() << '\n';
     if (diagnostic_file) diagnostic_file << line.str() << '\n';
+    if (source_pair_file) {
+      const auto per_pair = Kokkos::create_mirror_view_and_copy(
+          Kokkos::HostSpace{}, pipeline.per_pair_source());
+      const double inverse_points =
+          1.0 / static_cast<double>(radial_grid.size() *
+                                    static_cast<std::size_t>(
+                                        input.theta_points));
+      for (std::size_t pair_index = 0;
+           pair_index < registry.ordered_pairs().size(); ++pair_index) {
+        std::array<double, 2> squared_norm{};
+        std::array<double, 2> maximum{};
+        for (std::size_t component = 0; component < 2; ++component) {
+          for (std::size_t radial = 0; radial < radial_grid.size(); ++radial) {
+            for (int theta = 0; theta < input.theta_points; ++theta) {
+              const double magnitude = Kokkos::abs(per_pair(
+                  pair_index, component, radial,
+                  static_cast<std::size_t>(theta)));
+              squared_norm[component] += magnitude * magnitude;
+              maximum[component] = std::max(maximum[component], magnitude);
+            }
+          }
+        }
+        const auto& pair = registry.ordered_pairs()[pair_index];
+        source_pair_file << std::setprecision(17) << step << ',' << time << ','
+                         << pair_index << ',' << pair.m1 << ',' << pair.m2
+                         << ',' << pair.target << ','
+                         << std::sqrt(squared_norm[0] * inverse_points) << ','
+                         << maximum[0] << ','
+                         << std::sqrt(squared_norm[1] * inverse_points) << ','
+                         << maximum[1] << '\n';
+      }
+    }
   };
 
   const auto total_start = std::chrono::steady_clock::now();
