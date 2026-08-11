@@ -125,6 +125,12 @@ TEST_CASE("device angular plan copies matrices once and launches without copies"
                          3e-14);
       CHECK_COMPLEX_NEAR(host_laplacian(batch, mode),
                          expected_laplacian[mode], 3e-14);
+      const int ell = plan.ell_min() + static_cast<int>(mode);
+      const double independently_expected =
+          -static_cast<double>((ell + 2) * (ell - 1));
+      CHECK_COMPLEX_NEAR(host_laplacian(batch, mode),
+                         independently_expected * host_modal(batch, mode),
+                         3e-14);
     }
   }
 }

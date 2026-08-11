@@ -148,12 +148,20 @@ inline void validate_mode(const int ell, const int spin, const int m) {
   return -static_cast<Real>((ell + spin) * (ell - spin + 1));
 }
 
-// The spin-covariant unit-sphere Laplacian is the symmetric composition
-// (L_{s+1}R_s + R_{s-1}L_s)/2. Its eigenvalue is s^2-l(l+1).
-[[nodiscard]] inline Real spin_weighted_laplacian_eigenvalue(const int ell,
-                                                             const int spin) {
+// The symmetric spin-covariant unit-sphere Laplacian is useful as a geometric
+// diagnostic, but it is not the angular operator in the Teukolsky equation.
+// Its eigenvalue is s^2-l(l+1).
+[[nodiscard]] inline Real symmetric_spin_covariant_laplacian_eigenvalue(
+    const int ell, const int spin) {
   validate_mode(ell, spin, 0);
   return static_cast<Real>(spin * spin - ell * (ell + 1));
+}
+
+// Teukolsky's angular operator is the lower-after-raise composition
+// L_{s+1} R_s, with eigenvalue -(ell-s)(ell+s+1).
+[[nodiscard]] inline Real spin_weighted_laplacian_eigenvalue(const int ell,
+                                                             const int spin) {
+  return lower_after_raise_eigenvalue(ell, spin);
 }
 
 // Wigner small-d matrix in the Condon-Shortley convention. Long-double

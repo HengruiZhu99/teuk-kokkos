@@ -3,6 +3,7 @@
 
 #include "test_harness.hpp"
 #include "teuk/angular.hpp"
+#include "teuk/teukolsky.hpp"
 
 namespace angular = teuk::angular;
 
@@ -36,7 +37,7 @@ TEST_CASE("Gauss-Legendre quadrature has deterministic symmetry and exact moment
   }
 }
 
-TEST_CASE("raising lowering and spin Laplacian factors follow fixed conventions") {
+TEST_CASE("raising lowering and Teukolsky angular factors follow conventions") {
   CHECK_NEAR(angular::raising_factor(2, -2), 2.0, 1e-15);
   CHECK_NEAR(angular::raising_factor(3, -1), std::sqrt(12.0), 1e-15);
   CHECK_NEAR(angular::lowering_factor(2, -2), 0.0, 1e-15);
@@ -54,9 +55,40 @@ TEST_CASE("raising lowering and spin Laplacian factors follow fixed conventions"
           0.5 * (angular::lower_after_raise_eigenvalue(ell, spin) +
                  angular::raise_after_lower_eigenvalue(ell, spin));
       CHECK_NEAR(symmetric,
-                 angular::spin_weighted_laplacian_eigenvalue(ell, spin),
+                 angular::symmetric_spin_covariant_laplacian_eigenvalue(
+                     ell, spin),
+                 2e-14);
+      CHECK_NEAR(angular::spin_weighted_laplacian_eigenvalue(ell, spin),
+                 angular::lower_after_raise_eigenvalue(ell, spin), 2e-14);
+    }
+  }
+}
+
+TEST_CASE("Teukolsky angular eigenvalues reject the former symmetric shift") {
+  CHECK_NEAR(angular::spin_weighted_laplacian_eigenvalue(2, -2), -4.0,
+             0.0);
+  CHECK_NEAR(angular::spin_weighted_laplacian_eigenvalue(3, -2), -10.0,
+             0.0);
+  CHECK_NEAR(angular::spin_weighted_laplacian_eigenvalue(4, -2), -18.0,
+             0.0);
+  for (int spin : {-2, -1, 1, 2}) {
+    for (int ell = std::abs(spin); ell <= std::abs(spin) + 4; ++ell) {
+      const double teukolsky =
+          angular::spin_weighted_laplacian_eigenvalue(ell, spin);
+      const double old_symmetric =
+          angular::symmetric_spin_covariant_laplacian_eigenvalue(ell, spin);
+      CHECK_NEAR(old_symmetric - teukolsky, -static_cast<double>(spin),
                  2e-14);
     }
+  }
+
+  // This is an explicit L_{s+1} R_s composition for the production spin.
+  for (int ell = 2; ell <= 7; ++ell) {
+    const double explicit_composition =
+        angular::raising_factor(ell, -2) *
+        angular::lowering_factor(ell, -1);
+    CHECK_NEAR(angular::spin_weighted_laplacian_eigenvalue(ell, -2),
+               explicit_composition, 2e-14);
   }
 }
 
@@ -128,6 +160,32 @@ TEST_CASE("modal angular operators apply exact diagonal eigenvalues") {
         angular::spin_weighted_laplacian_eigenvalue(ell, transform.spin()) *
             modal[i],
         2e-15);
+  }
+}
+
+TEST_CASE("Schwarzschild scri pure Y22 sees the separated angular eigenvalue") {
+  const angular::SpinWeightedTransform transform(-2, 2, 4, 7);
+  std::vector<teuk::Complex> modal(transform.mode_count(),
+                                   teuk::Complex(0.0, 0.0));
+  modal[0] = teuk::Complex(0.7, -0.3);
+  const auto psi = transform.synthesize(modal);
+  const auto angular_rhs = transform.synthesize(transform.laplacian(modal));
+
+  teuk::TeukolskyParameters parameters;
+  parameters.mass = 1.0;
+  parameters.spin = 0.0;
+  parameters.compactification_length = 1.3;
+  parameters.spin_weight = -2;
+  parameters.azimuthal_mode = 2;
+  for (std::size_t node = 0; node < psi.size(); ++node) {
+    const auto coefficients = teuk::teukolsky_coefficients(
+        parameters, 0.0, transform.grid().theta(node));
+    const teuk::TeukolskyState state{teuk::Complex(0.0, 0.0),
+                                     teuk::Complex(0.0, 0.0), psi[node]};
+    const auto p_rhs = teuk::teukolsky_p_rhs(
+        coefficients, state, teuk::Complex(0.0, 0.0), angular_rhs[node],
+        teuk::Complex(0.0, 0.0));
+    CHECK_COMPLEX_NEAR(p_rhs, -4.0 * psi[node], 3e-14);
   }
 }
 
