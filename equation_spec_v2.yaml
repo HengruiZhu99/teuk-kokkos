@@ -1,0 +1,246 @@
+specification:
+  name: corrected_second_order_kerr_teukolsky
+  version: 2.0.0
+  date: 2026-08-11
+  purpose: Machine-readable transcription of the corrected equations and conventions required for a performance-portable
+    second-order Kerr Teukolsky solver.
+  legacy_reference:
+    repository: JLRipley314/teuk-fortran-2020
+    audited_commit: 0a12faef3461f04ef71c8d42517eaaba512e34aa
+    role: regression reference only, not source of truth
+  primary_references:
+  - arxiv: '2008.11770'
+    title: 'Second Order Perturbations of Kerr Black Holes: Reconstruction of the Metric'
+  - arxiv: '2010.00162'
+    title: Numerical computation of second order vacuum perturbations of Kerr black holes
+  triple_check:
+    route_I: General type-D second-order NP/GHP derivation from arXiv:2008.11770 Eqs. (B14)-(B17)
+    route_II: Outgoing-radiation-gauge/tetrad specialization from arXiv:2010.00162 Eqs. (B29)-(B36)
+    route_III: Independent rho^(1) elimination using arXiv:2010.00162 Eqs. (B19) and (B31)
+    agreement: all three routes agree
+conventions:
+  signature: paper convention; preserve exactly and document in code
+  coordinates:
+    names:
+    - T
+    - R
+    - theta
+    - phi
+    compactification: r = L^2 / R
+    scri: R = 0
+    outer_horizon: R_H = L^2/r_+
+    fourier: X(T,R,theta,phi)=sum_m X_m(T,R,theta) exp(i m phi)
+  perturbation_order:
+    first: superscript (1)
+    second: superscript (2)
+  conjugate_mode:
+    notation: X_m^sharp
+    definition: X_m^sharp = conjugate(X_{-m})
+  internal_units:
+    recommendation: M=1 internally; convert explicitly at input/output
+weights_and_falloffs:
+  fields:
+    Psi4_1:
+      spin: -2
+      boost: -2
+      falloff: 1
+      rescaled: F
+    Psi3_1:
+      spin: -1
+      boost: -1
+      falloff: 2
+      rescaled: G
+    Psi2_1:
+      spin: 0
+      boost: 0
+      falloff: 3
+      rescaled: H
+    lambda_1:
+      spin: -2
+      boost: -1
+      falloff: 1
+      rescaled: Lambda
+    pi_1:
+      spin: -1
+      boost: 0
+      falloff: 2
+      rescaled: Pi
+    h_barm_barm:
+      spin: -2
+      boost: 0
+      falloff: 1
+      rescaled: B
+    h_l_barm:
+      spin: -1
+      boost: 1
+      falloff: 2
+      rescaled: C
+    mu_h_ll:
+      spin: 0
+      boost: 1
+      falloff: 3
+      rescaled: U
+  backgrounds:
+    mu:
+      falloff: 1
+      rescaled: mu0
+    tau:
+      falloff: 2
+      rescaled: tau0
+    pi:
+      falloff: 2
+      rescaled: pi0
+    Psi2_0:
+      falloff: 3
+      rescaled: psi20
+  definitions:
+  - Psi4^(1) = R F
+  - Psi3^(1) = R^2 G
+  - Psi2^(1) = R^3 H
+  - lambda^(1) = R Lambda
+  - pi^(1) = R^2 Pi
+  - h_barm_barm = R B
+  - h_l_barm = R^2 C
+  - mu h_ll = R^3 U
+  - mu = R mu0
+  - tau = R^2 tau0
+  - pi = R^2 pi0
+background:
+  y: cos(theta)
+  mu0: 1/(-L^2 + i a R cos(theta))
+  tau0: i a sin(theta)/(sqrt(2) (L^2-i a R cos(theta))^2)
+  pi0: -i a sin(theta)/(sqrt(2) (L^4+a^2 R^2 cos(theta)^2))
+  psi20: -M/(L^2-i a R cos(theta))^3
+  identity: Delta mu = -mu^2
+rescaled_operators:
+  Delta_n:
+    definition: Delta_n X = R^(-n) Delta(R^n X)
+    coordinate: (2+4 M R/L^2) d_T X + (R/L^2)(R d_R X+n X)
+  eth_n:
+    definition: eth_n X = R^(-(n+1)) eth(R^n X)
+    coordinate: '[-i a sin(theta) d_T X + Raise_s X]/[sqrt(2)(L^2-i a R cos(theta))] - i p a R sin(theta) X/[sqrt(2)(L^2-i
+      a R cos(theta))^2], p=s+b'
+  ethprime_n:
+    definition: ethprime_n X = R^(-(n+1)) ethprime(R^n X)
+    coordinate: '[i a sin(theta) d_T X + Lower_s X]/[sqrt(2)(L^2+i a R cos(theta))] + i q a R sin(theta) X/[sqrt(2)(L^2+i
+      a R cos(theta))^2], q=-s+b'
+  spin_harmonic_actions:
+    raise: Raise_s _sY_lm = sqrt((l-s)(l+s+1)) _{s+1}Y_lm
+    lower: Lower_s _sY_lm = -sqrt((l+s)(l-s+1)) _{s-1}Y_lm
+continuum_second_order:
+  teukolsky_equation: T Psi4^(2) = S
+  outer_source: S = (Delta+4 mu+bar(mu)) s_d + (ethprime+4 pi-bar(tau)) s_t
+  s_d: "1/2 h_ll (Delta+mu) Psi4^(1)\n+ Psi4^(1) [ 1/2(eth+bar(pi)+2 tau)h_l_barm\n             +(Delta-mu+bar(mu))h_ll\n\
+    \             -1/2(ethprime-5 pi-4 bar(tau))h_lm ]\n-1/2 Psi3^(1) [ (eth+bar(pi)+tau)h_barm_barm\n         \
+    \       +(Delta-2 mu+bar(mu))h_l_barm ]\n-(h_l_barm Delta-1/2 h_barm_barm eth-4 pi^(1))Psi3^(1)\n-3 lambda^(1)\
+    \ Psi2^(1)"
+  s_t: "-h_lm(Delta+mu+2 bar(mu))Psi4^(1)\n+1/2 h_mm ethprime Psi4^(1)\n+Psi4^(1)[bar(pi^(1))-Delta h_lm\n     \
+    \     +(ethprime-1/2 pi-1/2 bar(tau))h_mm]"
+  critical_correction:
+    correct: Psi4^(1) * 1/2 * (eth+bar(pi)+2 tau) h_l_barm
+    legacy: 1/2 Psi4 eth(h_l_barm) + 1 Psi4(bar(pi)+2 tau)h_l_barm
+    defect: +1/2 Psi4(bar(pi)+2 tau)h_l_barm
+compact_ordered_pair_source:
+  pair_rule: m_target = m1 + m2; sum all ordered pairs
+  D_12: "1/2 U1(Delta_1 F2/mu0 + R F2)\n+F1[1/2 R eth_2 C2\n    +1/2 R^2(bar(pi0)+2 tau0)C2\n    +Delta_3 U2/mu0\
+    \ + R U2^sharp\n    -1/2 R ethprime_2 C2^sharp\n    +1/2 R^2(5 pi0+4 bar(tau0))C2^sharp]\n-1/2 G1[R eth_1 B2\
+    \ + R^2(bar(pi0)+tau0)B2\n         +R Delta_2 C2 + R^2(-2 mu0+bar(mu0))C2]\n-R C1 Delta_2 G2 +1/2 R B1 eth_2\
+    \ G2\n+4 R Pi1 G2 -3 R Lambda1 H2"
+  T_12: "-C1^sharp[Delta_1 F2+R(mu0+2 bar(mu0))F2]\n+1/2 B1^sharp ethprime_1 F2\n+F1[Pi2^sharp-Delta_2 C2^sharp+ethprime_1\
+    \ B2^sharp\n    -1/2 R(pi0+bar(tau0))B2^sharp]"
+  summed:
+    D_mt: sum_{m1+m2=mt} D_12
+    T_mt: sum_{m1+m2=mt} T_12
+  S_over_R3: 'Delta_3 D_mt + R(4 mu0+bar(mu0))D_mt
+
+    +R ethprime_3 T_mt + R^2(4 pi0-bar(tau0))T_mt'
+  coordinate_forcing: 2(L^4+a^2 R^2 cos(theta)^2) * S_over_R3
+metric_reconstruction_physical:
+  equations:
+  - -(Delta+4mu)Psi3^(1)+(eth-tau)Psi4^(1)=0
+  - -(Delta+mu+bar(mu))lambda^(1)-Psi4^(1)=0
+  - -(Delta+3mu)Psi2^(1)+(eth-2tau)Psi3^(1)=0
+  - -(Delta-mu+bar(mu))h_barm_barm-2lambda^(1)=0
+  - -Delta pi^(1)-Psi3^(1)-(bar(pi)+tau)lambda^(1)+1/2 mu(bar(pi)+tau)h_barm_barm=0
+  - -(Delta+bar(mu))h_l_barm-2pi^(1)-tau h_barm_barm=0
+  - -(Delta+bar(mu))(mu h_ll)-mu(eth+bar(pi)+2tau)h_l_barm-2Psi2^(1) -pi(ethprime-pi)h_mm+(mu ethprime-3mu pi+2bar(mu)pi-2mu
+    bar(tau))h_lm -2(eth+bar(pi))pi^(1)-2pi bar(pi^(1))=0
+metric_reconstruction_rescaled:
+  equations:
+    Delta_2_G: -4 R mu0 G + eth_1 F - R tau0 F
+    Delta_1_Lambda: -R(mu0+bar(mu0))Lambda-F
+    Delta_3_H: -3 R mu0 H+eth_2 G-2 R tau0 G
+    Delta_1_B: R(mu0-bar(mu0))B-2 Lambda
+    Delta_2_Pi: -G-R(bar(pi0)+tau0)Lambda+1/2 R^2 mu0(bar(pi0)+tau0)B
+    Delta_2_C: -R bar(mu0)C-2Pi-R tau0 B
+    Delta_3_U: '-R bar(mu0)U-R mu0 eth_2 C-R^2 mu0(bar(pi0)+2tau0)C
+
+      -2 eth_2 Pi-2R bar(pi0)Pi-2H-2R pi0 Pi^sharp
+
+      -R pi0 ethprime_1 B^sharp+R^2 pi0^2 B^sharp
+
+      +R mu0 ethprime_2 C^sharp
+
+      +R^2(-3mu0 pi0+2bar(mu0)pi0-2mu0 bar(tau0))C^sharp'
+linear_teukolsky_reduction:
+  coefficients:
+    C: 8M(2M-a^2R/L^2)(1+2MR/L^2)-a^2 sin(theta)^2
+    K: L^2-(8M^2-a^2)R^2/L^2+4a^2MR^3/L^4
+    Hrad: R^2(L^4-2L^2MR+a^2R^2)/L^4
+    Gm: 2 i a m(1+4MR/L^2) +2[2M(-s+(2+s)2MR/L^2-3a^2R^2/L^4)-a^2R/L^2+i s a cos(theta)]
+  variables:
+    P: C d_T psi-2K d_R psi+Gm psi
+    Q: d_R psi
+  equations:
+    psi_T: (P+2KQ-Gm psi)/C
+    P_T: 'Hrad d_R Q
+
+      +[2R(1+s-(3+s)MR/L^2+2a^2R^2/L^4)-2 i a m R^2/L^2]Q
+
+      +[-2R((1+s)M/L^2-a^2R/L^4)-2 i a m R/L^2]psi
+
+      +spin_weighted_laplacian(psi)+forcing'
+    Q_T: d_R[(P+2KQ-Gm psi)/C]-gamma(Q-d_R psi)
+angular_product_oracle:
+  coefficient: "integral(_s1Y_l1m1 _s2Y_l2m2 conjugate(_s3Y_l3m3)) =(-1)^(m3+s3)sqrt((2l1+1)(2l2+1)(2l3+1)/(4pi))\n\
+    \ *Wigner3j(l1,l2,l3;-s1,-s2,s3)\n *Wigner3j(l1,l2,l3;m1,m2,-m3)"
+  selection_rules:
+  - m3=m1+m2
+  - s3=s1+s2
+  - triangle inequalities
+  production_requirement: padded collocation or exact modal convolution must agree with this oracle
+time_integration:
+  prohibited_legacy_staging: S1=Sn, S2=S3=(Sn+Snp1)/2, S4=Snp1
+  reason: source quadrature reduces exactly to trapezoidal rule; global order 2
+  required: Evaluate first-order Teukolsky state, reconstruction state, all source primitives, outer source derivatives,
+    and second-order RHS at common RK stage states and times.
+  stage_tangent:
+    first_derivative: Udot=L(U)
+    second_derivative_stationary_linear_system: Uddot=L(Udot)
+    bilinear_JVP: d_T B(U,V)=B(Udot,V)+B(U,Vdot)
+  reference_integrator: classical RK4 coupled vertical slice before low-storage optimization
+known_legacy_findings:
+  confirmed_errors:
+  - id: source_factor
+    severity: critical
+    description: missing 1/2 on the connection part of (eth+bar(pi)+2tau)h_l_barm
+  - id: driven_time_order
+    severity: critical
+    description: endpoint-averaged source makes the driven solution globally second order
+  high_risk_implementation_issues:
+  - post-RK filtering followed by stale k5-to-k1 reuse
+  - unsafe signed-m indexing and set-based mode ordering
+  - mass-dependent delayed-source activation convention
+  - no exact nonlinear angular-product oracle
+  - raw horizon Psi4^(2) is gauge/tetrad dependent
+verification:
+  executable: verify_second_order_teukolsky.py
+  expected: all exact and manufactured-solution checks pass
+  source_ledger: SOURCE_TERM_LEDGER.csv
+  expected_check_count: 94
+  recorded_result: 94 passed, 0 failed with SymPy 1.14.0
+  recorded_output_json: verify_second_order_teukolsky_output.json
+  recorded_output_text: verify_second_order_teukolsky_output.txt
+  limitations:
+  - Mathematica kernel unavailable in the audit environment
+  - The checks are a reproducible symbolic/static audit, not a formal proof of every runtime path

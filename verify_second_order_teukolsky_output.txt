@@ -1,0 +1,96 @@
+[PASS] [info    ] [I: general NP/GHP] route1.B14_B15_to_B17: Substituting B15 into B14 and moving first-order products to the RHS gives exactly B17, while -3 Psi2^(0) completes the Teukolsky operator.
+[PASS] [info    ] [I: general NP/GHP] route1.sign.metric_operator_on_Psi4: The metric_operator_on_Psi4 coefficient agrees with Eq. B17.
+[PASS] [info    ] [I: general NP/GHP] route1.sign.metric_operator_on_Psi3: The metric_operator_on_Psi3 coefficient agrees with Eq. B17.
+[PASS] [info    ] [I: general NP/GHP] route1.sign.lambda_nu_on_Psi2_1: The lambda_nu_on_Psi2_1 coefficient agrees with Eq. B17.
+[PASS] [info    ] [I: general NP/GHP] route1.sign.first_order_operator_times_lambda_nu: The first_order_operator_times_lambda_nu coefficient agrees with Eq. B17.
+[PASS] [info    ] [III: independent B31+B19 elimination] route3.rho_elimination.full: Substituting B19 into the d4 bracket of B31 reproduces the first two lines of Eq. 15a exactly.
+[PASS] [critical] [III: independent B31+B19 elimination] route3.connection_coefficient: The coefficient 1/2 multiplies both the derivative and connection pieces of (eth+bar(pi)+2 tau) h_{l bar m}; it cannot be applied only to eth(h).
+[PASS] [info    ] [II: ORG/tetrad specialization] route2.B30_to_st: Collecting B30 in GHP form gives Eq. 15b, including -1/2(pi+bar(tau)) h_mm.
+[PASS] [info    ] [II: ORG/tetrad specialization] route2.outer_operator_structure: The four lines B31/B34/B35/B36 group as S=(Delta+4mu+bar(mu)) s_d + (eth'+4pi-bar(tau)) s_t; B36 vanishes in the chosen tetrad.
+[PASS] [info    ] [II: ORG/tetrad specialization] route2.quadratic_amplitude_scaling: The second-order source is homogeneous of degree two in first-order perturbations.
+[PASS] [info    ] [weight audit] weights.sd.hll_Delta_psi4: hll_Delta_psi4 has (spin,boost)=Weight(spin=-2, boost=-1), matching s_d=Weight(spin=-2, boost=-1).
+[PASS] [info    ] [weight audit] weights.sd.hll_mu_psi4: hll_mu_psi4 has (spin,boost)=Weight(spin=-2, boost=-1), matching s_d=Weight(spin=-2, boost=-1).
+[PASS] [info    ] [weight audit] weights.sd.psi4_eth_hlb: psi4_eth_hlb has (spin,boost)=Weight(spin=-2, boost=-1), matching s_d=Weight(spin=-2, boost=-1).
+[PASS] [info    ] [weight audit] weights.sd.psi4_barpi_hlb: psi4_barpi_hlb has (spin,boost)=Weight(spin=-2, boost=-1), matching s_d=Weight(spin=-2, boost=-1).
+[PASS] [info    ] [weight audit] weights.sd.psi4_Delta_hll: psi4_Delta_hll has (spin,boost)=Weight(spin=-2, boost=-1), matching s_d=Weight(spin=-2, boost=-1).
+[PASS] [info    ] [weight audit] weights.sd.psi4_ethp_hlm: psi4_ethp_hlm has (spin,boost)=Weight(spin=-2, boost=-1), matching s_d=Weight(spin=-2, boost=-1).
+[PASS] [info    ] [weight audit] weights.sd.psi3_eth_hbb: psi3_eth_hbb has (spin,boost)=Weight(spin=-2, boost=-1), matching s_d=Weight(spin=-2, boost=-1).
+[PASS] [info    ] [weight audit] weights.sd.psi3_Delta_hlb: psi3_Delta_hlb has (spin,boost)=Weight(spin=-2, boost=-1), matching s_d=Weight(spin=-2, boost=-1).
+[PASS] [info    ] [weight audit] weights.sd.hlb_Delta_psi3: hlb_Delta_psi3 has (spin,boost)=Weight(spin=-2, boost=-1), matching s_d=Weight(spin=-2, boost=-1).
+[PASS] [info    ] [weight audit] weights.sd.hbb_eth_psi3: hbb_eth_psi3 has (spin,boost)=Weight(spin=-2, boost=-1), matching s_d=Weight(spin=-2, boost=-1).
+[PASS] [info    ] [weight audit] weights.sd.pi1_psi3: pi1_psi3 has (spin,boost)=Weight(spin=-2, boost=-1), matching s_d=Weight(spin=-2, boost=-1).
+[PASS] [info    ] [weight audit] weights.sd.lambda_psi2: lambda_psi2 has (spin,boost)=Weight(spin=-2, boost=-1), matching s_d=Weight(spin=-2, boost=-1).
+[PASS] [info    ] [weight audit] weights.st.hlm_Delta_psi4: hlm_Delta_psi4 has (spin,boost)=Weight(spin=-1, boost=-2), matching s_t=Weight(spin=-1, boost=-2).
+[PASS] [info    ] [weight audit] weights.st.hmm_ethp_psi4: hmm_ethp_psi4 has (spin,boost)=Weight(spin=-1, boost=-2), matching s_t=Weight(spin=-1, boost=-2).
+[PASS] [info    ] [weight audit] weights.st.psi4_barpi1: psi4_barpi1 has (spin,boost)=Weight(spin=-1, boost=-2), matching s_t=Weight(spin=-1, boost=-2).
+[PASS] [info    ] [weight audit] weights.st.psi4_Delta_hlm: psi4_Delta_hlm has (spin,boost)=Weight(spin=-1, boost=-2), matching s_t=Weight(spin=-1, boost=-2).
+[PASS] [info    ] [weight audit] weights.st.psi4_ethp_hmm: psi4_ethp_hmm has (spin,boost)=Weight(spin=-1, boost=-2), matching s_t=Weight(spin=-1, boost=-2).
+[PASS] [info    ] [weight audit] weights.source.Delta_sd: Delta_sd has (spin,boost)=Weight(spin=-2, boost=-2), matching the spin -2, boost -2 Teukolsky source.
+[PASS] [info    ] [weight audit] weights.source.mu_sd: mu_sd has (spin,boost)=Weight(spin=-2, boost=-2), matching the spin -2, boost -2 Teukolsky source.
+[PASS] [info    ] [weight audit] weights.source.ethp_st: ethp_st has (spin,boost)=Weight(spin=-2, boost=-2), matching the spin -2, boost -2 Teukolsky source.
+[PASS] [info    ] [weight audit] weights.source.pi_st: pi_st has (spin,boost)=Weight(spin=-2, boost=-2), matching the spin -2, boost -2 Teukolsky source.
+[PASS] [info    ] [weight audit] weights.source.bartau_st: bartau_st has (spin,boost)=Weight(spin=-2, boost=-2), matching the spin -2, boost -2 Teukolsky source.
+[PASS] [info    ] [radial rescaling] falloff.sd.hll_Delta_psi4: Physical power R^3; after s_(d/t)=R^3(D/T), the explicit factor is R^0.
+[PASS] [info    ] [radial rescaling] falloff.sd.hll_mu_psi4: Physical power R^4; after s_(d/t)=R^3(D/T), the explicit factor is R^1.
+[PASS] [info    ] [radial rescaling] falloff.sd.psi4_eth_hlb: Physical power R^4; after s_(d/t)=R^3(D/T), the explicit factor is R^1.
+[PASS] [info    ] [radial rescaling] falloff.sd.psi4_barpi_hlb: Physical power R^5; after s_(d/t)=R^3(D/T), the explicit factor is R^2.
+[PASS] [info    ] [radial rescaling] falloff.sd.psi4_Delta_hll: Physical power R^3; after s_(d/t)=R^3(D/T), the explicit factor is R^0.
+[PASS] [info    ] [radial rescaling] falloff.sd.psi4_barmu_hll: Physical power R^4; after s_(d/t)=R^3(D/T), the explicit factor is R^1.
+[PASS] [info    ] [radial rescaling] falloff.sd.psi4_ethp_hlm: Physical power R^4; after s_(d/t)=R^3(D/T), the explicit factor is R^1.
+[PASS] [info    ] [radial rescaling] falloff.sd.psi4_pi_hlm: Physical power R^5; after s_(d/t)=R^3(D/T), the explicit factor is R^2.
+[PASS] [info    ] [radial rescaling] falloff.sd.psi3_eth_hbb: Physical power R^4; after s_(d/t)=R^3(D/T), the explicit factor is R^1.
+[PASS] [info    ] [radial rescaling] falloff.sd.psi3_pi_hbb: Physical power R^5; after s_(d/t)=R^3(D/T), the explicit factor is R^2.
+[PASS] [info    ] [radial rescaling] falloff.sd.psi3_Delta_hlb: Physical power R^4; after s_(d/t)=R^3(D/T), the explicit factor is R^1.
+[PASS] [info    ] [radial rescaling] falloff.sd.psi3_mu_hlb: Physical power R^5; after s_(d/t)=R^3(D/T), the explicit factor is R^2.
+[PASS] [info    ] [radial rescaling] falloff.sd.hlb_Delta_psi3: Physical power R^4; after s_(d/t)=R^3(D/T), the explicit factor is R^1.
+[PASS] [info    ] [radial rescaling] falloff.sd.hbb_eth_psi3: Physical power R^4; after s_(d/t)=R^3(D/T), the explicit factor is R^1.
+[PASS] [info    ] [radial rescaling] falloff.sd.pi1_psi3: Physical power R^4; after s_(d/t)=R^3(D/T), the explicit factor is R^1.
+[PASS] [info    ] [radial rescaling] falloff.sd.lambda_psi2: Physical power R^4; after s_(d/t)=R^3(D/T), the explicit factor is R^1.
+[PASS] [info    ] [radial rescaling] falloff.st.hlm_Delta_psi4: Physical power R^3; after s_(d/t)=R^3(D/T), the explicit factor is R^0.
+[PASS] [info    ] [radial rescaling] falloff.st.hlm_mu_psi4: Physical power R^4; after s_(d/t)=R^3(D/T), the explicit factor is R^1.
+[PASS] [info    ] [radial rescaling] falloff.st.hmm_ethp_psi4: Physical power R^3; after s_(d/t)=R^3(D/T), the explicit factor is R^0.
+[PASS] [info    ] [radial rescaling] falloff.st.psi4_barpi1: Physical power R^3; after s_(d/t)=R^3(D/T), the explicit factor is R^0.
+[PASS] [info    ] [radial rescaling] falloff.st.psi4_Delta_hlm: Physical power R^3; after s_(d/t)=R^3(D/T), the explicit factor is R^0.
+[PASS] [info    ] [radial rescaling] falloff.st.psi4_ethp_hmm: Physical power R^3; after s_(d/t)=R^3(D/T), the explicit factor is R^0.
+[PASS] [info    ] [radial rescaling] falloff.st.psi4_pi_hmm: Physical power R^4; after s_(d/t)=R^3(D/T), the explicit factor is R^1.
+[PASS] [info    ] [radial rescaling] falloff.outer_source_structure: The rescaled outer source is Delta_3 D + R(4mu0+bar(mu0))D + R eth'_3 T + R^2(4pi0-bar(tau0))T.
+[PASS] [info    ] [background/GHP] background.Delta_mu: For the chosen tetrad, Delta mu = -mu^2 exactly; this justifies replacing (Delta-mu+bar(mu))h_ll with Delta(mu h_ll)/mu + bar(mu)h_ll.
+[PASS] [info    ] [background/GHP] background.mu_rescaling: mu=R mu0.
+[PASS] [info    ] [background/GHP] background.psi2_regular: Psi2=R^3 psi2_0 has the expected regular rescaled limit at scri.
+[PASS] [critical] [background/GHP] background.disputed_connection_nonzero: At the equator, bar(pi0)+2 tau0=3 i a/(sqrt(2)L^4), so the legacy factor error survives for rotating Kerr.
+[PASS] [info    ] [background/GHP] ghp.Delta_n: Delta_n X = R^{-n} Delta(R^n X) matches the Fortran thorn-prime implementation.
+[PASS] [info    ] [background/GHP] ghp.eth_connection: The rescaled eth GHP-weight connection coefficient is algebraically identical to the paper expression.
+[PASS] [info    ] [background/GHP] ghp.ethprime_connection: The rescaled eth-prime GHP-weight connection coefficient matches the paper expression.
+[PASS] [info    ] [background/GHP] second_order.coordinate_source_prefactor: Eq. 35 gives the coordinate forcing 2(L^4+a^2R^2 cos^2(theta)) S/R^3.
+[PASS] [info    ] [linear reduction] linear.denominator: The repeated Fortran denominator equals L^4 times the coefficient of psi_TT.
+[PASS] [info    ] [linear reduction] linear.psi.P: psi_T coefficient of P is 1/C.
+[PASS] [info    ] [linear reduction] linear.psi.Q: psi_T coefficient of Q is 2K/C.
+[PASS] [info    ] [linear reduction] linear.psi.psi: psi_T coefficient of psi is -G/C.
+[PASS] [info    ] [linear reduction] linear.P.QR: P_T principal Q_R coefficient is H.
+[PASS] [info    ] [linear reduction] linear.P.Q: P_T lower-order Q coefficient matches the coordinate PDE.
+[PASS] [info    ] [linear reduction] linear.P.psi: P_T lower-order psi coefficient matches the coordinate PDE.
+[PASS] [info    ] [linear reduction] linear.Q.derivative_form: Q_T should be generated as d_R[(P+2KQ-G psi)/C] (plus P_R,Q_R terms and optional reduction damping), rather than copied as giant coefficients.
+[PASS] [info    ] [linear reduction] linear.boundary.H_horizon: H vanishes at Delta_Kerr=0.
+[PASS] [info    ] [linear reduction] linear.boundary.H_scri: H vanishes at scri R=0.
+[PASS] [info    ] [metric reconstruction] reconstruction.Delta2_G: The rescaled Delta2_G transport source agrees term by term with Eq. 12 and mod_metric_recon.f90.
+[PASS] [info    ] [metric reconstruction] reconstruction.Delta1_Lambda: The rescaled Delta1_Lambda transport source agrees term by term with Eq. 12 and mod_metric_recon.f90.
+[PASS] [info    ] [metric reconstruction] reconstruction.Delta3_H: The rescaled Delta3_H transport source agrees term by term with Eq. 12 and mod_metric_recon.f90.
+[PASS] [info    ] [metric reconstruction] reconstruction.Delta1_B: The rescaled Delta1_B transport source agrees term by term with Eq. 12 and mod_metric_recon.f90.
+[PASS] [info    ] [metric reconstruction] reconstruction.Delta2_Pi: The rescaled Delta2_Pi transport source agrees term by term with Eq. 12 and mod_metric_recon.f90.
+[PASS] [info    ] [metric reconstruction] reconstruction.Delta2_C: The rescaled Delta2_C transport source agrees term by term with Eq. 12 and mod_metric_recon.f90.
+[PASS] [info    ] [metric reconstruction] reconstruction.Delta3_U: The rescaled Delta3_U transport source agrees term by term with Eq. 12 and mod_metric_recon.f90.
+[PASS] [info    ] [metric reconstruction] reconstruction.solve_Delta_n: The common code denominator exactly solves Delta_n X=RHS for X_T.
+[PASS] [info    ] [mode/angular] modes.ordered_pairs: Ordered mode pairs correctly produce m_t=m_1+m_2; both orderings contribute to m_t=0.
+[PASS] [info    ] [mode/angular] angular.gaunt.Y00_l2_m2_s-2: The generalized spin-weighted Gaunt formula reproduces Y_00 * _sY_lm.
+[PASS] [info    ] [mode/angular] angular.gaunt.Y00_l3_m-1_s1: The generalized spin-weighted Gaunt formula reproduces Y_00 * _sY_lm.
+[PASS] [info    ] [mode/angular] angular.gaunt.Y00_l4_m0_s0: The generalized spin-weighted Gaunt formula reproduces Y_00 * _sY_lm.
+[PASS] [info    ] [mode/angular] angular.gaunt.selection_m: The Gaunt oracle enforces m_3=m_1+m_2.
+[PASS] [info    ] [mode/angular] angular.gaunt.selection_spin: The Gaunt oracle enforces s_3=s_1+s_2.
+[PASS] [critical] [time integration] time.legacy_is_trapezoidal: Using the endpoint average at both RK4 midpoint stages collapses exactly to trapezoidal source quadrature.
+[PASS] [critical] [time integration] time.legacy_leading_defect: The local forcing defect begins at S'' dt^3/12, implying global second order.
+[PASS] [info    ] [time integration] time.backward_difference_formula: The five-point backward derivative itself is fourth order; moments k=0..5 are [0, 1, 0, 0, 0, -24]. Its use does not make endpoint-averaged RK forcing fourth order.
+[PASS] [info    ] [time integration] time.manufactured.correct_rk4: Stage-coupled RK4 errors=[1.4516147617271713e-07, 9.049085925028066e-09, 5.646505485401576e-10, 3.525846281604572e-11]; observed orders=[4.003742754143681, 4.002341876300917, 4.001316804125907].
+[PASS] [critical] [time integration] time.manufactured.legacy_order2: Legacy endpoint-averaged source errors=[0.002407941957579318, 0.0006021427167688387, 0.0001505455604506878, 3.763700945702553e-05]; observed orders=[1.9996232441813042, 1.9999053036806536, 1.9999762592088937].
+[PASS] [info    ] [time integration] time.bilinear_JVP: For every bilinear source primitive B(U,V), d_t B = B(Udot,V)+B(U,Vdot); this supports a stage-local Jet/JVP implementation.
+
+Completed 94 checks with SymPy 1.14.0: 94 passed, 0 failed.

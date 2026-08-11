@@ -1,0 +1,12 @@
+diff --git a/src/mod_scd_order_source.f90 b/src/mod_scd_order_source.f90
+--- a/src/mod_scd_order_source.f90
++++ b/src/mod_scd_order_source.f90
+@@ -227,7 +227,7 @@ contains
+       !-------------------------------------------------
+       + psi4_lin_f%level(:,:,m1_ang)*( &
+             0.5_rp*R*hlmb%edth(:,:,m2_ang) &
+-         +  (R**2)*( &
++         +  0.5_rp*(R**2)*( &
+                conjg(pi_0) &
+             +  2.0_rp*ta_0 &
+             )*hlmb%level(:,:,m2_ang) &

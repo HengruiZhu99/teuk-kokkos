@@ -1,0 +1,17 @@
+{
+  "bundle": "teuk_second_order_kokkos_triplechecked_package",
+  "version": "2.0.0",
+  "date": "2026-08-11",
+  "legacy_commit": "0a12faef3461f04ef71c8d42517eaaba512e34aa",
+  "critical_corrections": [
+    "source connection coefficient 1 -> 1/2",
+    "replace endpoint-averaged source staging with fully stage-coupled fourth-order integration"
+  ],
+  "symbolic_checks": {
+    "passed": 94,
+    "failed": 0,
+    "sympy": "1.14.0"
+  },
+  "primary_handoff_prompt": "CODEX_PROMPT_KOKKOS_SECOND_ORDER_TEUKOLSKY_V2.md",
+  "machine_specification": "equation_spec_v2.yaml"
+}

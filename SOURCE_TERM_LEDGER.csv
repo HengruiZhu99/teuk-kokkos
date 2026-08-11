@@ -1,0 +1,27 @@
+id,physical_term,coefficient,correct_rescaled_ordered_pair_term,spin_boost_weight,physical_R_power,explicit_R_power_after_dividing_by_R3,legacy_status,verification
+sd01,(1/2) h_ll Delta Psi4,1/2,(1/2) U_1 (Delta_1 F_2 / mu0),"(-2,-1)",3,0,matches legacy,B31+B19; scaling
+sd02,(1/2) mu h_ll Psi4,1/2,(1/2) R U_1 F_2,"(-2,-1)",4,1,matches legacy,B31+B19; scaling
+sd03,Psi4 (1/2) eth h_lbar,1/2,(1/2) R F_1 eth_2 C_2,"(-2,-1)",4,1,matches legacy,Eq15a; B19 elimination
+sd04,Psi4 (1/2)(bar(pi)+2 tau) h_lbar,1/2,(1/2) R^2 F_1 (bar(pi0)+2 tau0) C_2,"(-2,-1)",5,2,LEGACY ERROR: implemented coefficient 1,Eq15a; independent B31+B19 elimination
+sd05,Psi4 (Delta-mu+bar(mu)) h_ll,1,F_1 [Delta_3 U_2/mu0 + R U_2^sharp],"(-2,-1)",3,0,matches legacy,Delta mu=-mu^2; scaling
+sd06,-Psi4 (1/2) ethprime h_lm,-1/2,-(1/2) R F_1 ethprime_2 C_2^sharp,"(-2,-1)",4,1,matches legacy,Eq15a; scaling
+sd07,+Psi4 (1/2)(5 pi+4 bar(tau)) h_lm,1/2,+(1/2) R^2 F_1 (5 pi0+4 bar(tau0)) C_2^sharp,"(-2,-1)",5,2,matches legacy,Eq15a; scaling
+sd08,-(1/2) Psi3 eth h_barbar,-1/2,-(1/2) R G_1 eth_1 B_2,"(-2,-1)",4,1,matches legacy,B34; scaling
+sd09,-(1/2) Psi3 (bar(pi)+tau) h_barbar,-1/2,-(1/2) R^2 G_1 (bar(pi0)+tau0) B_2,"(-2,-1)",5,2,matches legacy,B34; scaling
+sd10,-(1/2) Psi3 Delta h_lbar,-1/2,-(1/2) R G_1 Delta_2 C_2,"(-2,-1)",4,1,matches legacy,B34; scaling
+sd11,-(1/2) Psi3 (-2mu+bar(mu)) h_lbar,-1/2,-(1/2) R^2 G_1 (-2mu0+bar(mu0)) C_2,"(-2,-1)",5,2,matches legacy,B34; scaling
+sd12,-h_lbar Delta Psi3,-1,-R C_1 Delta_2 G_2,"(-2,-1)",4,1,matches legacy,B34; scaling
+sd13,+(1/2) h_barbar eth Psi3,1/2,+(1/2) R B_1 eth_2 G_2,"(-2,-1)",4,1,matches legacy,B34; scaling
+sd14,+4 pi^(1) Psi3,4,+4 R Pi_1 G_2,"(-2,-1)",4,1,matches legacy,B34; scaling
+sd15,-3 lambda^(1) Psi2^(1),-3,-3 R Lambda_1 H_2,"(-2,-1)",4,1,matches legacy,B35; scaling
+st01,-h_lm Delta Psi4,-1,-C_1^sharp Delta_1 F_2,"(-1,-2)",3,0,matches legacy,B30; scaling
+st02,-h_lm (mu+2bar(mu)) Psi4,-1,-R C_1^sharp (mu0+2bar(mu0)) F_2,"(-1,-2)",4,1,matches legacy,B30; scaling
+st03,+(1/2) h_mm ethprime Psi4,1/2,+(1/2) B_1^sharp ethprime_1 F_2,"(-1,-2)",3,0,matches legacy,B30; scaling
+st04,+Psi4 bar(pi^(1)),1,+F_1 Pi_2^sharp,"(-1,-2)",3,0,matches legacy,B30; scaling
+st05,-Psi4 Delta h_lm,-1,-F_1 Delta_2 C_2^sharp,"(-1,-2)",3,0,matches legacy,B30; scaling
+st06,+Psi4 ethprime h_mm,1,+F_1 ethprime_1 B_2^sharp,"(-1,-2)",3,0,matches legacy,B30; scaling
+st07,-(1/2) Psi4 (pi+bar(tau)) h_mm,-1/2,-(1/2) R F_1 (pi0+bar(tau0)) B_2^sharp,"(-1,-2)",4,1,matches legacy,B30; scaling
+S01,Delta s_d,1,Delta_3 D,"(-2,-2)",3,0,matches legacy,Eq14; scaling
+S02,(4mu+bar(mu)) s_d,1,R(4mu0+bar(mu0)) D,"(-2,-2)",4,1,matches legacy,Eq14; scaling
+S03,ethprime s_t,1,R ethprime_3 T,"(-2,-2)",4,1,matches legacy,Eq14; scaling
+S04,(4pi-bar(tau)) s_t,1,R^2(4pi0-bar(tau0)) T,"(-2,-2)",5,2,matches legacy,Eq14; scaling

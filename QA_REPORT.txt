@@ -1,0 +1,18 @@
+FINAL QA REPORT
+===============
+
+Bundle version: 2.0.0
+Date: 2026-08-11
+
+[PASS] equation_spec_v2.yaml parses and reports version 2.0.0.
+[PASS] SOURCE_TERM_LEDGER.csv parses: 26 rows; exactly one confirmed legacy algebraic error (sd04).
+[PASS] verify_second_order_teukolsky_output.json: 94 passed, 0 failed.
+[PASS] Re-executed symbolic/manufactured audit: 94 passed, 0 failed with SymPy 1.14.0.
+[PASS] Correct 1/2 connection coefficient appears in derivation, implementer reference, and Codex prompt.
+[PASS] Codex prompt CLI flag matches the executable audit (--json-out).
+[PASS] No stale v1 specification references, disallowed control bytes, Unicode dash hazards, or replacement characters.
+[PASS] Minimal legacy patch dry-runs against an exact-context synthetic fixture.
+[PASS] Combined PDF opens, contains 36 pages, passes basic preflight, and was rendered at 160 dpi for visual inspection.
+[PASS] Rendered pages inspected: no clipped equations, broken glyphs, or overlapping tables remain.
+
+Recorded limitation: a Mathematica kernel was unavailable. The Mathematica notebook was inspected for provenance but not independently executed. The SymPy audit is reproducible and exact for the encoded identities, but is not a formal proof of every runtime path.
