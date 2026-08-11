@@ -21,6 +21,7 @@
 #include "teuk/pipeline_checkpoint.hpp"
 #include "teuk/pipeline_diagnostics.hpp"
 #include "teuk/pipeline_initial_data.hpp"
+#include "teuk/pipeline_independent_reconstruction_diagnostics.hpp"
 #include "teuk/pipeline_reconstruction_diagnostics.hpp"
 #include "teuk/rk4.hpp"
 #include "teuk/spatial_pipeline.hpp"
@@ -117,7 +118,13 @@ int run_spatial_pipeline(const teuk::Parameters& input) {
       static_cast<std::size_t>(input.radial_points), 0.0, horizon);
   teuk::SpatialPipeline pipeline(
       execution, registry, radial_grid, input.ell_max, input.theta_points,
-      background, input.reduction_damping, input.dissipation);
+      background, input.reduction_damping, input.dissipation,
+      teuk::ReductionEvolution::FreeDamped, "full_pipeline",
+      teuk::SecondOrderSourcePolicy{
+          input.allow_inconsistent_source
+              ? teuk::SecondOrderSourceMode::Unrestricted
+              : teuk::SecondOrderSourceMode::ConstraintAware,
+          input.source_start_time, input.source_constraint_tolerance});
 
   const double time_step =
       input.final_time / static_cast<double>(input.steps);
@@ -134,7 +141,8 @@ int run_spatial_pipeline(const teuk::Parameters& input) {
       input.reduction_damping,
       input.dissipation,
       teuk::ReductionEvolution::FreeDamped,
-      time_step};
+      time_step,
+      pipeline.source_policy()};
   double time = 0.0;
   std::uint64_t completed_steps = 0;
   if (input.restart_directory.empty()) {
@@ -165,9 +173,13 @@ int run_spatial_pipeline(const teuk::Parameters& input) {
   teuk::HorizonTransverseDiagnostics horizon_diagnostics(
       radial_grid, registry.size(),
       static_cast<std::size_t>(input.theta_points));
-  teuk::PipelineReconstructionDiagnostics reconstruction_diagnostics(
+  teuk::PipelineTransportEquationDiagnostics transport_diagnostics(
       registry.size(), radial_grid.size(),
       static_cast<std::size_t>(input.theta_points));
+  teuk::PipelineIndependentReconstructionDiagnostics
+      independent_reconstruction_diagnostics(
+          registry.size(), radial_grid.size(),
+          static_cast<std::size_t>(input.theta_points));
 
   std::ofstream diagnostic_file;
   std::ofstream source_pair_file;
@@ -214,7 +226,8 @@ int run_spatial_pipeline(const teuk::Parameters& input) {
   const char* header =
       "step,time,kappa_time,first_psi_rms,second_psi_rms,"
       "first_constraint_rms,second_constraint_rms,source_rms,forcing_rms,"
-      "reconstruction_residual_rms,"
+      "source_active,source_constraint_max,transport_residual_rms,"
+      "psi3_bianchi_rms,psi2_bianchi_rms,hll_reality_rms,"
       "first_horizon_d0,first_horizon_d1,first_horizon_d2,"
       "first_horizon_d3,first_horizon_d4,second_horizon_d0,"
       "second_horizon_d1,second_horizon_d2,second_horizon_d3,"
@@ -223,11 +236,12 @@ int run_spatial_pipeline(const teuk::Parameters& input) {
   if (diagnostic_file) diagnostic_file << header << '\n';
   const double kappa = teuk::surface_gravity(input.mass, input.spin);
   const auto sample = [&](const std::uint64_t step, const double time) {
-    pipeline.evaluate_rhs(execution, pipeline.storage().state(),
-                          pipeline.storage().rhs());
+    pipeline.evaluate_rhs_at_time(execution, pipeline.storage().state(),
+                                  pipeline.storage().rhs(), time);
     const auto report = diagnostics.sample_pipeline(execution, pipeline);
-    const auto reconstruction =
-        reconstruction_diagnostics.sample(execution, pipeline);
+    const auto transport = transport_diagnostics.sample(execution, pipeline);
+    const auto independent =
+        independent_reconstruction_diagnostics.sample(execution, pipeline);
     const auto first_horizon = horizon_maxima(first_psi);
     const auto second_horizon = horizon_maxima(second_psi);
     std::ostringstream line;
@@ -237,7 +251,11 @@ int run_spatial_pipeline(const teuk::Parameters& input) {
          << report.first_reduction_constraint.rms << ','
          << report.second_reduction_constraint.rms << ','
          << report.source_over_r3.rms << ',' << report.forcing.rms << ','
-         << reconstruction.combined.rms;
+         << (report.second_order_source_active ? 1 : 0) << ','
+         << report.independent_reconstruction_constraint_maximum << ','
+         << transport.combined.rms << ',' << independent.psi3_bianchi.rms
+         << ',' << independent.psi2_bianchi.rms << ','
+         << independent.hll_reality.rms;
     for (const double value : first_horizon) line << ',' << value;
     for (const double value : second_horizon) line << ',' << value;
     std::cout << line.str() << '\n';

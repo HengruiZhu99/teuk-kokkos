@@ -26,6 +26,9 @@ struct Parameters {
   double pulse_amplitude = 1.0e-3;
   double pulse_center_fraction = 0.45;
   double pulse_width_fraction = 0.12;
+  double source_start_time = 0.0;
+  double source_constraint_tolerance = 1.0e-10;
+  bool allow_inconsistent_source = false;
   int steps = 20;
   int diagnostic_interval = 5;
   int checkpoint_interval = 0;
@@ -92,6 +95,13 @@ inline void apply_key_value(Parameters& parameters, std::string_view argument) {
   else if (key == "amplitude") parameters.pulse_amplitude = parse_double(value, "amplitude");
   else if (key == "pulse_center") parameters.pulse_center_fraction = parse_double(value, "pulse_center");
   else if (key == "pulse_width") parameters.pulse_width_fraction = parse_double(value, "pulse_width");
+  else if (key == "source_start") parameters.source_start_time = parse_double(value, "source_start");
+  else if (key == "source_constraint_tol") parameters.source_constraint_tolerance = parse_double(value, "source_constraint_tol");
+  else if (key == "source_mode") {
+    if (value == "constraint_aware") parameters.allow_inconsistent_source = false;
+    else if (value == "unrestricted") parameters.allow_inconsistent_source = true;
+    else throw std::invalid_argument("source_mode must be constraint_aware or unrestricted");
+  }
   else if (key == "steps") parameters.steps = parse_int(value, "steps");
   else if (key == "diagnostic_every") parameters.diagnostic_interval = parse_int(value, "diagnostic_every");
   else if (key == "checkpoint_every") parameters.checkpoint_interval = parse_int(value, "checkpoint_every");
@@ -127,6 +137,12 @@ inline void validate(const Parameters& parameters) {
       parameters.pulse_center_fraction < 0.0 ||
       parameters.pulse_center_fraction > 1.0) {
     throw std::invalid_argument("invalid pulse parameters");
+  }
+  if (!std::isfinite(parameters.source_start_time) ||
+      parameters.source_start_time < 0.0 ||
+      !std::isfinite(parameters.source_constraint_tolerance) ||
+      parameters.source_constraint_tolerance < 0.0) {
+    throw std::invalid_argument("invalid second-order source gate");
   }
   if (parameters.modes.empty()) throw std::invalid_argument("modes must not be empty");
   std::vector<int> sorted_modes = parameters.modes;

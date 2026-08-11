@@ -68,7 +68,10 @@ TEST_CASE("composed spatial pipeline injects and scales its quadratic source") {
   const teuk::UniformRadialGrid radial_grid(9, 0.0, 0.8);
   const teuk::KerrParameters parameters{1.0, 0.37, 1.6};
   teuk::SpatialPipeline pipeline(execution, registry, radial_grid, 3, 6,
-                                 parameters, 0.12, 0.01);
+                                 parameters, 0.12, 0.01,
+                                 teuk::ReductionEvolution::FreeDamped,
+                                 "explicit_unrestricted_source_test",
+                                 teuk::SecondOrderSourcePolicy::unrestricted());
 
   auto state_host = Kokkos::create_mirror_view(pipeline.storage().state());
   for (std::size_t mode = 0; mode < registry.size(); ++mode) {
@@ -312,7 +315,10 @@ TEST_CASE("composed nonlinear spatial pipeline retains RK4 stage order") {
   const teuk::UniformRadialGrid radial_grid(9, 0.0, 0.8);
   teuk::SpatialPipeline pipeline(
       execution, registry, radial_grid, 3, 5,
-      teuk::KerrParameters{1.0, 0.31, 1.5}, 0.08, 0.005);
+      teuk::KerrParameters{1.0, 0.31, 1.5}, 0.08, 0.005,
+      teuk::ReductionEvolution::FreeDamped,
+      "explicit_unrestricted_temporal_test",
+      teuk::SecondOrderSourcePolicy::unrestricted());
   Kokkos::View<teuk::Complex****, Kokkos::LayoutRight, Kokkos::HostSpace>
       initial("pipeline_rk_initial", 1, teuk::point_pipeline_field_count,
               radial_grid.size(), pipeline.storage().theta_count());

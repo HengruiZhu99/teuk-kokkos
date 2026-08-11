@@ -33,6 +33,8 @@ struct PipelineDiagnosticsReport {
   PipelineNorm second_reduction_constraint;
   PipelineNorm source_over_r3;
   PipelineNorm forcing;
+  double independent_reconstruction_constraint_maximum = 0.0;
+  bool second_order_source_active = false;
   std::size_t point_count = 0;
   bool scri_finite = false;
   bool horizon_finite = false;
@@ -137,7 +139,10 @@ class PipelineDiagnostics {
         host_scalar_max_squared_(label + "_host_scalar_max_squared",
                                  pipeline_diagnostics_detail::ScalarCount),
         host_finite_flags_(label + "_host_finite_flags",
-                           pipeline_diagnostics_detail::FiniteFlagCount) {
+                           pipeline_diagnostics_detail::FiniteFlagCount),
+        host_source_constraint_max_squared_(
+            label + "_host_source_constraint_max_squared", 1),
+        host_source_active_(label + "_host_source_active", 1) {
     if (mode_count_ == 0 || theta_count_ == 0) {
       throw std::invalid_argument(
           "pipeline diagnostics require nonempty mode and theta dimensions");
@@ -330,8 +335,18 @@ class PipelineDiagnostics {
   template <class ExecSpace, class Pipeline>
   PipelineDiagnosticsReport sample_pipeline(const ExecSpace& execution,
                                              const Pipeline& pipeline) {
-    return sample_storage(execution, pipeline.storage(),
-                          pipeline.source_over_r3(), pipeline.forcing());
+    auto report = sample_storage(execution, pipeline.storage(),
+                                 pipeline.source_over_r3(),
+                                 pipeline.forcing());
+    Kokkos::deep_copy(execution, host_source_constraint_max_squared_,
+                      pipeline.source_constraint_max_squared());
+    Kokkos::deep_copy(execution, host_source_active_,
+                      pipeline.source_active());
+    execution.fence("copy second-order source activation diagnostics");
+    report.independent_reconstruction_constraint_maximum =
+        std::sqrt(host_source_constraint_max_squared_(0));
+    report.second_order_source_active = host_source_active_(0) != 0;
+    return report;
   }
 
  private:
@@ -412,6 +427,9 @@ class PipelineDiagnostics {
   Kokkos::View<double*, Kokkos::HostSpace> host_scalar_sum_squared_;
   Kokkos::View<double*, Kokkos::HostSpace> host_scalar_max_squared_;
   Kokkos::View<int*, Kokkos::HostSpace> host_finite_flags_;
+  Kokkos::View<double*, Kokkos::HostSpace>
+      host_source_constraint_max_squared_;
+  Kokkos::View<int*, Kokkos::HostSpace> host_source_active_;
 };
 
 }  // namespace teuk

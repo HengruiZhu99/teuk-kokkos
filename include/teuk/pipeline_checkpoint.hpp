@@ -34,7 +34,7 @@
 
 namespace teuk {
 
-inline constexpr std::uint64_t pipeline_checkpoint_format_version = 1;
+inline constexpr std::uint64_t pipeline_checkpoint_format_version = 2;
 inline constexpr const char* pipeline_checkpoint_metadata_file =
     "metadata.txt";
 inline constexpr const char* pipeline_checkpoint_state_file = "state.bin";
@@ -50,6 +50,7 @@ struct PipelineCheckpointConfiguration {
   double dissipation = 0.0;
   ReductionEvolution reduction = ReductionEvolution::FreeDamped;
   double time_step = 0.0;
+  SecondOrderSourcePolicy source_policy;
 };
 
 struct PipelineCheckpointProgress {
@@ -92,6 +93,22 @@ inline ReductionEvolution parse_reduction(const std::string& text) {
   throw std::runtime_error("unsupported checkpoint reduction evolution");
 }
 
+inline const char* source_mode_name(const SecondOrderSourceMode mode) {
+  switch (mode) {
+    case SecondOrderSourceMode::ConstraintAware: return "constraint_aware";
+    case SecondOrderSourceMode::Unrestricted: return "unrestricted";
+  }
+  throw std::invalid_argument("unsupported second-order source mode");
+}
+
+inline SecondOrderSourceMode parse_source_mode(const std::string& text) {
+  if (text == "constraint_aware") {
+    return SecondOrderSourceMode::ConstraintAware;
+  }
+  if (text == "unrestricted") return SecondOrderSourceMode::Unrestricted;
+  throw std::runtime_error("unsupported checkpoint second-order source mode");
+}
+
 inline const char* native_byte_order() {
   if constexpr (std::endian::native == std::endian::little) return "little";
   if constexpr (std::endian::native == std::endian::big) return "big";
@@ -114,6 +131,11 @@ inline void validate_configuration(
                   "checkpoint reduction damping");
   validate_finite(configuration.dissipation, "checkpoint dissipation");
   validate_finite(configuration.time_step, "checkpoint time step");
+  validate_finite(configuration.source_policy.source_start_time,
+                  "checkpoint source start time");
+  validate_finite(
+      configuration.source_policy.independent_constraint_tolerance,
+      "checkpoint source constraint tolerance");
   if (!(configuration.background.mass > 0.0) ||
       std::abs(configuration.background.spin) >
           configuration.background.mass ||
@@ -123,10 +145,13 @@ inline void validate_configuration(
           std::max(configuration.ell_max + 1,
                    (3 * configuration.ell_max + 2) / 2) ||
       configuration.reduction_damping < 0.0 ||
-      configuration.dissipation < 0.0 || !(configuration.time_step > 0.0)) {
+      configuration.dissipation < 0.0 || !(configuration.time_step > 0.0) ||
+      configuration.source_policy.source_start_time < 0.0 ||
+      configuration.source_policy.independent_constraint_tolerance < 0.0) {
     throw std::invalid_argument("invalid pipeline checkpoint configuration");
   }
   (void)reduction_name(configuration.reduction);
+  (void)source_mode_name(configuration.source_policy.mode);
 }
 
 inline bool same_configuration(
@@ -141,7 +166,12 @@ inline bool same_configuration(
          left.reduction_damping == right.reduction_damping &&
          left.dissipation == right.dissipation &&
          left.reduction == right.reduction &&
-         left.time_step == right.time_step;
+         left.time_step == right.time_step &&
+         left.source_policy.mode == right.source_policy.mode &&
+         left.source_policy.source_start_time ==
+             right.source_policy.source_start_time &&
+         left.source_policy.independent_constraint_tolerance ==
+             right.source_policy.independent_constraint_tolerance;
 }
 
 template <class Value>
@@ -356,6 +386,13 @@ inline void write_metadata_file(
          << "reduction="
          << reduction_name(metadata.configuration.reduction) << '\n'
          << "time_step=" << metadata.configuration.time_step << '\n'
+         << "source_mode="
+         << source_mode_name(metadata.configuration.source_policy.mode) << '\n'
+         << "source_start_time="
+         << metadata.configuration.source_policy.source_start_time << '\n'
+         << "source_constraint_tolerance="
+         << metadata.configuration.source_policy.independent_constraint_tolerance
+         << '\n'
          << "time=" << metadata.progress.time << '\n'
          << "step=" << metadata.progress.step << '\n'
          << "state_checksum_fnv1a64=" << metadata.state_checksum << '\n';
@@ -430,7 +467,8 @@ inline std::map<std::string, std::string> read_entries(
       "radial_coordinates", "theta_coordinates", "mass",
       "spin",            "compactification_length", "ell_max",
       "theta_nodes",     "reduction_damping", "dissipation",
-      "reduction",       "time_step",        "time",
+      "reduction",       "time_step",        "source_mode",
+      "source_start_time", "source_constraint_tolerance", "time",
       "step",            "state_checksum_fnv1a64"};
   if (entries.size() != expected.size()) {
     throw std::runtime_error("checkpoint metadata key set does not match format");
@@ -507,6 +545,12 @@ inline PipelineCheckpointMetadata read_pipeline_checkpoint_metadata(
       parse_reduction(require_text(entries, "reduction"));
   metadata.configuration.time_step =
       parse_number<double>(entries, "time_step");
+  metadata.configuration.source_policy.mode =
+      parse_source_mode(require_text(entries, "source_mode"));
+  metadata.configuration.source_policy.source_start_time =
+      parse_number<double>(entries, "source_start_time");
+  metadata.configuration.source_policy.independent_constraint_tolerance =
+      parse_number<double>(entries, "source_constraint_tolerance");
   metadata.progress.time = parse_number<double>(entries, "time");
   metadata.progress.step = parse_number<std::uint64_t>(entries, "step");
   metadata.state_checksum =

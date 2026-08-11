@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <stdexcept>
 #include <string>
@@ -28,6 +29,26 @@ struct SpatialPipelineTiming {
   [[nodiscard]] double total_seconds() const {
     return first_linear_seconds + reconstruction_seconds + tangent_seconds +
            source_seconds + second_linear_seconds;
+  }
+};
+
+enum class SecondOrderSourceMode {
+  // Development-safe default: the raw quadratic source is diagnosed, but the
+  // coordinate forcing is applied only after both the configured causal start
+  // time and the independent reconstruction-constraint tolerance are met.
+  ConstraintAware,
+  // Explicit algebra/testing opt-in. This can drive from inconsistent metric
+  // data and must not be interpreted as a physical second-order solution.
+  Unrestricted,
+};
+
+struct SecondOrderSourcePolicy {
+  SecondOrderSourceMode mode = SecondOrderSourceMode::ConstraintAware;
+  double source_start_time = 0.0;
+  double independent_constraint_tolerance = 1.0e-10;
+
+  [[nodiscard]] static SecondOrderSourcePolicy unrestricted() {
+    return {SecondOrderSourceMode::Unrestricted, 0.0, 0.0};
   }
 };
 
@@ -107,7 +128,8 @@ class SpatialPipeline {
                   const double dissipation = 0.0,
                   const ReductionEvolution reduction =
                       ReductionEvolution::FreeDamped,
-                  const std::string& label = "full_pipeline")
+                  const std::string& label = "full_pipeline",
+                  const SecondOrderSourcePolicy source_policy = {})
       : registry_(registry),
         background_(background),
         teukolsky_{background.mass,
@@ -118,6 +140,7 @@ class SpatialPipeline {
                    reduction_damping},
         dissipation_(dissipation),
         reduction_(reduction),
+        source_policy_(source_policy),
         storage_(registry, radial_grid, angular::gauss_legendre(theta_nodes),
                  label),
         first_angular_(execution, registry, -2, -2, ell_max, theta_nodes,
@@ -220,6 +243,9 @@ class SpatialPipeline {
                         radial_grid.size(), theta_nodes),
         forcing_(label + "_forcing", registry.size(), radial_grid.size(),
                  theta_nodes),
+        source_constraint_max_squared_(
+            label + "_source_constraint_max_squared", 1),
+        source_active_(label + "_source_active", 1),
         rk_workspace_(storage_.value_count()) {
     const int exact_product_nodes = (3 * ell_max + 2) / 2;
     if (ell_max < 3 ||
@@ -229,6 +255,12 @@ class SpatialPipeline {
     }
     if (dissipation < 0.0) {
       throw std::invalid_argument("pipeline dissipation must be nonnegative");
+    }
+    if (!std::isfinite(source_policy_.source_start_time) ||
+        source_policy_.source_start_time < 0.0 ||
+        !std::isfinite(source_policy_.independent_constraint_tolerance) ||
+        source_policy_.independent_constraint_tolerance < 0.0) {
+      throw std::invalid_argument("pipeline source policy is invalid");
     }
     Kokkos::deep_copy(execution, storage_.state(), Complex(0.0, 0.0));
     Kokkos::deep_copy(execution, storage_.rhs(), Complex(0.0, 0.0));
@@ -252,6 +284,16 @@ class SpatialPipeline {
     return source_over_r3_;
   }
   [[nodiscard]] SpatialOuterSourceView forcing() const { return forcing_; }
+  [[nodiscard]] Kokkos::View<double*, MemorySpace>
+  source_constraint_max_squared() const {
+    return source_constraint_max_squared_;
+  }
+  [[nodiscard]] Kokkos::View<int*, MemorySpace> source_active() const {
+    return source_active_;
+  }
+  [[nodiscard]] SecondOrderSourcePolicy source_policy() const {
+    return source_policy_;
+  }
   [[nodiscard]] SpatialInnerSourceView inner_source() const {
     return projected_inner_;
   }
@@ -278,6 +320,14 @@ class SpatialPipeline {
   void evaluate_rhs(const ExecutionSpace& execution, const StageView& stage,
                     const OutputView& output,
                     SpatialPipelineTiming* timing = nullptr) {
+    evaluate_rhs_at_time(execution, stage, output, 0.0, timing);
+  }
+
+  template <class StageView, class OutputView>
+  void evaluate_rhs_at_time(const ExecutionSpace& execution,
+                            const StageView& stage, const OutputView& output,
+                            const double stage_time,
+                            SpatialPipelineTiming* timing = nullptr) {
     static_assert(StageView::rank == 4 && OutputView::rank == 4,
                   "pipeline stages must have rank four");
     validate_stage(stage, output);
@@ -363,6 +413,7 @@ class SpatialPipeline {
         storage_.sin_theta(), source_fields_, source_field_tangents_,
         source_derivatives_, source_derivative_tangents_, inner_source_);
     project_inner_source(execution);
+    apply_source_policy(execution, stage_time);
     if (timing != nullptr) {
       record_timing(timing->source_seconds,
                     "profile quadratic spatial source");
@@ -396,10 +447,10 @@ class SpatialPipeline {
             const double time_step) {
     auto flat_state = storage_.flat_state();
     const auto rhs = [this](const ExecutionSpace& stage_execution,
-                            const double, const auto& flat_stage,
+                            const double stage_time, const auto& flat_stage,
                             const auto& flat_output) {
-      evaluate_rhs(stage_execution, storage_.reshape(flat_stage),
-                   storage_.reshape(flat_output));
+      evaluate_rhs_at_time(stage_execution, storage_.reshape(flat_stage),
+                           storage_.reshape(flat_output), stage_time);
     };
     device_classical_rk4_step(execution, flat_state, time, time_step, rhs,
                               rk_workspace_);
@@ -932,11 +983,63 @@ class SpatialPipeline {
         ethprime_t_, source_over_r3_, forcing_);
   }
 
+  void apply_source_policy(const ExecutionSpace& execution,
+                           const double stage_time) {
+    const auto constraint_max_squared = source_constraint_max_squared_;
+    const auto source_active = source_active_;
+    const auto constraints = independent_constraints_;
+    const auto forcing = forcing_;
+    const std::size_t constraint_points = constraints.size();
+    const std::size_t forcing_points = forcing.size();
+    const double tolerance_squared =
+        source_policy_.independent_constraint_tolerance *
+        source_policy_.independent_constraint_tolerance;
+    const double source_start_time = source_policy_.source_start_time;
+    const bool constraint_aware =
+        source_policy_.mode == SecondOrderSourceMode::ConstraintAware;
+    Kokkos::parallel_for(
+        "reset_second_order_source_gate",
+        Kokkos::RangePolicy<ExecutionSpace>(execution, 0, 1),
+        KOKKOS_LAMBDA(const int) {
+          constraint_max_squared(0) = 0.0;
+          source_active(0) = 0;
+        });
+    Kokkos::parallel_for(
+        "reduce_second_order_source_constraint",
+        Kokkos::RangePolicy<ExecutionSpace>(execution, 0, constraint_points),
+        KOKKOS_LAMBDA(const std::size_t flat) {
+          const Complex value = constraints.data()[flat];
+          const double magnitude = Kokkos::abs(value);
+          const double magnitude_squared =
+              Kokkos::isfinite(magnitude) ? magnitude * magnitude : 1.0e300;
+          Kokkos::atomic_max(&constraint_max_squared(0), magnitude_squared);
+        });
+    Kokkos::parallel_for(
+        "decide_second_order_source_gate",
+        Kokkos::RangePolicy<ExecutionSpace>(execution, 0, 1),
+        KOKKOS_LAMBDA(const int) {
+          const bool causal_time_reached = stage_time >= source_start_time;
+          const bool constraints_satisfied =
+              !constraint_aware ||
+              constraint_max_squared(0) <= tolerance_squared;
+          source_active(0) = causal_time_reached && constraints_satisfied;
+        });
+    Kokkos::parallel_for(
+        "apply_second_order_source_gate",
+        Kokkos::RangePolicy<ExecutionSpace>(execution, 0, forcing_points),
+        KOKKOS_LAMBDA(const std::size_t flat) {
+          if (source_active(0) == 0) {
+            forcing.data()[flat] = Complex(0.0, 0.0);
+          }
+        });
+  }
+
   ModeRegistry registry_;
   KerrParameters background_;
   TeukolskyParameters teukolsky_;
   double dissipation_;
   ReductionEvolution reduction_;
+  SecondOrderSourcePolicy source_policy_;
   SpatialPipelineStorage storage_;
   SignedModeAngularCoordinator<> first_angular_;
   SignedModeAngularCoordinator<> g_angular_;
@@ -971,6 +1074,8 @@ class SpatialPipeline {
   SpatialOuterSourceView ethprime_t_;
   SpatialOuterSourceView source_over_r3_;
   SpatialOuterSourceView forcing_;
+  Kokkos::View<double*, MemorySpace> source_constraint_max_squared_;
+  Kokkos::View<int*, MemorySpace> source_active_;
   DeviceRK4Workspace<Complex> rk_workspace_;
 };
 

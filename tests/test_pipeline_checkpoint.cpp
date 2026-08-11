@@ -53,7 +53,8 @@ teuk::PipelineCheckpointConfiguration checkpoint_configuration() {
           0.08,
           0.004,
           teuk::ReductionEvolution::FreeDamped,
-          2.0e-5};
+          2.0e-5,
+          {}};
 }
 
 void initialize_pipeline(const teuk::ExecutionSpace& execution,
@@ -259,7 +260,7 @@ TEST_CASE("pipeline checkpoint rejects malformed truncated and mismatched data")
   const auto malformed = temporary.path() / "malformed";
   copy_checkpoint(valid, malformed);
   replace_metadata_line(
-      malformed / teuk::pipeline_checkpoint_metadata_file, "version", "2");
+      malformed / teuk::pipeline_checkpoint_metadata_file, "version", "1");
   CHECK(rejects(
       [&] { (void)teuk::read_pipeline_checkpoint_metadata(malformed); }));
 

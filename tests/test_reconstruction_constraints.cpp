@@ -4,6 +4,7 @@
 #include <cstddef>
 
 #include "teuk/ghp.hpp"
+#include "teuk/pipeline_diagnostics.hpp"
 #include "teuk/pipeline_independent_reconstruction_diagnostics.hpp"
 #include "teuk/pipeline_initial_data.hpp"
 #include "teuk/reconstruction_constraints.hpp"
@@ -105,4 +106,49 @@ TEST_CASE("default Gaussian exposes inconsistent reconstruction constraints") {
   CHECK(report.psi3_bianchi.maximum > 1.0e-8);
   CHECK(report.psi2_bianchi.maximum > 1.0e-8);
   CHECK(report.hll_reality.maximum < 1.0e-13);
+  const auto active = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, pipeline.source_active());
+  const auto constraint_max = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, pipeline.source_constraint_max_squared());
+  CHECK(active(0) == 0);
+  CHECK(std::sqrt(constraint_max(0)) >= report.psi3_bianchi.maximum);
+}
+
+TEST_CASE("causal constraint-aware source gate is visible and configurable") {
+  const teuk::ExecutionSpace execution;
+  const teuk::ModeRegistry registry({-1, 0, 1});
+  const teuk::UniformRadialGrid grid(9, 0.0, 0.8);
+  const teuk::KerrParameters parameters{1.0, 0.35, 1.5};
+  const teuk::SecondOrderSourcePolicy policy{
+      teuk::SecondOrderSourceMode::ConstraintAware, 0.2, 1.0e6};
+  teuk::SpatialPipeline pipeline(
+      execution, registry, grid, 3, 6, parameters, 0.1, 0.0,
+      teuk::ReductionEvolution::FreeDamped, "causal_source_gate", policy);
+  teuk::PipelineGaussianPulse pulse;
+  pulse.center = 0.4;
+  pulse.width = 0.15;
+  pulse.modes = {{3, -1, teuk::Complex(2.0e-4, -1.0e-4)},
+                 {3, 1, teuk::Complex(-1.0e-4, 1.5e-4)}};
+  for (auto& scale : pulse.reconstruction_scales) {
+    scale = teuk::Complex(0.2, -0.05);
+  }
+  teuk::initialize_compactified_gaussian_pulse(
+      execution, pipeline, registry, 3, parameters, pulse);
+  teuk::PipelineDiagnostics diagnostics(registry.size(), grid, 6);
+
+  pipeline.evaluate_rhs_at_time(execution, pipeline.storage().state(),
+                                pipeline.storage().rhs(), 0.1);
+  const auto before = diagnostics.sample_pipeline(execution, pipeline);
+  CHECK(!before.second_order_source_active);
+  CHECK(before.independent_reconstruction_constraint_maximum > 0.0);
+  CHECK(before.forcing.maximum == 0.0);
+  CHECK(before.source_over_r3.maximum > 1.0e-14);
+
+  pipeline.evaluate_rhs_at_time(execution, pipeline.storage().state(),
+                                pipeline.storage().rhs(), 0.3);
+  const auto after = diagnostics.sample_pipeline(execution, pipeline);
+  CHECK(after.second_order_source_active);
+  CHECK(after.independent_reconstruction_constraint_maximum ==
+        before.independent_reconstruction_constraint_maximum);
+  CHECK(after.forcing.maximum > 1.0e-14);
 }
