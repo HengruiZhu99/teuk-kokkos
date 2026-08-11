@@ -462,3 +462,56 @@ TEST_CASE("pipeline supports distinct parent target modes and angular bandlimits
   }
   CHECK(daughter_rhs_maximum > 1.0e-16);
 }
+
+TEST_CASE("disabled source policy is an exact first-order-only RHS") {
+  const teuk::ExecutionSpace execution;
+  const teuk::ModeRegistry registry({-1, 1});
+  const teuk::UniformRadialGrid radial_grid(9, 0.0, 0.8);
+  teuk::SpatialPipeline pipeline(
+      execution, registry, radial_grid, 3, 6,
+      teuk::KerrParameters{1.0, 0.31, 1.4}, 0.1, 0.002,
+      teuk::ReductionEvolution::FreeDamped, "disabled_linear_only_test",
+      teuk::SecondOrderSourcePolicy::disabled());
+
+  auto host = Kokkos::create_mirror_view(pipeline.storage().state());
+  for (std::size_t mode = 0; mode < host.extent(0); ++mode) {
+    for (std::size_t field = 0; field < host.extent(1); ++field) {
+      for (std::size_t radial = 0; radial < host.extent(2); ++radial) {
+        for (std::size_t theta = 0; theta < host.extent(3); ++theta) {
+          const double seed = 1.0 + 0.1 * static_cast<double>(mode) +
+                              0.01 * static_cast<double>(field) +
+                              0.001 * static_cast<double>(radial) +
+                              0.0001 * static_cast<double>(theta);
+          host(mode, field, radial, theta) =
+              teuk::Complex(seed, -0.3 * seed);
+        }
+      }
+    }
+  }
+  Kokkos::deep_copy(execution, pipeline.storage().state(), host);
+  pipeline.evaluate_rhs(execution, pipeline.storage().state(),
+                        pipeline.storage().rhs());
+  execution.fence("evaluate disabled first-order-only RHS");
+  const auto rhs = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, pipeline.storage().rhs());
+
+  double first_order_maximum = 0.0;
+  for (std::size_t mode = 0; mode < rhs.extent(0); ++mode) {
+    for (std::size_t field = 0; field < rhs.extent(1); ++field) {
+      for (std::size_t radial = 0; radial < rhs.extent(2); ++radial) {
+        for (std::size_t theta = 0; theta < rhs.extent(3); ++theta) {
+          if (field < static_cast<std::size_t>(teuk::PipelineField::G)) {
+            first_order_maximum = std::max(
+                first_order_maximum,
+                static_cast<double>(Kokkos::abs(
+                    rhs(mode, field, radial, theta))));
+          } else {
+            CHECK_COMPLEX_NEAR(rhs(mode, field, radial, theta),
+                               teuk::Complex(0.0, 0.0), 0.0);
+          }
+        }
+      }
+    }
+  }
+  CHECK(first_order_maximum > 1.0e-6);
+}

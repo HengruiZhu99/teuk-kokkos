@@ -491,6 +491,17 @@ class SpatialPipeline {
                     "profile first linear spatial RHS");
     }
 
+    // Disabled is the production first-order-only policy.  The first three
+    // fields above still exercise the complete angular transform, Galerkin
+    // projection, SBP radial operator, and caller-owned RK stage path.  Do not
+    // spend most of a linear run evolving reconstruction/tangent/source
+    // fields that cannot feed back into that subsystem; explicitly freeze
+    // every non-first-order state component instead.
+    if (source_policy_.mode == SecondOrderSourceMode::Disabled) {
+      zero_disabled_rhs_fields(execution, output);
+      return;
+    }
+
     evaluate_reconstruction_chain(execution, stage, output,
                                   reconstruction_radial_,
                                   reconstruction_angular_);
@@ -597,6 +608,34 @@ class SpatialPipeline {
   }
 
  private:
+  template <class OutputView>
+  void zero_disabled_rhs_fields(const ExecutionSpace& execution,
+                                const OutputView& output) const {
+    constexpr std::size_t first_disabled_field =
+        static_cast<std::size_t>(PipelineField::G);
+    constexpr std::size_t disabled_field_count =
+        point_pipeline_field_count - first_disabled_field;
+    const std::size_t radial_count = storage_.radial_count();
+    const std::size_t theta_count = storage_.theta_count();
+    const std::size_t total = storage_.mode_count() * disabled_field_count *
+                              radial_count * theta_count;
+    Kokkos::parallel_for(
+        "zero_disabled_pipeline_rhs",
+        Kokkos::RangePolicy<ExecutionSpace>(execution, 0, total),
+        KOKKOS_LAMBDA(const std::size_t flat) {
+          const std::size_t angular_plane = radial_count * theta_count;
+          const std::size_t mode_field = flat / angular_plane;
+          const std::size_t within = flat - mode_field * angular_plane;
+          const std::size_t mode = mode_field / disabled_field_count;
+          const std::size_t field =
+              first_disabled_field +
+              (mode_field - mode * disabled_field_count);
+          const std::size_t radial = within / theta_count;
+          const std::size_t theta = within - radial * theta_count;
+          output(mode, field, radial, theta) = Complex(0.0, 0.0);
+        });
+  }
+
   template <class StageView, class OutputView>
   void validate_stage(const StageView& stage, const OutputView& output) const {
     const auto valid = [&](const auto& view) {
