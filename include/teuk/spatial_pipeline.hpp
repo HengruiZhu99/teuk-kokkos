@@ -38,6 +38,9 @@ struct SpatialPipelineTiming {
 };
 
 enum class SecondOrderSourceMode {
+  // Linear-only evolution: retain the second-order storage contract but never
+  // apply or activate the quadratic forcing.
+  Disabled,
   // Development-safe default: the raw quadratic source is diagnosed, but the
   // coordinate forcing is applied only after both the configured causal start
   // time and the independent reconstruction-constraint tolerance are met.
@@ -55,6 +58,10 @@ struct SecondOrderSourcePolicy {
 
   [[nodiscard]] static SecondOrderSourcePolicy unrestricted() {
     return {SecondOrderSourceMode::Unrestricted, 0.0, 0.0, 1};
+  }
+
+  [[nodiscard]] static SecondOrderSourcePolicy disabled() {
+    return {SecondOrderSourceMode::Disabled, 0.0, 0.0, 1};
   }
 };
 
@@ -1190,6 +1197,7 @@ class SpatialPipeline {
         accepted_time <= source_activation_.last_eligibility_time) {
       return source_activation_.active;
     }
+    if (source_policy_.mode == SecondOrderSourceMode::Disabled) return false;
     bool passed = true;
     if (source_policy_.mode == SecondOrderSourceMode::Unrestricted) {
       source_activation_.last_eligibility_time = accepted_time;

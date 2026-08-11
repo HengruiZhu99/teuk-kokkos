@@ -16,42 +16,68 @@ TEST_CASE("surface gravity has Schwarzschild and extremal limits") {
   CHECK(teuk::surface_gravity(1.0, 0.999) > 0.0);
 }
 
-TEST_CASE("key value parameters are strict and validated") {
-  teuk::Parameters parameters;
-  teuk::apply_key_value(parameters, "spin=0.99");
-  teuk::apply_key_value(parameters, "nr=256");
-  teuk::apply_key_value(parameters, "steps=64");
-  teuk::apply_key_value(parameters, "ellmax=4");
-  teuk::apply_key_value(parameters, "ntheta=7");
-  teuk::apply_key_value(parameters, "modes=2,-2,0");
-  teuk::apply_key_value(parameters, "seed_m=-2");
-  teuk::apply_key_value(parameters, "seed_ell=3");
-  teuk::apply_key_value(parameters, "source_start=0.75");
-  teuk::apply_key_value(parameters, "source_constraint_tol=2e-8");
-  teuk::apply_key_value(parameters, "source_mode=unrestricted");
-  teuk::apply_key_value(parameters, "output=test-run");
-  teuk::apply_key_value(parameters, "restart=checkpoint-4");
-  teuk::validate(parameters);
-  CHECK_NEAR(parameters.spin, 0.99, 1.0e-15);
-  CHECK(parameters.radial_points == 256);
-  CHECK(parameters.steps == 64);
-  CHECK(parameters.ell_max == 4);
-  CHECK(parameters.modes == std::vector<int>({2, -2, 0}));
-  CHECK(parameters.seed_mode == -2);
-  CHECK(parameters.seed_ell == 3);
-  CHECK_NEAR(parameters.source_start_time, 0.75, 1.0e-15);
-  CHECK_NEAR(parameters.source_constraint_tolerance, 2.0e-8, 1.0e-20);
-  CHECK(parameters.allow_inconsistent_source);
-  CHECK(parameters.output_directory == "test-run");
-  CHECK(parameters.restart_directory == "checkpoint-4");
-
-  bool rejected = false;
-  try {
-    teuk::apply_key_value(parameters, "mystery=1");
-  } catch (const std::invalid_argument&) {
-    rejected = true;
-  }
-  CHECK(rejected);
+TEST_CASE("runtime configuration parses typed values modes and overrides") {
+  const std::string text = R"cfg(
+    # a complete nonlinear run
+    config_version = 1
+    mass = 1.0
+    spin = 7.0e-1
+    compactification_length = 1.5
+    nr = 33
+    ntheta = 8
+    ellmax_first = 4
+    ellmax_second = 5
+    first_order_modes = -2, 2
+    second_order_modes = -4, 0, 4
+    final_time = 2.5e-2
+    steps = 64
+    cfl = 1.0e-1
+    reduction_damping = 0.2
+    dissipation = 5e-3
+    reduction_mode = stage_constrained
+    initial_data.type = gaussian
+    initial_data.seed_ell = 3
+    initial_data.seed_m = 2
+    initial_data.amplitude_real = 2e-4
+    initial_data.amplitude_imag = -3e-5
+    initial_data.mode.1.ell = 4
+    initial_data.mode.1.m = -2
+    initial_data.mode.1.amplitude_real = -1e-4
+    initial_data.mode.1.amplitude_imag = 4e-5
+    initial_data.add_sharp_partner = false
+    second_order.enabled = true
+    second_order.source_mode = constraint_aware
+    second_order.source_start_time = 0.75
+    second_order.constraint_tolerance = 2e-8
+    second_order.required_consecutive_passes = 2
+    second_order.allow_truncated_daughter_modes = false
+    output.directory = test-run
+    output.diagnostic_every = 4
+    output.checkpoint_every = 8
+  )cfg";
+  const auto parameters = teuk::parse_run_configuration_text(
+      text, {"spin=0.6", "nr=65", "output.directory=override-run"});
+  CHECK_NEAR(parameters.background.spin, 0.6, 1.0e-15);
+  CHECK(parameters.grid.radial_points == 65);
+  CHECK(parameters.grid.ell_max_first == 4);
+  CHECK(parameters.grid.ell_max_second == 5);
+  CHECK(parameters.grid.first_order_modes == std::vector<int>({-2, 2}));
+  CHECK(parameters.grid.second_order_modes ==
+        std::vector<int>({-4, 0, 4}));
+  CHECK(parameters.method.reduction ==
+        teuk::ReductionEvolution::StageConstrained);
+  CHECK(parameters.initial_data.modes.size() == 2);
+  CHECK(parameters.initial_data.modes[0].ell == 3);
+  CHECK(parameters.initial_data.modes[0].m == 2);
+  CHECK_COMPLEX_NEAR(parameters.initial_data.modes[0].amplitude,
+                     teuk::Complex(2e-4, -3e-5), 0.0);
+  CHECK(parameters.initial_data.modes[1].ell == 4);
+  CHECK(parameters.initial_data.modes[1].m == -2);
+  CHECK(parameters.second_order.enabled);
+  CHECK(parameters.second_order.required_consecutive_passes == 2);
+  CHECK_NEAR(parameters.second_order.normalized_constraint_tolerance, 2e-8,
+             0.0);
+  CHECK(parameters.output.directory == "override-run");
 }
 
 TEST_CASE("metadata documents binary snapshot ordering") {

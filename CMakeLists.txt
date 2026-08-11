@@ -30,6 +30,18 @@ target_include_directories(teuk INTERFACE
 target_link_libraries(teuk INTERFACE Kokkos::kokkos)
 target_compile_features(teuk INTERFACE cxx_std_20)
 
+execute_process(
+  COMMAND git rev-parse HEAD
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+  OUTPUT_VARIABLE TEUK_GIT_COMMIT
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  ERROR_QUIET)
+if(NOT TEUK_GIT_COMMIT)
+  set(TEUK_GIT_COMMIT "unknown")
+endif()
+target_compile_definitions(teuk INTERFACE
+  TEUK_GIT_COMMIT="${TEUK_GIT_COMMIT}")
+
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|IntelLLVM")
   target_compile_options(teuk INTERFACE
     $<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra;-Wpedantic>)
@@ -49,6 +61,13 @@ if(BUILD_TESTING)
   target_include_directories(teuk_tests PRIVATE tests)
   target_link_libraries(teuk_tests PRIVATE teuk)
   add_test(NAME teuk.unit COMMAND teuk_tests)
+
+  add_test(
+    NAME teuk.config_integration
+    COMMAND ${CMAKE_COMMAND}
+      -DTEUK_SOLVER=$<TARGET_FILE:teuk_solver>
+      -DTEUK_INTEGRATION_DIR=${CMAKE_CURRENT_BINARY_DIR}/config-integration
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_config_integration.cmake)
 
   if(TEUK_ENABLE_SYMBOLIC_AUDIT)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)

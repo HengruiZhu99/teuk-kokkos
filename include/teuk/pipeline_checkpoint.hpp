@@ -99,6 +99,7 @@ inline ReductionEvolution parse_reduction(const std::string& text) {
 
 inline const char* source_mode_name(const SecondOrderSourceMode mode) {
   switch (mode) {
+    case SecondOrderSourceMode::Disabled: return "disabled";
     case SecondOrderSourceMode::ConstraintAware: return "constraint_aware";
     case SecondOrderSourceMode::Unrestricted: return "unrestricted";
   }
@@ -106,6 +107,7 @@ inline const char* source_mode_name(const SecondOrderSourceMode mode) {
 }
 
 inline SecondOrderSourceMode parse_source_mode(const std::string& text) {
+  if (text == "disabled") return SecondOrderSourceMode::Disabled;
   if (text == "constraint_aware") {
     return SecondOrderSourceMode::ConstraintAware;
   }
