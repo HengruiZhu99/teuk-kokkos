@@ -37,7 +37,7 @@ TEST_CASE("pipeline Gaussian initial data are bandlimited consistent and scalabl
   teuk::PipelineGaussianPulse pulse;
   pulse.center = 0.4;
   pulse.width = 0.14;
-  pulse.modes = {{2, 2, teuk::Complex(0.7, -0.2)},
+  pulse.modes = {{3, 2, teuk::Complex(0.7, -0.2)},
                  {3, -2, teuk::Complex(-0.35, 0.5)}};
 
   initial_data_copies = 0;
@@ -80,6 +80,21 @@ TEST_CASE("pipeline Gaussian initial data are bandlimited consistent and scalabl
           2e-12);
     }
 
+    for (const std::size_t field : {p, q, psi}) {
+      for (std::size_t radial = 0; radial < radial_grid.size(); ++radial) {
+        for (int node = 0; node < theta_nodes; ++node) {
+          nodal[static_cast<std::size_t>(node)] = initial(
+              mode_index, field, radial, static_cast<std::size_t>(node));
+        }
+        const auto projected = transform.synthesize(transform.analyze(nodal));
+        for (int node = 0; node < theta_nodes; ++node) {
+          CHECK_COMPLEX_NEAR(nodal[static_cast<std::size_t>(node)],
+                             projected[static_cast<std::size_t>(node)],
+                             3e-12);
+        }
+      }
+    }
+
     for (int node = 0; node < theta_nodes; ++node) {
       const auto theta = static_cast<std::size_t>(node);
       std::vector<teuk::Complex> psi_line(radial_grid.size());
@@ -91,6 +106,14 @@ TEST_CASE("pipeline Gaussian initial data are bandlimited consistent and scalabl
       for (std::size_t radial = 0; radial < radial_grid.size(); ++radial) {
         CHECK_COMPLEX_NEAR(initial(mode_index, q, radial, theta),
                            derivative[radial], 2e-14);
+      }
+    }
+
+    // In Kerr, the pointwise time derivative may contain discarded angular
+    // content. Its retained Galerkin coefficients must vanish instead.
+    for (std::size_t radial = 0; radial < radial_grid.size(); ++radial) {
+      for (int node = 0; node < theta_nodes; ++node) {
+        const auto theta = static_cast<std::size_t>(node);
         teuk::TeukolskyParameters parameters;
         parameters.mass = background.mass;
         parameters.spin = background.spin;
@@ -101,12 +124,15 @@ TEST_CASE("pipeline Gaussian initial data are bandlimited consistent and scalabl
         const auto coefficients = teuk::teukolsky_coefficients(
             parameters, radial_grid.coordinate(radial),
             teuk::angular::gauss_legendre(theta_nodes).theta(theta));
-        const teuk::TeukolskyState point{
-            initial(mode_index, p, radial, theta),
-            initial(mode_index, q, radial, theta),
-            initial(mode_index, psi, radial, theta)};
-        CHECK_COMPLEX_NEAR(teuk::teukolsky_psi_rhs(coefficients, point),
-                           teuk::Complex(0.0, 0.0), 3e-14);
+        nodal[theta] = teuk::teukolsky_psi_rhs(
+            coefficients,
+            {initial(mode_index, p, radial, theta),
+             initial(mode_index, q, radial, theta),
+             initial(mode_index, psi, radial, theta)});
+      }
+      const auto modal_dt = transform.analyze(nodal);
+      for (const auto coefficient : modal_dt) {
+        CHECK_COMPLEX_NEAR(coefficient, teuk::Complex(0.0, 0.0), 8e-13);
       }
     }
   }

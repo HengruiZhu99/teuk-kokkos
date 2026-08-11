@@ -27,6 +27,7 @@
 #include "teuk/background.hpp"
 #include "teuk/io.hpp"
 #include "teuk/modes.hpp"
+#include "teuk/pipeline_bands.hpp"
 #include "teuk/pipeline_io.hpp"
 #include "teuk/spatial_pipeline.hpp"
 #include "teuk/teukolsky.hpp"
@@ -652,6 +653,22 @@ inline PipelineCheckpointMetadata load_pipeline_checkpoint(
       directory / pipeline_checkpoint_state_file, count);
   if (checksum(values) != metadata.state_checksum) {
     throw std::runtime_error("pipeline checkpoint state checksum mismatch");
+  }
+
+  using ConstHostState =
+      Kokkos::View<const Complex****, Kokkos::LayoutRight, Kokkos::HostSpace,
+                   Kokkos::MemoryTraits<Kokkos::Unmanaged>>;
+  ConstHostState checkpoint_state(
+      values.data(), metadata.shape.modes, metadata.shape.fields,
+      metadata.shape.radial, metadata.shape.theta);
+  constexpr double restart_band_tolerance = 5.0e-11;
+  const auto band_report = measure_pipeline_state_off_band(
+      checkpoint_state, expected_registry,
+      {expected_configuration.ell_max, expected_configuration.ell_max});
+  if (!pipeline_state_is_bandlimited(band_report,
+                                     restart_band_tolerance)) {
+    throw std::runtime_error(
+        "pipeline checkpoint contains meaningful off-band angular content");
   }
 
   Kokkos::View<Complex*, Kokkos::HostSpace> host("checkpoint_read_state",

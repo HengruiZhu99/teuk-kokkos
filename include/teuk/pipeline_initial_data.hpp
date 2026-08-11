@@ -11,8 +11,10 @@
 
 #include "teuk/angular.hpp"
 #include "teuk/background.hpp"
+#include "teuk/dense_solve.hpp"
 #include "teuk/fields.hpp"
 #include "teuk/modes.hpp"
+#include "teuk/pipeline_bands.hpp"
 #include "teuk/pipeline_storage.hpp"
 #include "teuk/sbp.hpp"
 #include "teuk/spatial_pipeline.hpp"
@@ -121,6 +123,68 @@ inline std::vector<Complex> angular_seed(
   return transform.synthesize(modal);
 }
 
+template <class HostStateView>
+inline double construct_galerkin_zero_time_derivative_p(
+    const HostStateView& state, const ModeRegistry& registry,
+    const int ell_max, const KerrParameters& background,
+    const UniformRadialGrid& radial_grid) {
+  const std::size_t p = static_cast<std::size_t>(PipelineField::FirstP);
+  const std::size_t q = static_cast<std::size_t>(PipelineField::FirstQ);
+  const std::size_t psi = static_cast<std::size_t>(PipelineField::FirstPsi);
+  const int theta_count = static_cast<int>(state.extent(3));
+  const auto angular_grid = angular::gauss_legendre(theta_count);
+  double maximum_residual = 0.0;
+  TeukolskyParameters parameters;
+  parameters.mass = background.mass;
+  parameters.spin = background.spin;
+  parameters.compactification_length = background.compactification_length;
+  parameters.spin_weight = -2;
+  for (std::size_t mode = 0; mode < registry.size(); ++mode) {
+    const int m = registry.modes()[mode];
+    parameters.azimuthal_mode = m;
+    const angular::SpinWeightedTransform transform(-2, m, ell_max,
+                                                   theta_count);
+    const std::size_t modal_count = transform.mode_count();
+    const auto& analysis = transform.analysis_matrix();
+    const auto& synthesis = transform.synthesis_matrix();
+    std::vector<Complex> matrix(modal_count * modal_count);
+    std::vector<Complex> rhs(modal_count);
+    for (std::size_t radial = 0; radial < state.extent(2); ++radial) {
+      std::fill(matrix.begin(), matrix.end(), Complex(0.0, 0.0));
+      std::fill(rhs.begin(), rhs.end(), Complex(0.0, 0.0));
+      for (std::size_t node = 0; node < state.extent(3); ++node) {
+        const auto coefficients = teukolsky_coefficients(
+            parameters, radial_grid.coordinate(radial),
+            angular_grid.theta(node));
+        const Complex inverse_time = 1.0 / coefficients.time;
+        const Complex nodal_rhs = inverse_time *
+            (-2.0 * coefficients.radial_advection *
+                 state(mode, q, radial, node) +
+             coefficients.definition * state(mode, psi, radial, node));
+        for (std::size_t row = 0; row < modal_count; ++row) {
+          rhs[row] += analysis(row, node) * nodal_rhs;
+          for (std::size_t column = 0; column < modal_count; ++column) {
+            matrix[row * modal_count + column] +=
+                analysis(row, node) * inverse_time * synthesis(node, column);
+          }
+        }
+      }
+      const auto original_matrix = matrix;
+      const auto original_rhs = rhs;
+      const auto modal_p = solve_dense_complex_system(matrix, rhs);
+      maximum_residual = std::max(
+          maximum_residual,
+          dense_complex_relative_residual(original_matrix, modal_p,
+                                          original_rhs));
+      const auto nodal_p = transform.synthesize(modal_p);
+      for (std::size_t node = 0; node < state.extent(3); ++node) {
+        state(mode, p, radial, node) = nodal_p[node];
+      }
+    }
+  }
+  return maximum_residual;
+}
+
 }  // namespace pipeline_initial_data_detail
 
 // Readable host setup for the complete SpatialPipeline state. All thirteen
@@ -190,28 +254,14 @@ inline void initialize_compactified_gaussian_pulse(
     }
   }
 
-  // P is defined from the chosen partial_T Psi=0 condition.
-  const auto angular_grid =
-      angular::gauss_legendre(static_cast<int>(theta_count));
-  TeukolskyParameters teukolsky;
-  teukolsky.mass = background.mass;
-  teukolsky.spin = background.spin;
-  teukolsky.compactification_length = background.compactification_length;
-  teukolsky.spin_weight = -2;
-  for (std::size_t mode = 0; mode < registry.size(); ++mode) {
-    teukolsky.azimuthal_mode = registry.modes()[mode];
-    for (std::size_t radial = 0; radial < radial_count; ++radial) {
-      const Real coordinate = radial_grid.coordinate(radial);
-      for (std::size_t theta = 0; theta < theta_count; ++theta) {
-        const auto coefficients = teukolsky_coefficients(
-            teukolsky, coordinate, angular_grid.theta(theta));
-        const Complex psi = host_state(mode, first_psi, radial, theta);
-        const Complex q = host_state(mode, first_q, radial, theta);
-        host_state(mode, first_p, radial, theta) =
-            -2.0 * coefficients.radial_advection * q +
-            coefficients.definition * psi;
-      }
-    }
+  // P is solved in the retained spin -2 basis. In Kerr, writing the
+  // pointwise definition directly would inject ell_max+1 through G_m F.
+  const double galerkin_residual =
+      pipeline_initial_data_detail::construct_galerkin_zero_time_derivative_p(
+          host_state, registry, ell_max, background, radial_grid);
+  if (!std::isfinite(galerkin_residual) || galerkin_residual > 2.0e-12) {
+    throw std::runtime_error(
+        "Galerkin initial-time-derivative solve failed its residual check");
   }
 
   if (!pipeline_initial_data_detail::is_zero(pulse.second_order_scale)) {
@@ -256,6 +306,9 @@ inline void initialize_compactified_gaussian_pulse(
       }
     }
   }
+
+  project_pipeline_state_to_retained_bands(
+      host_state, registry, {ell_max, ell_max});
 
   Kokkos::deep_copy(execution, storage.state(), host_state);
   execution.fence("initialize compactified Gaussian pipeline pulse");

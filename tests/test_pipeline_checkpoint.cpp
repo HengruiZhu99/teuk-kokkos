@@ -58,7 +58,9 @@ teuk::PipelineCheckpointConfiguration checkpoint_configuration() {
 }
 
 void initialize_pipeline(const teuk::ExecutionSpace& execution,
-                         teuk::SpatialPipeline& pipeline) {
+                         teuk::SpatialPipeline& pipeline,
+                         const teuk::ModeRegistry& registry,
+                         const int ell_max) {
   auto host = Kokkos::create_mirror_view(pipeline.storage().state());
   for (std::size_t mode = 0; mode < host.extent(0); ++mode) {
     for (std::size_t field = 0; field < host.extent(1); ++field) {
@@ -76,6 +78,8 @@ void initialize_pipeline(const teuk::ExecutionSpace& execution,
       }
     }
   }
+  teuk::project_pipeline_state_to_retained_bands(
+      host, registry, {ell_max, ell_max});
   Kokkos::deep_copy(execution, pipeline.storage().state(), host);
 }
 
@@ -157,8 +161,10 @@ TEST_CASE("full spatial pipeline checkpoint resumes the real RK4 trajectory") {
       configuration.reduction_damping, configuration.dissipation,
       configuration.reduction, "checkpoint_interrupted",
       configuration.source_policy);
-  initialize_pipeline(execution, uninterrupted);
-  initialize_pipeline(execution, interrupted);
+  initialize_pipeline(execution, uninterrupted, registry,
+                      configuration.ell_max);
+  initialize_pipeline(execution, interrupted, registry,
+                      configuration.ell_max);
 
   constexpr std::uint64_t total_steps = 4;
   constexpr std::uint64_t checkpoint_step = 2;
@@ -259,11 +265,20 @@ TEST_CASE("pipeline checkpoint rejects malformed truncated and mismatched data")
       configuration.reduction_damping, configuration.dissipation,
       configuration.reduction, "checkpoint_rejection",
       configuration.source_policy);
-  initialize_pipeline(execution, pipeline);
+  initialize_pipeline(execution, pipeline, registry, configuration.ell_max);
 
   TemporaryTestDirectory temporary;
   const auto valid = temporary.path() / "valid";
   teuk::write_pipeline_checkpoint(execution, valid, pipeline, registry,
+                                  configuration, {0.0, 0});
+
+  const auto off_band = temporary.path() / "off-band";
+  auto off_band_host = Kokkos::create_mirror_view(pipeline.storage().state());
+  Kokkos::deep_copy(off_band_host, pipeline.storage().state());
+  off_band_host(0, static_cast<std::size_t>(teuk::PipelineField::FirstP), 0,
+                0) += teuk::Complex(0.25, -0.1);
+  Kokkos::deep_copy(execution, pipeline.storage().state(), off_band_host);
+  teuk::write_pipeline_checkpoint(execution, off_band, pipeline, registry,
                                   configuration, {0.0, 0});
 
   const auto malformed = temporary.path() / "malformed";
@@ -283,6 +298,12 @@ TEST_CASE("pipeline checkpoint rejects malformed truncated and mismatched data")
   const teuk::Complex sentinel(0.125, -0.375);
   set_pipeline_state(execution, pipeline, sentinel);
   const auto before_rejections = pipeline_state(execution, pipeline);
+
+  CHECK(rejects([&] {
+    (void)teuk::load_pipeline_checkpoint(execution, off_band, pipeline,
+                                         registry, configuration);
+  }));
+  CHECK(pipeline_state(execution, pipeline) == before_rejections);
 
   const auto truncated = temporary.path() / "truncated";
   copy_checkpoint(valid, truncated);
