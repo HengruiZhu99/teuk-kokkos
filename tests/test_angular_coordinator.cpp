@@ -56,7 +56,7 @@ TEST_CASE("signed-mode angular coordinator matches every host plan") {
   constexpr int ell_max = 5;
   constexpr int node_count = 9;
   constexpr std::size_t radial_count = 3;
-  constexpr std::size_t field_count = 5;
+  constexpr std::size_t field_count = 7;
   const teuk::ModeRegistry registry({2, -2, 0, 1, -1});
   const teuk::KerrParameters parameters{1.0, 0.76, 1.25};
   const execution_space execution;
@@ -93,6 +93,11 @@ TEST_CASE("signed-mode angular coordinator matches every host plan") {
         const auto i = static_cast<std::size_t>(node);
         host_fields(mode_index, 0, radial, i) = nodal[i];
         host_fields(mode_index, 1, radial, i) = dt_nodal[i];
+        // Slot 6 represents an arbitrary padded/nonlinear nodal value rather
+        // than a field already synthesized in the retained modal band.
+        host_fields(mode_index, 6, radial, i) =
+            nodal[i] + teuk::Complex(0.013 * node * node,
+                                     -0.007 * node * node * node);
       }
     }
   }
@@ -142,6 +147,7 @@ TEST_CASE("signed-mode angular coordinator matches every host plan") {
       count_coordinator_allocation);
   Kokkos::Tools::Experimental::set_begin_deep_copy_callback(
       count_coordinator_copy);
+  coordinator.project(execution, fields, 6, fields, 5);
   coordinator.laplacian(execution, fields, 0, fields, 2);
   coordinator.eth(execution, fields, 0, fields, 1, radius, sin_theta,
                   cos_theta, fields, 3);
@@ -166,6 +172,13 @@ TEST_CASE("signed-mode angular coordinator matches every host plan") {
     for (std::size_t radial = 0; radial < radial_count; ++radial) {
       const auto expected_laplacian = source_transform.synthesize(
           source_transform.laplacian(modal[mode_index][radial]));
+      std::vector<teuk::Complex> padded_nodal(node_count);
+      for (int node = 0; node < node_count; ++node) {
+        padded_nodal[static_cast<std::size_t>(node)] = host_fields(
+            mode_index, 6, radial, static_cast<std::size_t>(node));
+      }
+      const auto expected_projection = source_transform.synthesize(
+          source_transform.analyze(padded_nodal));
       const auto raised_nodal = raised_transform.synthesize(align_modal(
           source_transform, source_transform.raise(modal[mode_index][radial]),
           raised_transform));
@@ -174,6 +187,8 @@ TEST_CASE("signed-mode angular coordinator matches every host plan") {
           lowered_transform));
       for (int node = 0; node < node_count; ++node) {
         const auto i = static_cast<std::size_t>(node);
+        CHECK_COMPLEX_NEAR(result(mode_index, 5, radial, i),
+                           expected_projection[i], 9e-13);
         CHECK_COMPLEX_NEAR(result(mode_index, 2, radial, i),
                            expected_laplacian[i], 9e-13);
         const auto expected_eth = teuk::eth_n_point(

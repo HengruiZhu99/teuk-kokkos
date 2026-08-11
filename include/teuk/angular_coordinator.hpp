@@ -93,6 +93,28 @@ class SignedModeAngularCoordinator {
     return radial_count_;
   }
 
+  // Project arbitrary nodal values onto the coordinator's retained fixed-m
+  // harmonic band. This analyze/synthesize path is used to truncate padded
+  // nonlinear D/T values before subsequent outer angular derivatives.
+  template <class InputView, class OutputView>
+  void project(const execution_space& execution, const InputView& input,
+               const std::size_t input_field, const OutputView& output,
+               const std::size_t output_field) {
+    validate_field_views(input, input_field, output, output_field);
+    for (std::size_t mode_index = 0; mode_index < resources_.size();
+         ++mode_index) {
+      auto input_mode = Kokkos::subview(input, mode_index, input_field,
+                                        Kokkos::ALL, Kokkos::ALL);
+      auto output_mode = Kokkos::subview(output, mode_index, output_field,
+                                         Kokkos::ALL, Kokkos::ALL);
+      auto& resource = *resources_[mode_index];
+      resource.angular.analyze(execution, input_mode,
+                               resource.laplacian_modal);
+      resource.angular.synthesize(execution, resource.laplacian_modal,
+                                  output_mode);
+    }
+  }
+
   // Nodal spin-weighted Laplacian for one field slot. Input and output may be
   // different slots of the same allocation because analysis completes on the
   // same execution queue before synthesis overwrites the output slot.
