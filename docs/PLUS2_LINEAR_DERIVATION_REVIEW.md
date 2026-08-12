@@ -123,10 +123,9 @@ X_m^sharp  = conjugate(X_(-m)).
 
 No `conjugate(X_m)` shortcut is permitted.
 
-Equations (C1c), (C1e), and (12) of arXiv:2008.11770 (with Eq. (11)
-repeating the `kappa1` formula), specialized to the ORG and perturbed tetrad
-used by arXiv:2010.00162, give the following exact
-two-step operator.  First form the first-order spin coefficients
+Equations (C1c) and (C1e) of arXiv:2008.11770 (with Eq. (11) repeating the
+`kappa1` formula), specialized to the ORG and perturbed tetrad used by
+arXiv:2010.00162, give the first step.  Form the first-order spin coefficients
 
 ```text
 sigma1 = 1/2 [D + 2(epsilon_bar-epsilon) + rho-rho_bar] h_mm
@@ -136,12 +135,19 @@ kappa1 = [D - 2 epsilon-rho_bar] h_lm
          - 1/2 [delta-2 alpha_bar-2 beta+pi_bar+tau] h_ll.
 ```
 
-Then
+For the second step, do **not** use displayed Eq. (12) of
+arXiv:2008.11770.  Its connection signs contradict the paper's own exact
+Ricci identity (A9b).  Solving (A9b) for `Psi0` on a type-D background gives
 
 ```text
 Psi0^(1) = [D-rho-rho_bar-3 epsilon+epsilon_bar] sigma1
-           - [delta+tau-pi_bar+alpha_bar+3 beta] kappa1.       (T0)
+           - [delta-alpha_bar-3 beta+pi_bar-tau] kappa1.       (T0)
 ```
+
+This corrected expression is independently printed as the exact Weyl-scalar
+formula in Campanelli and Lousto, arXiv:gr-qc/9811019 Appendix A Eq. (A5).
+Thus the disagreement is localized to displayed Eq. (12), not to the spin
+coefficients or to the Appendix-A Ricci identity.
 
 All background coefficients and derivatives here are in the rotated code
 tetrad.  This is a second-order differential operator on the reconstructed
@@ -158,16 +164,17 @@ kappa1 = (thorn-rho_bar) h_lm
          - 1/2 (eth+pi_bar+tau) h_ll.
 ```
 
-For the outer angular operation it is safer to retain the displayed NP
-formula initially.  If it is expressed through the repository's `eth`, use
-the weight of `kappa1`, `(s,b)=(+1,+2)`, and include the connection conversion
-exactly:
+The corrected outer operations have the especially simple GHP form
 
 ```text
 delta kappa1 = eth(kappa1) + 3 beta kappa1 + alpha_bar kappa1.
+
+Psi0^(1) = (thorn-rho-rho_bar) sigma1
+           - (eth+pi_bar-tau) kappa1.
 ```
 
-Dropping those connection terms would change `T0`.
+The `alpha_bar` and `beta` terms cancel in the second line; retaining the
+opposite-sign combination from arXiv:2008.11770 Eq. (12) would change `T0`.
 
 ### Exact input and derivative manifest
 
@@ -383,7 +390,9 @@ PASS explicit tetrad phase rationalization
 PASS tetrad phase has unit norm
 PASS sigma NP-to-GHP rewrite
 PASS kappa NP-to-GHP rewrite
-PASS outer Psi0 angular operator NP-to-eth rewrite
+PASS exact Psi0 formula solves Ricci identity A9b
+PASS displayed Eq12 signs differ from corrected A5 at nontrivial point
+PASS corrected outer Psi0 angular operator NP-to-eth rewrite
 PASS T0 spin/boost weights
 PASS Schwarzschild angular Starobinsky product
 PASS ell=2 angular Starobinsky product
@@ -396,7 +405,8 @@ PASS compact spin +2 lower-order endpoint finiteness
 ```
 
 These checks encode arXiv:2010.00162 Eqs. (21b) and (22),
-arXiv:2008.11770 Eqs. (C1c), (C1e), and (12), and
+arXiv:2008.11770 Eqs. (C1c), (C1e), and (A9b),
+arXiv:gr-qc/9811019 Eq. (A5), and
 arXiv:2403.20311 Eqs. (2.22)--(2.24).  They intentionally do not claim the
 phase-sensitive hatted-factor validation of Eqs. (2.37), (2.38), and (2.44).
 
@@ -420,9 +430,11 @@ transcription.  This still requires the exact tests L3--L6 before enabling
 production `spin_weight=+2`.
 
 There is no formal blocker to a local metric-curvature `Psi0^(1)` diagnostic:
-the exact `T0` operator is given above.  The main numerical risk is the
-`R^-3/R^-4` cancellation at scri; convergence against the coordinate oracle
-is mandatory.
+the corrected exact `T0` operator is given above and is supported by two
+independent primary identities.  The sign disagreement in
+arXiv:2008.11770 Eq. (12) must remain an explicit regression test.  The main
+numerical risk is the `R^-3/R^-4` cancellation at scri; convergence against
+the coordinate oracle is mandatory.
 
 The following remain hard gates for claiming a TSI-normalized companion:
 
@@ -442,3 +454,4 @@ from a single sign of `m`, or from the unhatted Starobinsky product alone.
 - https://arxiv.org/abs/1601.06084
 - https://arxiv.org/abs/1908.09095
 - https://arxiv.org/abs/2403.20311
+- https://arxiv.org/abs/gr-qc/9811019

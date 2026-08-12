@@ -139,16 +139,61 @@ def main() -> None:
     )
     require_equal("kappa NP-to-GHP rewrite", kappa_np.subs(substitutions), kappa_ghp)
 
-    # For kappa, (s,b)=(1,2), hence (p,q)=(3,1).
-    delta_kappa, eth_kappa, kappa = sp.symbols(
-        "delta_kappa eth_kappa kappa"
+    # Loutrel et al. Appendix A Eq. (A9b), solved for Psi0, agrees with
+    # Campanelli--Lousto Appendix A Eq. (A5).  Displayed Loutrel Eq. (12)
+    # instead has the wrong connection signs and must not be transcribed.
+    d_sigma, delta_kappa, sigma, kappa, psi0 = sp.symbols(
+        "D_sigma delta_kappa sigma kappa psi0"
     )
+    ricci_identity_rhs = (
+        sigma * (rho + rho_bar + 3 * epsilon - epsilon_bar)
+        - kappa * (tau - pi_bar + alpha_bar + 3 * beta)
+        + psi0
+    )
+    exact_psi0 = (
+        d_sigma
+        - (rho + rho_bar + 3 * epsilon - epsilon_bar) * sigma
+        - (
+            delta_kappa
+            - alpha_bar * kappa
+            - 3 * beta * kappa
+            + pi_bar * kappa
+            - tau * kappa
+        )
+    )
+    require_equal(
+        "exact Psi0 formula solves Ricci identity A9b",
+        ricci_identity_rhs.subs(psi0, exact_psi0),
+        d_sigma - delta_kappa,
+    )
+    old_displayed_angular = (
+        delta_kappa + (tau - pi_bar + alpha_bar + 3 * beta) * kappa
+    )
+    corrected_angular = (
+        delta_kappa + (-alpha_bar - 3 * beta + pi_bar - tau) * kappa
+    )
+    nontrivial_point = {
+        delta_kappa: sp.Integer(5),
+        tau: sp.Integer(2),
+        pi_bar: sp.Integer(-3),
+        alpha_bar: sp.Integer(7),
+        beta: sp.Integer(11),
+        kappa: sp.Integer(13),
+    }
+    require_equal(
+        "displayed Eq12 signs differ from corrected A5 at nontrivial point",
+        (old_displayed_angular - corrected_angular).subs(nontrivial_point),
+        sp.Integer(1170),
+    )
+
+    # For kappa, (s,b)=(1,2), hence (p,q)=(3,1).
+    eth_kappa = sp.symbols("eth_kappa")
     # The delta-to-eth equality is definitional; check its insertion into the
     # NP outer operator rather than equating independent symbols directly.
-    outer_np = delta_kappa + (tau - pi_bar + alpha_bar + 3 * beta) * kappa
-    outer_in_eth = eth_kappa + (tau - pi_bar + 2 * alpha_bar + 6 * beta) * kappa
+    outer_np = delta_kappa + (-alpha_bar - 3 * beta + pi_bar - tau) * kappa
+    outer_in_eth = eth_kappa + (pi_bar - tau) * kappa
     require_equal(
-        "outer Psi0 angular operator NP-to-eth rewrite",
+        "corrected outer Psi0 angular operator NP-to-eth rewrite",
         outer_np.subs({delta_kappa: eth_kappa + 3 * beta * kappa + alpha_bar * kappa}),
         outer_in_eth,
     )
