@@ -441,6 +441,9 @@ std::vector<C> evolve_manufactured(const int steps,
 }  // namespace
 
 TEST_CASE("plus2 Bianchi transport has fourth-order common-stage time RK4") {
+  CHECK(transport_type::authority() ==
+        teuk::Plus2BianchiTransportAuthority::
+            ValidationOnlyWeaklyHyperbolicInRotatingKerr);
   std::vector<std::uint64_t> generations;
   std::vector<double> stage_times;
   const auto coarse = evolve_manufactured(4, &generations, &stage_times);

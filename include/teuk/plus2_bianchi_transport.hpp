@@ -31,6 +31,10 @@ enum class Plus2BianchiStateComponent : std::size_t {
   Count = 2,
 };
 
+enum class Plus2BianchiTransportAuthority {
+  ValidationOnlyWeaklyHyperbolicInRotatingKerr,
+};
+
 // Complete h[0..2] and stationary-background inputs used by (B0), (B1), and
 // their exact first time derivatives.  Bianchi-5 couples Sig to the stationary
 // type-D curvature psi20, so its tangent contains SigT but no H/HT factor.
@@ -660,6 +664,11 @@ static_assert(sizeof(ComputeZ0TTAndConstraintsFunctor) < 1800);
 template <class ExecSpace = ExecutionSpace>
 class Plus2BianchiTransport {
  public:
+  [[nodiscard]] static constexpr Plus2BianchiTransportAuthority authority()
+      noexcept {
+    return Plus2BianchiTransportAuthority::
+        ValidationOnlyWeaklyHyperbolicInRotatingKerr;
+  }
   using execution_space = ExecSpace;
   using memory_space = typename execution_space::memory_space;
   static_assert(std::is_same_v<memory_space, MemorySpace>,
@@ -1091,8 +1100,9 @@ class Plus2BianchiTransport {
 // One-way common-stage RK4 wrapper.  primary_rhs cannot access the curvature
 // transport through its signature; the passive stage sees the primary stage,
 // builds h[0..2], computes Route-A closure/tangents, and then exposes the
-// generation-stamped curvature and derivative stages to the observer
-// (normally the live source gate).
+// generation-stamped curvature and derivative stages to the observer. This
+// wrapper is validation-only in rotating Kerr because the continuum radial
+// symbol has a nontrivial Jordan block.
 template <class PrimaryValue, class ExecutionSpace, class PrimaryStateView,
           class PrimaryRightHandSide, class PrimaryInputProducer,
           class StageObserver>

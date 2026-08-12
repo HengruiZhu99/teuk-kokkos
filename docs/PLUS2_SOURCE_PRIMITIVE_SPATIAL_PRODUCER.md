@@ -5,8 +5,9 @@ live-source scientific overload; not runtime wiring or a physical Bianchi
 boundary-data qualification.
 
 `Plus2SourcePrimitiveSpatialProducer` consumes generation-stamped
-reconstruction `h[0]`, `h[1]`, and `h[2]` views together with the read-only
-Route-A transported-curvature and Bianchi-derivative stages. It constructs
+reconstruction `h[0]`, `h[1]`, and `h[2]` views together with read-only
+curvature and derivative stages. The latter may come from Route A only in
+validation; rotating production requires local Route B. It constructs
 exactly the producer-owned production slots:
 
 - twelve non-curvature primitives: `H,Sig,Kap,Rh,Ta,Al,Be,Ep,Pi,V,C,B`;
@@ -16,12 +17,13 @@ exactly the producer-owned production slots:
   `Delta2Sig,Delta3Kap,ethprime3Kap`.
 
 `Z0,Z1` and the four curvature derivative pairs
-`Delta4Z1,ethprime4Z1,Delta5Z0,eth5Z0` remain owned by the Bianchi transport.
-The producer neither writes nor stamps those six output slots. Composition
-copies them through the existing typed transport adapter; there is no second
-authority and no curvature recomputation. The scientific live overload invokes
-this producer directly from the stamped reconstruction stage; generic source
-callbacks remain confined to low-level composition tests.
+`Delta4Z1,ethprime4Z1,Delta5Z0,eth5Z0` remain owned by the typed curvature
+adapter. The producer neither writes nor stamps those six output slots.
+Composition copies them through that adapter; there is no second authority or
+curvature recomputation. The scientific live overload invokes this concrete
+producer directly from the stamped reconstruction stage; generic source
+callbacks remain confined to low-level component tests. Rotating production
+still requires the pending five-level local Route-B curvature provider.
 
 The formulas use the reviewed ordinary-NP primitive evaluator algebra, the
 repository GHP angular operators, exact stage tangents, signed
@@ -46,5 +48,5 @@ Focused serial evidence covers the twelve formulas and Jet tangents against
 the reviewed point oracle, exact output ownership, signed sharp lookup,
 stale/nonfinite fail closure, endpoint-inclusive D10-5 convergence of both a
 connection primitive and the nested `Delta3Kap` Q slot, and zero hot-path
-allocations/fences. This does not qualify the physical initial or radial
-boundary prescription for the passive Bianchi state.
+allocations/fences. This does not qualify physical local curvature or the
+validation-only passive Bianchi state.

@@ -160,9 +160,10 @@ struct MetricDerivativesT {
   Scalar ethprime1_Bsharp;
 };
 
-// The twelve non-curvature manifest rows.  Z0 and Z1 are deliberately absent:
-// this layer consumes them from the independently evolved Route-A transport
-// and never reconstructs a quotient or invents a scri coefficient.
+// The twelve non-curvature manifest rows. Z0 and Z1 are deliberately absent:
+// this layer consumes a typed curvature adapter and never reconstructs a
+// quotient or invents a scri coefficient. Route A may supply that adapter only
+// in validation; rotating production requires the local Route-B graph.
 template <class Scalar>
 struct ConnectionPrimitivesT {
   Scalar H;
@@ -201,7 +202,7 @@ connection_primitives(const double radius,
   derivatives.eth1_B = d.eth1_B;
   derivatives.ethprime1_Bsharp = d.ethprime1_Bsharp;
   // Curvature-quotient derivative slots enter only Z0/Z1. Those returned
-  // values are ignored in favor of the typed Route-A transport.
+  // values are ignored in favor of the typed curvature adapter.
   const auto p = plus2_source_primitives(radius, background, fields,
                                          derivatives);
   return {p.H, p.Sig, p.Kap, p.Rh, p.Ta, p.Al,

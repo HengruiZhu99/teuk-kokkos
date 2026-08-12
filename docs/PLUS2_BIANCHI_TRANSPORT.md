@@ -3,7 +3,8 @@
 **Status:** standalone, allocation-free Route-A validation transport and
 restart gate with a typed adapter into the standalone live-source composition;
 blocked from production use by rotating weak hyperbolicity and not wired to
-`solver_driver`.
+`solver_driver`. The characteristic and endpoint evidence gate is documented
+in `PLUS2_CURVATURE_INITIAL_AND_BOUNDARY_GATE.md`.
 
 For nonzero background rotation, the two-field Route-A radial principal symbol
 has a repeated outward characteristic speed but only a Jordan chain: the
@@ -162,7 +163,10 @@ machinery, not a well-posed rotating production evolution or physical initial
 or boundary data. A standalone three-state coordinator also verifies one
 common RK tableau for primary, Route-A validation state, and passive
 Teukolsky companion without operator splitting. It does not remove the Route-A
-Jordan block. Production must pivot to a strongly hyperbolic or algebraic
-curvature provider (currently expected to be local Route B from `h[0..4]`),
-then independently qualify scri/horizon data and the complete four-field
-convergence/TSI campaign before any `solver_driver` wiring.
+Jordan block. The curvature gate supplies a typed, resolution-bound D10-5
+l'Hopital operator for independently produced peeling numerators and proves
+the continuum characteristic directions; its analytic profiles are quotient
+tests, not physical metric data. Production must pivot to the local Route-B
+provider from `h[0..4]`, earn a physical full-plane three-resolution
+certificate, and qualify the complete four-field convergence/TSI campaign
+before any `solver_driver` wiring.

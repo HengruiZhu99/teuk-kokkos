@@ -1,7 +1,8 @@
 # Spin `+2` stage-local curvature derivative gate
 
-**Status:** Route A approved and implemented as a standalone mathematical and
-production-value gate; no `SpatialPipeline` or runtime wiring.
+**Status:** Route A implemented as a standalone mathematical and validation
+gate. Its rotating transport is blocked for production by a weakly
+hyperbolic radial Jordan block; no `SpatialPipeline` or runtime wiring.
 
 ## 1. Question fixed by this gate
 
@@ -249,21 +250,21 @@ the contract into:
 Supplying fictitious zero tangents to the current API is not an acceptable
 implementation.
 
-## 6. Two exact production contracts
+## 6. Two exact curvature-construction contracts
 
-### Route A: Bianchi curvature closure
+### Route A: Bianchi curvature closure (validation only in rotating Kerr)
 
-Two variants are mathematically exact:
+Two variants are algebraically exact:
 
 1. A producer supplies same-stage regular `Z0,Z1` values and their radial and
    angular workspaces.  Their `T` and `TT` values and all four required source
    derivative slots are computed from (B0)--(B1T).  `Z0,Z1` may be obtained
    from the local metric only where the curvature quotients are qualified.
 2. `Z1` and then `Z0` are evolved as passive triangular first-order Bianchi
-   companion states.  This avoids rebuilding the delicate quotient at every
-   RK stage, but adds initial data, RK storage, boundary conditions, and
-   Bianchi constraint monitoring.  Initial data must be consistent with the
-   metric curvature, including explicit regular scri coefficients.
+   companion states. This avoids rebuilding the delicate quotient at every
+   RK stage, but the rotating principal symbol has a radial Jordan block and
+   is not strongly hyperbolic. It is therefore validation-only, irrespective
+   of initial data or boundary treatment.
 
 Minimum live inputs and workspaces are:
 
@@ -337,7 +338,9 @@ scri cancellation issue.
 
 ## 8. Decision gate
 
-The owner selected Route A.  The standalone implementation consists of:
+The owner initially selected Route A. Subsequent characteristic review limits
+its transport variant to validation and selects Route B for rotating
+production. The standalone Route-A implementation consists of:
 
 - `include/teuk/plus2_bianchi.hpp`, which provides (B0), (B1), exact
   `Delta_n` inversion, and fail-closed curvature quotient semantics;
@@ -353,12 +356,16 @@ The two mathematical alternatives considered were:
 - Route B with four exact applications of the full autonomous linear graph
   and explicit three-time-order scri curvature coefficients.
 
-Both routes are exact.  Route A has the lower derivative order and avoids
-repeated curvature division, but it introduces curvature state/initial-data
-semantics.  Route B preserves a purely local metric definition, but has a
-larger workspace and a substantially harder endpoint/cancellation gate.
+Both routes are algebraically exact. Route A has the lower derivative order
+but its rotating transport is weakly hyperbolic. Route B preserves a purely
+local metric definition and avoids that extra evolution, but has a larger
+workspace and a substantially harder endpoint/cancellation gate. The exact
+five-level derivative-tower design is documented in
+`docs/PLUS2_ROUTE_B_LOCAL_CURVATURE_DESIGN.md`.
 
-This standalone commit does not yet construct all radial/angular views from
-the live reconstruction state.  In particular, it cannot be wired until the
-separate fourth-order one-sided scri quotient/coefficient layer supplies
-qualified `Z0,Z1` values.  No endpoint extrapolation is hidden in this gate.
+This standalone gate does not construct all radial/angular views from the
+live reconstruction state. The separate D10-5 l'Hopital operator and its
+three-resolution certificate are now documented in
+`docs/PLUS2_CURVATURE_INITIAL_AND_BOUNDARY_GATE.md`, but the live producer
+still lacks the curvature numerator graph needed to earn that certificate.
+No endpoint extrapolation is hidden in either gate.

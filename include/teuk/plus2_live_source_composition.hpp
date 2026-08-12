@@ -21,8 +21,11 @@ namespace teuk {
 // This is the narrow live-composition gate between the already qualified
 // kernels.  It intentionally does not hide Z0/Z1 as mutable adapter state:
 // callers must supply their exact common-RK-stage values and first/second
-// tangents.  The scientific overload below binds the concrete primitive
-// spatial producer; the callback overload remains a low-level test seam.
+// tangents. The scientific overload below binds the concrete primitive
+// spatial producer; its curvature adapter may come from Route A only for
+// validation because the rotating Bianchi transport is weakly hyperbolic.
+// Rotating production requires the pending local Route-B curvature graph.
+// The callback overload remains a low-level component-test seam.
 using Plus2LiveReadinessView =
     Kokkos::View<std::uint8_t**, Kokkos::LayoutRight, MemorySpace>;
 

@@ -11,9 +11,9 @@ production by the rotating Route-A weak-hyperbolicity finding.
 1. decoded first-order/reconstruction value, tangent, and second tangent;
 2. the D10-5 metric-curvature `Psi0` graph required by the nested fourth-order
    live path;
-3. externally supplied same-stage, read-only Bianchi adapters containing
-   transported `Z0,Z1` values and first/second tangents plus the four Route-A
-   derivative pairs;
+3. externally supplied same-stage, read-only curvature adapters containing
+   `Z0,Z1` values and first/second tangents plus the four curvature derivative
+   pairs (Route A in validation, local Route B in rotating production);
 4. the concrete D10-5 producer for the twelve non-curvature primitives, seven
    remaining `J/K` pairs, and three value-only `Q` derivatives;
 5. value-only ordered-pair source evaluation;
@@ -36,7 +36,7 @@ every adapter invocation. Reconstruction, transported curvature, and Bianchi
 derivatives are exposed to producers through read-only views, so this
 interface cannot write feedback into the primary or Bianchi state.
 
-Transport owns exactly the value/tangent pairs for `Delta_4 Z1`,
+The curvature adapter owns exactly the value/tangent pairs for `Delta_4 Z1`,
 `ethprime_4 Z1`, `Delta_5 Z0`, and `eth_5 Z0`. The normalization kernel copies
 those eight adapter components into the corresponding four production `J/K`
 rows after the primitive callback and ignores producer stamps for only those
@@ -64,14 +64,12 @@ Route-B curvature provider from `h[0..4]`; it is not implemented or qualified
 here. The composition and companion common-stage RHS keep the provider seam
 external so that an algebraic provider need not own an evolved middle state.
 The outer projection/derivative producer remains an explicit reviewed seam.
-Physical Bianchi initialization, horizon/scri boundary data, and peeling
-coefficients remain external evidence requirements. `Z0,Z1` and their four
-derivative pairs must come from the common one-way RK state or exact
-deterministic replay; they cannot be hidden mutable state in a source callback.
-A grid containing
-scri is rejected unless the caller asserts independently qualified peeling
-coefficients; neither endpoint extrapolation nor a zero coefficient is
-invented here.
+The typed D10-5 l'Hopital gate can certify already supplied peeling numerators,
+but the live Route-B numerator graph and physical full-plane certificate remain
+absent. `Z0,Z1` and their four derivative pairs cannot be hidden mutable state
+in a source callback. A grid containing scri is rejected unless the caller
+supplies independently qualified peeling coefficients; neither endpoint
+extrapolation nor a zero coefficient is invented here.
 
 The binding and its manufactured seam test are not evidence for the physical
 Bianchi initial/boundary prescription, a complete runtime integration, or a
