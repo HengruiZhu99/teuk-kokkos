@@ -1,0 +1,102 @@
+specification:
+  name: raw_org_spin_plus2_companion
+  status: proposal_not_production_authority
+  perturbation_expansion: "A=A0+epsilon*A1+epsilon^2*A2+... (no factorial)"
+  signature: "+---"
+  gauge: outgoing_radiation_gauge
+  tetrad: rotated_kinnersley_gamma_zero
+  evolved_second_order_variable: raw_fixed_tetrad_Psi0_coefficient
+  paired_existing_variable: raw_fixed_tetrad_Psi4_coefficient
+  warning: "Do not substitute the Spiers reduced psi0L source for this raw field"
+
+prime_map:
+  tetrad: "l<->n, m<->mbar"
+  derivatives: "D<->Delta, delta<->bardelta"
+  weyl: "Psi0<->Psi4, Psi1<->Psi3, Psi2->Psi2"
+  spin_coefficients:
+    kappa: "-nu"
+    sigma: "-lambda"
+    rho: "-mu"
+    tau: "-pi"
+    beta: "-alpha"
+    epsilon: "-gamma"
+  ghp_weight: "{p,q}->{-p,-q}"
+  fourier_m: unchanged
+  sharp: "separate operation X_m^sharp=conj(X_-m)"
+
+regular_field:
+  physical: Psi0
+  internal: Z_plus
+  spin: 2
+  boost: 2
+  scaling: "Psi0 = W_plus * Z_plus"
+  W_plus: "R^5/(L^2-i*a*R*cos(theta))^4"
+  scri: "finite Z_plus for Psi0=O(R^5)"
+  horizon: "W_plus finite and nonzero for 0<R_H<infinity"
+
+background_outer_operators:
+  d4p: "D-4*rho-rhobar-3*epsilon+epsilonbar"
+  d3p: "delta-3*beta-alphabar-4*tau+pibar"
+  warning: "Do not drop epsilon terms unless D is explicitly replaced by the weighted GHP thorn on a stated type"
+
+homogeneous_covariant_operator:
+  expression: "(D-4*rho-rhobar-3*epsilon+epsilonbar)*(Delta-4*gamma+mu)-(delta-3*beta-alphabar-4*tau+pibar)*(bardelta-4*alpha+pi)-3*Psi2_0"
+  field: Psi0
+
+ungauge_fixed_source:
+  equation: "O_plus[Psi0_2]=S0_2"
+  terms:
+    - id: u01
+      expression: "-[d4p*A0_1-d3p*B0_1] Psi0_1"
+    - id: u02
+      expression: "+[d4p*C1_1-d3p*D1_1] Psi1_1"
+    - id: u03
+      expression: "+3[d4p*sigma_1-d3p*kappa_1] Psi2_1"
+    - id: u04
+      expression: "-3 Psi2_0[(d4p_1+3*rho_1)*sigma_1-(d3p_1+3*tau_1)*kappa_1]"
+  operator_definitions:
+    A0: "Delta-4*gamma+mu"
+    B0: "bardelta-4*alpha+pi"
+    C1: "delta-2*beta-4*tau"
+    D1: "D-2*epsilon-4*rho"
+
+org_specialization:
+  zero: [Delta_1, gamma_1, mu_1, nu_1, A0_1]
+  derivative_perturbations:
+    D_1: "-(1/2)*h_ll*Delta"
+    delta_1: "-h_lm*Delta+(1/2)*h_mm*bardelta"
+    bardelta_1: "-h_lbar*Delta+(1/2)*h_barbar*delta"
+  grouped_source:
+    - "d4p[C1_1(Psi1_1)+3*sigma_1*Psi2_1]"
+    - "d3p[B0_1(Psi0_1)-D1_1(Psi1_1)-3*kappa_1*Psi2_1]"
+    - "-3*Psi2_0[(D_1-rho_1-rhobar_1-3*epsilon_1+epsilonbar_1)*sigma_1-(delta_1-3*beta_1-alphabar_1-tau_1+pibar_1)*kappa_1]"
+
+required_inputs:
+  - {name: Psi0_1, spin: 2, boost: 2, scri_power: 5, current: derived_missing}
+  - {name: Psi1_1, spin: 1, boost: 1, scri_power: 4, current: derived_missing}
+  - {name: Psi2_1, spin: 0, boost: 0, scri_power: 3, current: stored_H}
+  - {name: sigma_1, spin: 2, boost: 1, scri_power: 2, current: derived_missing}
+  - {name: kappa_1, spin: 1, boost: 2, scri_power: 3, current: derived_missing}
+  - {name: rho_1, spin: 0, boost: 1, scri_power: 3, current: derived_missing}
+  - {name: tau_1, spin: 1, boost: 0, scri_power: 2, current: derived_missing}
+  - {name: pi_1, spin: -1, boost: 0, scri_power: 2, current: stored_Pi}
+
+homogeneous_operator:
+  authority: "arXiv:2010.00162 compact common s=+/-2 master equation"
+  spin: 2
+  principal_symbol: same_as_existing_minus2
+  angular_eigenvalue: "-(ell-2)*(ell+3)"
+  reuse_generic_kernel: mathematically_derived_but_not_numerically_qualified
+  coordinate_source_normalization:
+    general: "forcing_s=(2*Sigma_BL/R)*S_s"
+    both_signs: "2*(L^4+a^2*R^2*cos(theta)^2)*S_s/R^3"
+    scri_gate: "prove S0=O(R^3) after exact ORG/Bianchi cancellations"
+
+production_gate:
+  enabled: false
+  blockers:
+    - full_source_ledger_and_rescaling
+    - independent_CAS_notebook_replay
+    - cancellation_safe_Psi0_Psi1_oracle
+    - scri_and_horizon_compact_source_expansion
+    - cpu_gpu_and_convergence_validation

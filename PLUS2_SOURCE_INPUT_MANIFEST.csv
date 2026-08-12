@@ -1,0 +1,15 @@
+id,physical_definition,spin,boost,proposed_stored_definition,scri_power,sharp_relation,computed_from,differential_order,stage_tangent
+p0,Psi0^(1),2,2,"Psi0=R^5 Z0",5,none,"(D-rho-rhobar-3epsilon+epsilonbar)sigma-(delta+tau-pibar+alphabar+3beta)kappa",2,"Jet/product rule from same-stage metric and tangent"
+p1,Psi1^(1),1,1,"Psi1=R^4 Z1",4,none,"linearization of (D-rhobar+epsilonbar)beta-(delta+alphabar-pibar)epsilon-(alpha+pi)sigma+(mu+gamma)kappa; independent Bianchi transport oracle",2,"Jet/product rule or differentiated Bianchi transport at same RK stage"
+p2,Psi2^(1),0,0,"Psi2=R^3 H",3,"field-specific reality relation not assumed",existing H,0,existing reconstruction tangent
+sig,sigma^(1),2,1,"sigma=R^2 Sigma1",2,none,"0.5(D-2epsilon+2epsilonbar+rho-rhobar)h_mm-(pibar+tau)h_lm",1,"Jet/product rule from Bsharp and Csharp"
+kap,kappa^(1),1,2,"kappa=R^3 Kappa1",3,none,"(D-2epsilon-rhobar)h_lm-0.5(delta-2alphabar-2beta+pibar+tau)h_ll",1,"Jet/product rule from Csharp and U"
+rh,rho^(1),0,1,"rho1=R^3 Rho1",3,"rho1_m^sharp=conj(rho1_-m) only if established from real metric","0.5 mu h_ll+0.5(bardelta-2alpha-pi)h_lm-0.5(delta-2alphabar+pibar+2tau)h_lbar",1,"Jet/product rule from U and C/Csharp"
+ta,tau^(1),1,0,"tau1=R^2 Tau1",2,"pibar1 requires sharp of stored pi1","0.5(Delta+mu)h_lm-0.5 pi h_mm",1,"Jet/product rule from Csharp and Bsharp"
+al,alpha^(1),-1,0,"alpha1=R^2 Alpha1",2,"alphabar1 uses sharp","-0.25(Delta-2mu+mubar)h_lbar-0.25(delta-2alphabar+pibar+tau)h_barbar",1,"Jet/product rule from C and B"
+be,beta^(1),1,0,"beta1=R^2 Beta1",2,"betabar1 uses sharp","-0.25(Delta+mu+2mubar)h_lm+0.25(bardelta+2betabar-pi-taubar)h_mm",1,"Jet/product rule from Csharp and Bsharp"
+ep,epsilon^(1),0,1,"epsilon1=R^2 Epsilon1",2,"epsilonbar1 uses sharp","-0.25(Delta-mu+mubar)h_ll-0.25(delta-2alphabar+pibar+2tau)h_lbar+0.25(bardelta-2alpha-3pi-2taubar)h_lm",1,"Jet/product rule from U and C/Csharp"
+pi,pi^(1),-1,0,"pi1=R^2 Pi",2,"pibar1_m=conj(pi1_-m)",existing Pi,0,existing reconstruction tangent
+hll,h_ll,0,2,"h_ll=R^2 U/mu0",2,real-metric sharp relation,current U,0,existing reconstruction tangent
+hlb,h_lbar,-1,1,"h_lbar=R^2 C",2,"h_lm_m=conj(h_lbar_-m)",current C,0,existing reconstruction tangent
+hbb,h_barbar,-2,0,"h_barbar=R B",1,"h_mm_m=conj(h_barbar_-m)",current B,0,existing reconstruction tangent
