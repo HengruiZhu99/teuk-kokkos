@@ -388,12 +388,15 @@ struct FinalizeLevelFunctor {
   std::uint64_t* stamps;
   Complex* psi_coefficients;
   std::uint64_t* psi_coefficient_stamps;
+  Complex* current_coefficients;
+  std::uint64_t* current_coefficient_stamps;
   const std::uint8_t* ready;
   Stride5 jet_stride;
   Stride5 value_stride;
   Stride4 stamp_stride;
   Stride4 psi_coefficient_stride;
   Stride4 psi_coefficient_stamp_stride;
+  Stride5 current_coefficient_stride;
   std::size_t radial_count;
   std::size_t theta_count;
   std::size_t level;
@@ -411,6 +414,17 @@ struct FinalizeLevelFunctor {
         values[index5(level, mode, field, radial, theta, value_stride)] = {};
         jets[index5(level, mode, field, radial, theta, jet_stride)] = {};
       }
+      const auto jet =
+          jets[index5(level, mode, field, radial, theta, jet_stride)];
+      for (std::size_t order = 0; order < 5; ++order) {
+        const bool active = valid && order < 5 - level;
+        current_coefficients[index5(mode, field, order, radial, theta,
+                                    current_coefficient_stride)] =
+            active ? jet[order] : Complex{};
+        current_coefficient_stamps[index5(
+            mode, field, order, radial, theta,
+            current_coefficient_stride)] = active ? generation : 0;
+      }
     }
     stamps[index4(level, mode, radial, theta, stamp_stride)] =
         valid ? generation : 0;
@@ -425,6 +439,96 @@ struct FinalizeLevelFunctor {
                                     psi_coefficient_stamp_stride)] =
           active ? generation : 0;
     }
+  }
+};
+
+struct ValidateProjectedCoefficientsFunctor {
+  const Complex* coefficients;
+  const std::uint64_t* stamps;
+  std::uint8_t* ready;
+  Stride5 value_stride;
+  Stride5 stamp_stride;
+  std::size_t radial_count;
+  std::size_t theta_count;
+  std::size_t active_orders;
+  std::uint64_t token;
+
+  KOKKOS_INLINE_FUNCTION void operator()(const std::size_t flat) const {
+    const std::size_t plane = radial_count * theta_count;
+    const std::size_t mode = flat / plane;
+    const std::size_t within = flat - mode * plane;
+    const std::size_t radial = within / theta_count;
+    const std::size_t theta = within - radial * theta_count;
+    bool valid = true;
+    for (std::size_t field = 0; field < 3; ++field) {
+      for (std::size_t order = 0; order < active_orders; ++order) {
+        const auto value = coefficients[index5(mode, field, order, radial,
+                                                theta, value_stride)];
+        valid = valid && Kokkos::isfinite(value.real()) &&
+                Kokkos::isfinite(value.imag()) &&
+                stamps[index5(mode, field, order, radial, theta,
+                              stamp_stride)] == token;
+      }
+    }
+    if (!valid) Kokkos::atomic_exchange(ready, std::uint8_t{0});
+  }
+};
+
+struct AcceptProjectedCoefficientsFunctor {
+  const Complex* projected;
+  RouteBRadialTaylorJet<4, Complex>* jets;
+  Complex* values;
+  std::uint64_t* level_stamps;
+  Complex* current_coefficients;
+  std::uint64_t* current_stamps;
+  Complex* psi_coefficients;
+  std::uint64_t* psi_stamps;
+  const std::uint8_t* ready;
+  Stride5 projected_stride;
+  Stride5 jet_stride;
+  Stride5 value_stride;
+  Stride4 level_stamp_stride;
+  Stride5 current_stride;
+  Stride4 psi_stride;
+  std::size_t radial_count;
+  std::size_t theta_count;
+  std::size_t level;
+  std::size_t active_orders;
+  std::uint64_t generation;
+
+  KOKKOS_INLINE_FUNCTION void operator()(const std::size_t flat) const {
+    const std::size_t plane = radial_count * theta_count;
+    const std::size_t mode = flat / plane;
+    const std::size_t within = flat - mode * plane;
+    const std::size_t radial = within / theta_count;
+    const std::size_t theta = within - radial * theta_count;
+    const bool valid = ready[0] != 0;
+    for (std::size_t field = 0; field < 3; ++field) {
+      RouteBRadialTaylorJet<4, Complex> jet{};
+      for (std::size_t order = 0; order < 5; ++order) {
+        const bool active = valid && order < active_orders;
+        const Complex value =
+            active ? projected[index5(mode, field, order, radial, theta,
+                                      projected_stride)]
+                   : Complex{};
+        jet[order] = value;
+        current_coefficients[index5(mode, field, order, radial, theta,
+                                    current_stride)] = value;
+        current_stamps[index5(mode, field, order, radial, theta,
+                              current_stride)] = active ? generation : 0;
+        if (field == 2 && order < 4) {
+          psi_coefficients[index4(mode, order, radial, theta, psi_stride)] =
+              value;
+          psi_stamps[index4(mode, order, radial, theta, psi_stride)] =
+              active ? generation : 0;
+        }
+      }
+      jets[index5(level, mode, field, radial, theta, jet_stride)] = jet;
+      values[index5(level, mode, field, radial, theta, value_stride)] =
+          valid ? jet[0] : Complex{};
+    }
+    level_stamps[index4(level, mode, radial, theta, level_stamp_stride)] =
+        valid ? generation : 0;
   }
 };
 
@@ -452,6 +556,10 @@ class RouteBTeukolskyPrimaryJetTower {
       Kokkos::View<Complex****, Kokkos::LayoutRight, memory_space>;
   using psi_coefficient_stamp_view =
       Kokkos::View<std::uint64_t****, Kokkos::LayoutRight, memory_space>;
+  using coefficient_view =
+      Kokkos::View<Complex*****, Kokkos::LayoutRight, memory_space>;
+  using coefficient_stamp_view =
+      Kokkos::View<std::uint64_t*****, Kokkos::LayoutRight, memory_space>;
 
   RouteBTeukolskyPrimaryJetTower(
       const std::size_t mode_count, const UniformRadialGrid& grid,
@@ -472,6 +580,11 @@ class RouteBTeukolskyPrimaryJetTower {
                           grid.size(), theta_count),
         psi_coefficient_stamps_(label + "_psi_coefficient_stamps", mode_count,
                                 4, grid.size(), theta_count),
+        current_coefficients_(label + "_current_coefficients", mode_count, 3,
+                              5, grid.size(), theta_count),
+        current_coefficient_stamps_(label + "_current_coefficient_stamps",
+                                    mode_count, 3, 5, grid.size(),
+                                    theta_count),
         modes_(label + "_modes", mode_count),
         theta_(label + "_theta", theta_count),
         ready_(label + "_ready", 1) {
@@ -499,8 +612,20 @@ class RouteBTeukolskyPrimaryJetTower {
   psi_coefficient_stamps() const {
     return psi_coefficient_stamps_;
   }
+  [[nodiscard]] typename coefficient_view::const_type current_coefficients()
+      const {
+    return current_coefficients_;
+  }
+  [[nodiscard]] typename coefficient_stamp_view::const_type
+  current_coefficient_stamps() const {
+    return current_coefficient_stamps_;
+  }
   [[nodiscard]] std::size_t current_level() const { return current_level_; }
   [[nodiscard]] std::uint64_t generation() const { return generation_; }
+  [[nodiscard]] static bool generation_supported(
+      const std::uint64_t generation) {
+    return generation != 0 && valid_projection_tokens(generation);
+  }
 
   template <class ModeView, class ThetaView, class InputView,
             class InputStampView>
@@ -513,7 +638,7 @@ class RouteBTeukolskyPrimaryJetTower {
                   const ReductionEvolution reduction,
                   const double dissipation_strength) {
     validate_parameters(parameters, reduction, dissipation_strength);
-    if (generation == 0) {
+    if (!generation_supported(generation)) {
       throw std::invalid_argument("Route-B Teukolsky generation is zero");
     }
     validate_initial_views(signed_modes, theta, input, input_stamps);
@@ -523,6 +648,9 @@ class RouteBTeukolskyPrimaryJetTower {
     Kokkos::deep_copy(execution, jets_, jet_type{});
     Kokkos::deep_copy(execution, psi_coefficients_, Complex{});
     Kokkos::deep_copy(execution, psi_coefficient_stamps_, std::uint64_t{0});
+    Kokkos::deep_copy(execution, current_coefficients_, Complex{});
+    Kokkos::deep_copy(execution, current_coefficient_stamps_,
+                      std::uint64_t{0});
     Kokkos::deep_copy(execution, modes_, signed_modes);
     Kokkos::deep_copy(execution, theta_, theta);
     const std::size_t total = mode_count_ * grid_.size() * theta_count_;
@@ -554,13 +682,16 @@ class RouteBTeukolskyPrimaryJetTower {
         routeb_teukolsky_detail::FinalizeLevelFunctor{
             jets_.data(), values_.data(), stamps_.data(),
             psi_coefficients_.data(), psi_coefficient_stamps_.data(),
+            current_coefficients_.data(), current_coefficient_stamps_.data(),
             ready_.data(),
             strides5(jets_), strides5(values_), strides4(stamps_),
             strides4(psi_coefficients_), strides4(psi_coefficient_stamps_),
+            strides5(current_coefficients_),
             grid_.size(), theta_count_, 0, generation});
     parameters_ = parameters;
     generation_ = generation;
     current_level_ = 0;
+    current_level_projected_ = false;
     initialized_ = true;
   }
 
@@ -610,11 +741,54 @@ class RouteBTeukolskyPrimaryJetTower {
         routeb_teukolsky_detail::FinalizeLevelFunctor{
             jets_.data(), values_.data(), stamps_.data(),
             psi_coefficients_.data(), psi_coefficient_stamps_.data(),
+            current_coefficients_.data(), current_coefficient_stamps_.data(),
             ready_.data(),
             strides5(jets_), strides5(values_), strides4(stamps_),
             strides4(psi_coefficients_), strides4(psi_coefficient_stamps_),
+            strides5(current_coefficients_),
             grid_.size(), theta_count_, current_level_ + 1, generation});
     ++current_level_;
+    current_level_projected_ = false;
+  }
+
+  [[nodiscard]] std::uint64_t expected_projection_token() const {
+    if (!initialized_) return 0;
+    return projection_token(generation_, current_level_);
+  }
+
+  template <class ProjectedView, class ProjectedStampView>
+  void accept_projected_current(
+      const execution_space& execution, const ProjectedView& projected,
+      const ProjectedStampView& projected_stamps,
+      const std::uint64_t generation, const std::uint64_t token) {
+    if (!initialized_ || current_level_projected_ || generation != generation_ ||
+        token != expected_projection_token()) {
+      throw std::logic_error(
+          "Route-B Teukolsky projection stage is unavailable");
+    }
+    validate_projected_views(projected, projected_stamps);
+    Kokkos::deep_copy(execution, ready_, std::uint8_t{1});
+    const std::size_t active = 5 - current_level_;
+    const std::size_t total = mode_count_ * grid_.size() * theta_count_;
+    Kokkos::parallel_for(
+        "routeb_teukolsky_validate_projection",
+        Kokkos::RangePolicy<execution_space>(execution, 0, total),
+        routeb_teukolsky_detail::ValidateProjectedCoefficientsFunctor{
+            projected.data(), projected_stamps.data(), ready_.data(),
+            strides5(projected), strides5(projected_stamps), grid_.size(),
+            theta_count_, active, token});
+    Kokkos::parallel_for(
+        "routeb_teukolsky_accept_projection",
+        Kokkos::RangePolicy<execution_space>(execution, 0, total),
+        routeb_teukolsky_detail::AcceptProjectedCoefficientsFunctor{
+            projected.data(), jets_.data(), values_.data(), stamps_.data(),
+            current_coefficients_.data(), current_coefficient_stamps_.data(),
+            psi_coefficients_.data(), psi_coefficient_stamps_.data(),
+            ready_.data(), strides5(projected), strides5(jets_),
+            strides5(values_), strides4(stamps_),
+            strides5(current_coefficients_), strides4(psi_coefficients_),
+            grid_.size(), theta_count_, current_level_, active, generation_});
+    current_level_projected_ = true;
   }
 
  private:
@@ -651,6 +825,25 @@ class RouteBTeukolskyPrimaryJetTower {
     }
   }
 
+  [[nodiscard]] static std::uint64_t projection_token(
+      const std::uint64_t generation, const std::size_t level) {
+    return generation ^ (0xa24baed4963ee407ULL * (level + 1)) ^
+           0x9fb21c651e98df25ULL;
+  }
+
+  [[nodiscard]] static bool valid_projection_tokens(
+      const std::uint64_t generation) {
+    std::array<std::uint64_t, 5> tokens{};
+    for (std::size_t level = 0; level < tokens.size(); ++level) {
+      tokens[level] = projection_token(generation, level);
+      if (tokens[level] == 0) return false;
+      for (std::size_t previous = 0; previous < level; ++previous) {
+        if (tokens[previous] == tokens[level]) return false;
+      }
+    }
+    return true;
+  }
+
   template <class View>
   bool overlaps_owned(const View& view) const {
     return routeb_fornberg_detail::allocations_overlap(view, values_) ||
@@ -662,6 +855,10 @@ class RouteBTeukolskyPrimaryJetTower {
                                                         psi_coefficients_) ||
            routeb_fornberg_detail::allocations_overlap(
                view, psi_coefficient_stamps_) ||
+           routeb_fornberg_detail::allocations_overlap(
+               view, current_coefficients_) ||
+           routeb_fornberg_detail::allocations_overlap(
+               view, current_coefficient_stamps_) ||
            routeb_fornberg_detail::allocations_overlap(view, modes_) ||
            routeb_fornberg_detail::allocations_overlap(view, theta_) ||
            routeb_fornberg_detail::allocations_overlap(view, ready_);
@@ -740,6 +937,37 @@ class RouteBTeukolskyPrimaryJetTower {
     }
   }
 
+  template <class ProjectedView, class ProjectedStampView>
+  void validate_projected_views(
+      const ProjectedView& projected,
+      const ProjectedStampView& projected_stamps) const {
+    static_assert(ProjectedView::rank == 5 && ProjectedStampView::rank == 5);
+    static_assert(
+        std::is_same_v<typename ProjectedView::non_const_value_type, Complex> &&
+        std::is_same_v<typename ProjectedStampView::non_const_value_type,
+                       std::uint64_t>);
+    static_assert(Kokkos::SpaceAccessibility<
+                      execution_space,
+                      typename ProjectedView::memory_space>::accessible &&
+                  Kokkos::SpaceAccessibility<
+                      execution_space,
+                      typename ProjectedStampView::memory_space>::accessible);
+    const auto valid = [&](const auto& view) {
+      return view.data() != nullptr && view.extent(0) == mode_count_ &&
+             view.extent(1) == 3 && view.extent(2) == 5 &&
+             view.extent(3) == grid_.size() &&
+             view.extent(4) == theta_count_ &&
+             routeb_fornberg_detail::has_separated_strides<5>(view) &&
+             !overlaps_owned(view);
+    };
+    if (!valid(projected) || !valid(projected_stamps) ||
+        routeb_fornberg_detail::allocations_overlap(projected,
+                                                     projected_stamps)) {
+      throw std::invalid_argument(
+          "Route-B Teukolsky projected coefficient views invalid");
+    }
+  }
+
   std::size_t mode_count_;
   UniformRadialGrid grid_;
   std::size_t theta_count_;
@@ -750,6 +978,8 @@ class RouteBTeukolskyPrimaryJetTower {
       input_derivatives_;
   psi_coefficient_view psi_coefficients_;
   psi_coefficient_stamp_view psi_coefficient_stamps_;
+  coefficient_view current_coefficients_;
+  coefficient_stamp_view current_coefficient_stamps_;
   Kokkos::View<int*, memory_space> modes_;
   Kokkos::View<Real*, memory_space> theta_;
   Kokkos::View<std::uint8_t*, memory_space> ready_;
@@ -757,6 +987,7 @@ class RouteBTeukolskyPrimaryJetTower {
   std::size_t current_level_ = 0;
   std::uint64_t generation_ = 0;
   bool initialized_ = false;
+  bool current_level_projected_ = false;
 };
 
 }  // namespace teuk

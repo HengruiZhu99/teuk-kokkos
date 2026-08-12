@@ -742,10 +742,10 @@ TEST_CASE("Route-B reconstruction coefficient stamps track every active degree")
         Kokkos::HostSpace{}, fixture.tower.current_coefficient_stamps());
     for (std::size_t mode = 0; mode < 2; ++mode) {
       for (std::size_t field = 0; field < 7; ++field) {
-        for (std::size_t order = 0; order < 4; ++order) {
+        for (std::size_t order = 0; order < 5; ++order) {
           for (std::size_t radial = 0; radial < ContractFixture::radial_count;
                ++radial) {
-            const std::size_t active = level == 0 ? 4 : 5 - level;
+            const std::size_t active = 5 - level;
             CHECK(stamps(mode, field, order, radial, 0) ==
                   (order < active ? ContractFixture::generation : 0));
           }
@@ -817,7 +817,7 @@ TEST_CASE("Route-B reconstruction validates shape null alias and strided views")
   ContractFixture fixture;
   Kokkos::View<C****, Kokkos::LayoutRight, teuk::MemorySpace> wrong(
       "contract_wrong", 2, 6, ContractFixture::radial_count, 1);
-  CHECK(throws_invalid_argument([&] {
+    CHECK(throws_invalid_argument([&] {
     fixture.tower.initialize(
         fixture.execution, fixture.parameters, fixture.modes, fixture.sharp,
         fixture.theta, wrong, fixture.input_stamps, ContractFixture::generation,
@@ -1157,6 +1157,162 @@ TEST_CASE("Route-B reconstruction rejects malformed advance views") {
         fixture.execution, alias5, fixture.pass3_stamps,
         ContractFixture::generation, token3,
         teuk::ReductionEvolution::FreeDamped, 0.0);
+  }));
+}
+
+TEST_CASE("Route-B reconstruction projection seams are one shot and fail closed") {
+  auto make_projected = [](ContractFixture& fixture) {
+    Kokkos::View<C*****, Kokkos::LayoutRight, teuk::MemorySpace> projected(
+        "reconstruction_seam_projected", 2, 7, 5,
+        ContractFixture::radial_count, 1);
+    Kokkos::View<std::uint64_t*****, Kokkos::LayoutRight, teuk::MemorySpace>
+        stamps("reconstruction_seam_projected_stamps", 2, 7, 5,
+               ContractFixture::radial_count, 1);
+    Kokkos::deep_copy(fixture.execution, projected,
+                      fixture.tower.current_coefficients());
+    const auto token = fixture.tower.expected_initial_projection_token();
+    Kokkos::deep_copy(fixture.execution, stamps, token);
+    return std::pair{projected, stamps};
+  };
+  {
+    ContractFixture fixture;
+    fixture.initialize();
+    auto [projected, stamps] = make_projected(fixture);
+    const auto token = fixture.tower.expected_initial_projection_token();
+    CHECK(throws_logic_error([&] {
+      fixture.tower.accept_initial_projection(
+          fixture.execution, projected, stamps, ContractFixture::generation,
+          token + 1);
+    }));
+    CHECK(throws_logic_error([&] {
+      fixture.tower.accept_initial_projection(
+          fixture.execution, projected, stamps,
+          ContractFixture::generation + 1, token);
+    }));
+    Kokkos::View<C*****, Kokkos::LayoutRight, teuk::MemorySpace> wrong(
+        "reconstruction_seam_wrong", 2, 7, 4,
+        ContractFixture::radial_count, 1);
+  CHECK(throws_invalid_argument([&] {
+      fixture.tower.accept_initial_projection(
+          fixture.execution, wrong, stamps, ContractFixture::generation,
+          token);
+    }));
+    using BadStride =
+        Kokkos::View<C*****, Kokkos::LayoutStride, teuk::MemorySpace>;
+    BadStride colliding(
+        "reconstruction_seam_colliding",
+        Kokkos::LayoutStride(2, 6, 7, 1, 5, 14,
+                             ContractFixture::radial_count, 70, 1, 70));
+    CHECK(throws_invalid_argument([&] {
+      fixture.tower.accept_initial_projection(
+          fixture.execution, colliding, stamps, ContractFixture::generation,
+          token);
+    }));
+    using Alias = Kokkos::View<C*****, Kokkos::LayoutRight,
+                               teuk::MemorySpace,
+                               Kokkos::MemoryTraits<Kokkos::Unmanaged>>;
+    Alias alias(const_cast<C*>(fixture.tower.current_coefficients().data()), 2,
+                7, 5, ContractFixture::radial_count, 1);
+    CHECK(throws_invalid_argument([&] {
+      fixture.tower.accept_initial_projection(
+          fixture.execution, alias, stamps, ContractFixture::generation,
+          token);
+    }));
+    fixture.tower.accept_initial_projection(
+        fixture.execution, projected, stamps, ContractFixture::generation,
+        token);
+    CHECK(throws_logic_error([&] {
+      fixture.tower.accept_initial_projection(
+          fixture.execution, projected, stamps, ContractFixture::generation,
+          token);
+    }));
+  }
+  for (const bool nonfinite : {false, true}) {
+    ContractFixture fixture;
+    fixture.initialize();
+    auto [projected, stamps] = make_projected(fixture);
+    const auto token = fixture.tower.expected_initial_projection_token();
+    if (nonfinite) {
+      auto host = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{},
+                                                       projected);
+      host(0, 0, 4, 0, 0) =
+          C(std::numeric_limits<double>::quiet_NaN(), 0.0);
+      Kokkos::deep_copy(fixture.execution, projected, host);
+    } else {
+      auto host = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{},
+                                                       stamps);
+      host(0, 0, 4, 0, 0) = 0;
+      Kokkos::deep_copy(fixture.execution, stamps, host);
+    }
+    fixture.tower.accept_initial_projection(
+        fixture.execution, projected, stamps, ContractFixture::generation,
+        token);
+    fixture.execution.fence("inspect poisoned reconstruction projection seam");
+    const auto level_stamps = Kokkos::create_mirror_view_and_copy(
+        Kokkos::HostSpace{}, fixture.tower.stamps());
+    for (std::size_t mode = 0; mode < 2; ++mode)
+      for (std::size_t radial = 0; radial < ContractFixture::radial_count;
+           ++radial)
+        CHECK(level_stamps(0, mode, radial, 0) == 0);
+  }
+
+  // Pass1 uses a distinct token and is independently one-shot.
+  ContractFixture fixture;
+  fixture.initialize();
+  fixture.pass1();
+  Kokkos::View<C*****, Kokkos::LayoutRight, teuk::MemorySpace> projected(
+      "reconstruction_pass1_projected", 2, 7, 5,
+      ContractFixture::radial_count, 1);
+  Kokkos::View<std::uint64_t*****, Kokkos::LayoutRight, teuk::MemorySpace>
+      stamps("reconstruction_pass1_projected_stamps", 2, 7, 5,
+             ContractFixture::radial_count, 1);
+  Kokkos::deep_copy(fixture.execution, projected,
+                    fixture.tower.next_coefficients());
+  const auto token = ContractFixture::generation ^
+      (0x9e3779b97f4a7c15ULL * 1ULL) ^
+      (0xd1b54a32d192ed03ULL * 1ULL);
+  Kokkos::deep_copy(fixture.execution, stamps, token);
+  fixture.tower.accept_pass1_projection(
+      fixture.execution, projected, stamps, ContractFixture::generation,
+      token);
+  CHECK(throws_logic_error([&] {
+    fixture.tower.accept_pass1_projection(
+        fixture.execution, projected, stamps, ContractFixture::generation,
+        token);
+  }));
+  const auto token2 = fixture.tower.expected_pass_token();
+  Kokkos::deep_copy(fixture.execution, fixture.angular_stamps, token2);
+  fixture.tower.pass2(
+      fixture.execution, fixture.jet, fixture.angular_stamps,
+      ContractFixture::generation, token2,
+      teuk::ReductionEvolution::FreeDamped, 0.0);
+  Kokkos::deep_copy(fixture.execution, projected,
+                    fixture.tower.next_coefficients());
+  Kokkos::deep_copy(fixture.execution, stamps, token2);
+  fixture.tower.accept_pass2_projection(
+      fixture.execution, projected, stamps, ContractFixture::generation,
+      token2);
+  CHECK(throws_logic_error([&] {
+    fixture.tower.accept_pass2_projection(
+        fixture.execution, projected, stamps, ContractFixture::generation,
+        token2);
+  }));
+  const auto token3 = fixture.tower.expected_pass_token();
+  Kokkos::deep_copy(fixture.execution, fixture.pass3_stamps, token3);
+  fixture.tower.pass3(
+      fixture.execution, fixture.pass3, fixture.pass3_stamps,
+      ContractFixture::generation, token3,
+      teuk::ReductionEvolution::FreeDamped, 0.0);
+  Kokkos::deep_copy(fixture.execution, projected,
+                    fixture.tower.current_coefficients());
+  Kokkos::deep_copy(fixture.execution, stamps, token3);
+  fixture.tower.accept_pass3_projection(
+      fixture.execution, projected, stamps, ContractFixture::generation,
+      token3);
+  CHECK(throws_logic_error([&] {
+    fixture.tower.accept_pass3_projection(
+        fixture.execution, projected, stamps, ContractFixture::generation,
+        token3);
   }));
 }
 

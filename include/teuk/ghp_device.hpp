@@ -3,6 +3,7 @@
 #include <Kokkos_Core.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <stdexcept>
 #include <type_traits>
 
@@ -14,6 +15,18 @@
 namespace teuk {
 
 namespace ghp_device_detail {
+
+template <class LeftView, class RightView>
+bool allocations_overlap(const LeftView& left, const RightView& right) {
+  if (left.data() == nullptr || right.data() == nullptr) return false;
+  const auto left_begin = reinterpret_cast<std::uintptr_t>(left.data());
+  const auto right_begin = reinterpret_cast<std::uintptr_t>(right.data());
+  const auto left_end =
+      left_begin + left.span() * sizeof(typename LeftView::value_type);
+  const auto right_end =
+      right_begin + right.span() * sizeof(typename RightView::value_type);
+  return left_begin < right_end && right_begin < left_end;
+}
 
 struct AlignModalFunctor {
   const Complex* input;
@@ -234,7 +247,50 @@ class DeviceGhpAngularPlan {
                           cos_theta, output, workspace.angular_nodal);
   }
 
+  // Pure spin-weighted raise/lower, without the R-dependent Kerr tetrad and
+  // connection factors in eth_n/eth'_n. These commute with radial Taylor
+  // differentiation and are therefore the only coefficient-wise pieces used
+  // by the closed Route-B jet coordinator.
+  template <class NodalView, class OutputView>
+  void pure_raise(const execution_space& execution, const NodalView& field,
+                  const OutputView& output, Workspace& workspace) const {
+    validate_pure_shapes(field, output, workspace);
+    source_.analyze(execution, field, workspace.source_modal);
+    source_.raise(execution, workspace.source_modal,
+                  workspace.operated_modal);
+    align_modal(execution, workspace.operated_modal, source_.ell_min(),
+                workspace.raised_modal, raised_.ell_min());
+    raised_.synthesize(execution, workspace.raised_modal, output);
+  }
+
+  template <class NodalView, class OutputView>
+  void pure_lower(const execution_space& execution, const NodalView& field,
+                  const OutputView& output, Workspace& workspace) const {
+    validate_pure_shapes(field, output, workspace);
+    source_.analyze(execution, field, workspace.source_modal);
+    source_.lower(execution, workspace.source_modal,
+                  workspace.operated_modal);
+    align_modal(execution, workspace.operated_modal, source_.ell_min(),
+                workspace.lowered_modal, lowered_.ell_min());
+    lowered_.synthesize(execution, workspace.lowered_modal, output);
+  }
+
  private:
+  template <class NodalView, class OutputView>
+  void validate_pure_shapes(const NodalView& field, const OutputView& output,
+                            const Workspace& workspace) const {
+    static_assert(NodalView::rank == 2 && OutputView::rank == 2,
+                  "pure GHP angular views have invalid ranks");
+    if (field.data() == nullptr || output.data() == nullptr ||
+        field.extent(0) != output.extent(0) ||
+        field.extent(1) != node_count() ||
+        output.extent(1) != node_count() ||
+        workspace.batch_count() != field.extent(0) ||
+        ghp_device_detail::allocations_overlap(field, output)) {
+      throw std::invalid_argument("pure GHP angular view shape mismatch");
+    }
+  }
+
   template <class InputView, class OutputView>
   void align_modal(const execution_space& execution, const InputView& input,
                    const int input_ell_min, const OutputView& output,

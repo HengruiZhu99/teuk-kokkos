@@ -229,6 +229,48 @@ class SignedModeAngularCoordinator {
     }
   }
 
+  template <class InputView, class OutputView>
+  void pure_raise(const execution_space& execution, const InputView& input,
+                  const std::size_t input_field, const OutputView& output,
+                  const std::size_t output_field) {
+    validate_field_views(input, input_field, output, output_field);
+    for (std::size_t mode_index = 0; mode_index < resources_.size();
+         ++mode_index) {
+      auto input_mode = Kokkos::subview(input, mode_index, input_field,
+                                        Kokkos::ALL, Kokkos::ALL);
+      auto output_mode = Kokkos::subview(output, mode_index, output_field,
+                                         Kokkos::ALL, Kokkos::ALL);
+      if (!resources_[mode_index]) {
+        zero_mode(execution, output_mode, "zero_inactive_pure_raise");
+        continue;
+      }
+      auto& resource = *resources_[mode_index];
+      resource.ghp.pure_raise(execution, input_mode, output_mode,
+                              resource.ghp_workspace);
+    }
+  }
+
+  template <class InputView, class OutputView>
+  void pure_lower(const execution_space& execution, const InputView& input,
+                  const std::size_t input_field, const OutputView& output,
+                  const std::size_t output_field) {
+    validate_field_views(input, input_field, output, output_field);
+    for (std::size_t mode_index = 0; mode_index < resources_.size();
+         ++mode_index) {
+      auto input_mode = Kokkos::subview(input, mode_index, input_field,
+                                        Kokkos::ALL, Kokkos::ALL);
+      auto output_mode = Kokkos::subview(output, mode_index, output_field,
+                                         Kokkos::ALL, Kokkos::ALL);
+      if (!resources_[mode_index]) {
+        zero_mode(execution, output_mode, "zero_inactive_pure_lower");
+        continue;
+      }
+      auto& resource = *resources_[mode_index];
+      resource.ghp.pure_lower(execution, input_mode, output_mode,
+                              resource.ghp_workspace);
+    }
+  }
+
  private:
   template <class ViewType>
   void zero_mode(const execution_space& execution, const ViewType& view,

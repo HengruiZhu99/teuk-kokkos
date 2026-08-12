@@ -1078,4 +1078,93 @@ TEST_CASE("Route-B primary hot advance allocates and fences nothing") {
   CHECK(routeb_primary_fences == 0);
 }
 
+TEST_CASE("Route-B primary projection seam is one shot and fail closed") {
+  auto make_projected = [](ContractFixture& fixture) {
+    Kokkos::View<C*****, Kokkos::LayoutRight, teuk::MemorySpace> projected(
+        "primary_seam_projected", 1, 3, 5, ContractFixture::radial_count,
+        ContractFixture::theta_count);
+    Kokkos::View<std::uint64_t*****, Kokkos::LayoutRight, teuk::MemorySpace>
+        stamps("primary_seam_projected_stamps", 1, 3, 5,
+               ContractFixture::radial_count, ContractFixture::theta_count);
+    Kokkos::deep_copy(fixture.execution, projected,
+                      fixture.tower.current_coefficients());
+    Kokkos::deep_copy(fixture.execution, stamps,
+                      fixture.tower.current_coefficient_stamps());
+    const auto token = fixture.tower.expected_projection_token();
+    Kokkos::deep_copy(fixture.execution, stamps, token);
+    return std::pair{projected, stamps};
+  };
+  {
+    ContractFixture fixture;
+    fixture.initialize();
+    auto [projected, stamps] = make_projected(fixture);
+    const auto token = fixture.tower.expected_projection_token();
+    CHECK(throws_logic_error([&] {
+      fixture.tower.accept_projected_current(
+          fixture.execution, projected, stamps, ContractFixture::generation,
+          token + 1);
+    }));
+    CHECK(throws_logic_error([&] {
+      fixture.tower.accept_projected_current(
+          fixture.execution, projected, stamps,
+          ContractFixture::generation + 1, token);
+    }));
+    Kokkos::View<C*****, Kokkos::LayoutRight, teuk::MemorySpace> wrong(
+        "primary_seam_wrong", 1, 3, 4, ContractFixture::radial_count,
+        ContractFixture::theta_count);
+    CHECK(throws_invalid_argument([&] {
+      fixture.tower.accept_projected_current(
+          fixture.execution, wrong, stamps, ContractFixture::generation,
+          token);
+    }));
+    using Alias = Kokkos::View<C*****, Kokkos::LayoutRight,
+                               teuk::MemorySpace,
+                               Kokkos::MemoryTraits<Kokkos::Unmanaged>>;
+    Alias alias(const_cast<C*>(fixture.tower.current_coefficients().data()), 1,
+                3, 5, ContractFixture::radial_count,
+                ContractFixture::theta_count);
+    CHECK(throws_invalid_argument([&] {
+      fixture.tower.accept_projected_current(
+          fixture.execution, alias, stamps, ContractFixture::generation,
+          token);
+    }));
+    fixture.tower.accept_projected_current(
+        fixture.execution, projected, stamps, ContractFixture::generation,
+        token);
+    CHECK(throws_logic_error([&] {
+      fixture.tower.accept_projected_current(
+          fixture.execution, projected, stamps, ContractFixture::generation,
+          token);
+    }));
+  }
+  for (const bool nonfinite : {false, true}) {
+    ContractFixture fixture;
+    fixture.initialize();
+    auto [projected, stamps] = make_projected(fixture);
+    const auto token = fixture.tower.expected_projection_token();
+    if (nonfinite) {
+      auto host = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{},
+                                                       projected);
+      host(0, 0, 0, 0, 0) =
+          C(std::numeric_limits<double>::quiet_NaN(), 0.0);
+      Kokkos::deep_copy(fixture.execution, projected, host);
+    } else {
+      auto host = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{},
+                                                       stamps);
+      host(0, 0, 0, 0, 0) = 0;
+      Kokkos::deep_copy(fixture.execution, stamps, host);
+    }
+    fixture.tower.accept_projected_current(
+        fixture.execution, projected, stamps, ContractFixture::generation,
+        token);
+    fixture.execution.fence("inspect poisoned primary projection seam");
+    const auto level_stamps = Kokkos::create_mirror_view_and_copy(
+        Kokkos::HostSpace{}, fixture.tower.stamps());
+    for (std::size_t radial = 0; radial < ContractFixture::radial_count;
+         ++radial)
+      for (std::size_t node = 0; node < ContractFixture::theta_count; ++node)
+        CHECK(level_stamps(0, 0, radial, node) == 0);
+  }
+}
+
 }  // namespace

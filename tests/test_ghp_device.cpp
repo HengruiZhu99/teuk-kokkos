@@ -32,6 +32,16 @@ auto host_copy(const ViewType& view) {
   return Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{}, view);
 }
 
+template <class Function>
+bool throws_invalid_argument(Function&& function) {
+  try {
+    function();
+  } catch (const std::invalid_argument&) {
+    return true;
+  }
+  return false;
+}
+
 }  // namespace
 
 TEST_CASE("stage-local rotating Kerr GHP plan matches host point formulas") {
@@ -252,4 +262,25 @@ TEST_CASE("Schwarzschild GHP plan reduces to modal raising and lowering factors"
     CHECK_COMPLEX_NEAR(host_eth(0, i), scale * raised_nodal[i], 4e-13);
     CHECK_COMPLEX_NEAR(host_ethprime(0, i), scale * lowered_nodal[i], 4e-13);
   }
+}
+
+TEST_CASE("pure GHP angular plans reject exact and shifted overlap") {
+  using execution_space = Kokkos::DefaultExecutionSpace;
+  using plan_type = teuk::DeviceGhpAngularPlan<execution_space>;
+  constexpr int node_count = 7;
+  const execution_space execution;
+  const plan_type plan(execution, -1, 1, 0, 5, node_count,
+                       teuk::KerrParameters{1.0, 0.63, 1.4});
+  plan_type::Workspace workspace(plan, 1);
+  Kokkos::View<teuk::Complex*, teuk::MemorySpace> storage(
+      "pure_ghp_overlap_storage", 2 * node_count + 1);
+  using Unmanaged = Kokkos::View<
+      teuk::Complex**, Kokkos::LayoutRight, teuk::MemorySpace,
+      Kokkos::MemoryTraits<Kokkos::Unmanaged>>;
+  Unmanaged field(storage.data(), 1, node_count);
+  Unmanaged shifted(storage.data() + 1, 1, node_count);
+  CHECK(throws_invalid_argument(
+      [&] { plan.pure_raise(execution, field, field, workspace); }));
+  CHECK(throws_invalid_argument(
+      [&] { plan.pure_lower(execution, field, shifted, workspace); }));
 }

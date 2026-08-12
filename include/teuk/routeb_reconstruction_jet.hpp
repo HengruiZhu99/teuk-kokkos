@@ -637,7 +637,7 @@ struct PublishFields {
     for (std::size_t field = begin; field <= end; ++field) {
       const Jet4 jet = jets[index5(level, mode, field, radial, theta,
                                    jet_stride)];
-      for (std::size_t order = 0; order < 4; ++order) {
+      for (std::size_t order = 0; order < 5; ++order) {
         const bool active = valid && field >= first_field &&
                             field <= last_field && order < active_orders;
         coefficients[index5(mode, field, order, radial, theta,
@@ -687,7 +687,7 @@ struct FinalizeLevel {
       }
       values[index5(level, mode, field, radial, theta, value_stride)] =
           valid ? jet[0] : Complex{};
-      for (std::size_t order = 0; order < 4; ++order) {
+      for (std::size_t order = 0; order < 5; ++order) {
         const bool active = valid && order < active_orders;
         current_coefficients[index5(mode, field, order, radial, theta,
                                     coefficient_stride)] =
@@ -700,6 +700,143 @@ struct FinalizeLevel {
         next_stamps[index5(mode, field, order, radial, theta,
                            coefficient_stride)] = 0;
       }
+    }
+    level_stamps[index4(level, mode, radial, theta, level_stamp_stride)] =
+        valid ? generation : 0;
+  }
+};
+
+struct ValidateProjectedRange {
+  const Complex* projected;
+  const std::uint64_t* stamps;
+  std::uint8_t* ready;
+  Stride5 projected_stride;
+  Stride5 stamp_stride;
+  std::size_t radial_count;
+  std::size_t theta_count;
+  std::size_t first_field;
+  std::size_t last_field;
+  std::size_t active_orders;
+  std::uint64_t token;
+
+  KOKKOS_INLINE_FUNCTION void operator()(const std::size_t flat) const {
+    const std::size_t plane = radial_count * theta_count;
+    const std::size_t mode = flat / plane;
+    const std::size_t within = flat - mode * plane;
+    const std::size_t radial = within / theta_count;
+    const std::size_t theta = within - radial * theta_count;
+    bool valid = true;
+    for (std::size_t field = first_field; field <= last_field; ++field) {
+      for (std::size_t order = 0; order < active_orders; ++order) {
+        const Complex value = projected[index5(mode, field, order, radial,
+                                                theta, projected_stride)];
+        valid = valid && Kokkos::isfinite(value.real()) &&
+                Kokkos::isfinite(value.imag()) &&
+                stamps[index5(mode, field, order, radial, theta,
+                              stamp_stride)] == token;
+      }
+    }
+    if (!valid) Kokkos::atomic_exchange(ready, std::uint8_t{0});
+  }
+};
+
+struct AcceptProjectedNextRange {
+  const Complex* projected;
+  Jet4* jets;
+  Complex* next_coefficients;
+  std::uint64_t* next_stamps;
+  const std::uint8_t* ready;
+  Stride5 projected_stride;
+  Stride5 coefficient_stride;
+  Stride5 jet_stride;
+  std::size_t radial_count;
+  std::size_t theta_count;
+  std::size_t level;
+  std::size_t first_field;
+  std::size_t last_field;
+  std::size_t active_orders;
+  std::uint64_t token;
+
+  KOKKOS_INLINE_FUNCTION void operator()(const std::size_t flat) const {
+    const std::size_t plane = radial_count * theta_count;
+    const std::size_t mode = flat / plane;
+    const std::size_t within = flat - mode * plane;
+    const std::size_t radial = within / theta_count;
+    const std::size_t theta = within - radial * theta_count;
+    const bool valid = ready[0] != 0;
+    const std::size_t begin = valid ? first_field : 0;
+    const std::size_t end = valid ? last_field
+                                  : routeb_reconstruction_field_count - 1;
+    for (std::size_t field = begin; field <= end; ++field) {
+      Jet4 jet = jets[index5(level + 1, mode, field, radial, theta,
+                             jet_stride)];
+      for (std::size_t order = 0; order < 5; ++order) {
+        const bool active = valid && order < active_orders;
+        const Complex value =
+            active ? projected[index5(mode, field, order, radial, theta,
+                                      projected_stride)]
+                   : Complex{};
+        next_coefficients[index5(mode, field, order, radial, theta,
+                                 coefficient_stride)] = value;
+        next_stamps[index5(mode, field, order, radial, theta,
+                           coefficient_stride)] =
+            active ? token : 0;
+        jet[order] = value;
+      }
+      jets[index5(level + 1, mode, field, radial, theta, jet_stride)] = jet;
+    }
+  }
+};
+
+struct AcceptProjectedCurrentRange {
+  const Complex* projected;
+  Jet4* jets;
+  Complex* values;
+  std::uint64_t* level_stamps;
+  Complex* current_coefficients;
+  std::uint64_t* current_stamps;
+  const std::uint8_t* ready;
+  Stride5 projected_stride;
+  Stride5 coefficient_stride;
+  Stride5 jet_stride;
+  Stride5 value_stride;
+  Stride4 level_stamp_stride;
+  std::size_t radial_count;
+  std::size_t theta_count;
+  std::size_t level;
+  std::size_t first_field;
+  std::size_t last_field;
+  std::size_t active_orders;
+  std::uint64_t generation;
+
+  KOKKOS_INLINE_FUNCTION void operator()(const std::size_t flat) const {
+    const std::size_t plane = radial_count * theta_count;
+    const std::size_t mode = flat / plane;
+    const std::size_t within = flat - mode * plane;
+    const std::size_t radial = within / theta_count;
+    const std::size_t theta = within - radial * theta_count;
+    const bool valid = ready[0] != 0;
+    for (std::size_t field = 0; field < routeb_reconstruction_field_count;
+         ++field) {
+      Jet4 jet = jets[index5(level, mode, field, radial, theta, jet_stride)];
+      for (std::size_t order = 0; order < 5; ++order) {
+        const bool active = valid && order < active_orders;
+        if (!valid || (field >= first_field && field <= last_field)) {
+          jet[order] = active
+                           ? projected[index5(mode, field, order, radial,
+                                              theta, projected_stride)]
+                           : Complex{};
+        }
+        current_coefficients[index5(mode, field, order, radial, theta,
+                                    coefficient_stride)] =
+            active ? jet[order] : Complex{};
+        current_stamps[index5(mode, field, order, radial, theta,
+                              coefficient_stride)] =
+            active ? generation : 0;
+      }
+      jets[index5(level, mode, field, radial, theta, jet_stride)] = jet;
+      values[index5(level, mode, field, radial, theta, value_stride)] =
+          valid ? jet[0] : Complex{};
     }
     level_stamps[index4(level, mode, radial, theta, level_stamp_stride)] =
         valid ? generation : 0;
@@ -745,13 +882,13 @@ class RouteBReconstructionJetTower {
         input_derivatives_(label + "_input_derivatives", mode_count, 4, 7,
                            grid.size(), theta_count),
         current_coefficients_(label + "_current_coefficients", mode_count, 7,
-                              4, grid.size(), theta_count),
+                              5, grid.size(), theta_count),
         current_coefficient_stamps_(label + "_current_coefficient_stamps",
-                                    mode_count, 7, 4, grid.size(), theta_count),
-        next_coefficients_(label + "_next_coefficients", mode_count, 7, 4,
+                                    mode_count, 7, 5, grid.size(), theta_count),
+        next_coefficients_(label + "_next_coefficients", mode_count, 7, 5,
                            grid.size(), theta_count),
         next_coefficient_stamps_(label + "_next_coefficient_stamps",
-                                 mode_count, 7, 4, grid.size(), theta_count),
+                                 mode_count, 7, 5, grid.size(), theta_count),
         modes_(label + "_modes", mode_count),
         sharp_(label + "_sharp", mode_count),
         theta_(label + "_theta", theta_count),
@@ -795,9 +932,18 @@ class RouteBReconstructionJetTower {
   }
   [[nodiscard]] std::size_t current_level() const { return current_level_; }
   [[nodiscard]] std::uint64_t generation() const { return generation_; }
+  [[nodiscard]] static bool generation_supported(
+      const std::uint64_t generation) {
+    return generation != 0 && valid_generation_tokens(generation);
+  }
   [[nodiscard]] std::uint64_t expected_pass_token() const {
     if (!initialized_ || phase_ == Phase::Complete) return 0;
     return make_pass_token(current_level_, phase_);
+  }
+  [[nodiscard]] std::uint64_t expected_initial_projection_token() const {
+    return initialized_ && current_level_ == 0 && !initial_projected_
+               ? initial_projection_token()
+               : 0;
   }
 
   template <class ModeView, class SharpView, class ThetaView, class InputView,
@@ -811,7 +957,7 @@ class RouteBReconstructionJetTower {
                   const ReductionEvolution reduction,
                   const double dissipation_strength) {
     validate_parameters(parameters, reduction, dissipation_strength);
-    if (generation == 0 || !valid_generation_tokens(generation)) {
+    if (!generation_supported(generation)) {
       throw std::invalid_argument("Route-B reconstruction generation is zero");
     }
     validate_initial_views(signed_modes, sharp_indices, theta, input,
@@ -851,7 +997,7 @@ class RouteBReconstructionJetTower {
         Kokkos::RangePolicy<execution_space>(execution, 0, total),
         routeb_reconstruction_detail::ValidateFields{
             jets_.data(), ready_.data(), strides5(jets_), grid_.size(),
-            theta_count_, 0, 0, 6, 4});
+            theta_count_, 0, 0, 6, 5});
     Kokkos::parallel_for(
         "routeb_reconstruction_finalize_h0",
         Kokkos::RangePolicy<execution_space>(execution, 0, total),
@@ -861,11 +1007,15 @@ class RouteBReconstructionJetTower {
             next_coefficients_.data(), next_coefficient_stamps_.data(),
             ready_.data(), strides5(jets_), strides5(values_),
             strides4(level_stamps_), strides5(current_coefficients_),
-            grid_.size(), theta_count_, 0, 4, generation});
+            grid_.size(), theta_count_, 0, 5, generation});
     parameters_ = parameters;
     generation_ = generation;
     current_level_ = 0;
     phase_ = Phase::Pass1;
+    initial_projected_ = false;
+    pass1_projected_ = false;
+    pass2_projected_ = false;
+    pass3_projected_ = false;
     initialized_ = true;
   }
 
@@ -893,6 +1043,7 @@ class RouteBReconstructionJetTower {
     pack_pass1(execution, psi4, eth1_f);
     launch_pass(execution, combined_pass1_, 1, 0, 1, active, pass_token);
     phase_ = Phase::Pass2;
+    pass1_projected_ = false;
   }
 
   template <class AngularView, class AngularStampView>
@@ -914,6 +1065,7 @@ class RouteBReconstructionJetTower {
     pack_single(execution, eth2_g);
     launch_pass(execution, combined_pass1_, 2, 2, 5, active, pass_token);
     phase_ = Phase::Pass3;
+    pass2_projected_ = false;
   }
 
   template <class AngularView, class AngularStampView>
@@ -949,10 +1101,120 @@ class RouteBReconstructionJetTower {
             generation_});
     ++current_level_;
     phase_ = current_level_ < 4 ? Phase::Pass1 : Phase::Complete;
+    pass3_projected_ = false;
+  }
+
+  template <class ProjectedView, class ProjectedStampView>
+  void accept_initial_projection(
+      const execution_space& execution, const ProjectedView& projected,
+      const ProjectedStampView& projected_stamps,
+      const std::uint64_t generation, const std::uint64_t pass_token) {
+    if (!initialized_ || current_level_ != 0 || phase_ != Phase::Pass1 ||
+        generation != generation_ ||
+        initial_projected_ || pass_token != initial_projection_token()) {
+      throw std::logic_error(
+          "Route-B reconstruction h0 projection is unavailable");
+    }
+    validate_projected_views(projected, projected_stamps);
+    Kokkos::deep_copy(execution, ready_, std::uint8_t{1});
+    const std::size_t total = mode_count_ * grid_.size() * theta_count_;
+    Kokkos::parallel_for(
+        "routeb_reconstruction_validate_h0_projection",
+        Kokkos::RangePolicy<execution_space>(execution, 0, total),
+        routeb_reconstruction_detail::ValidateProjectedRange{
+            projected.data(), projected_stamps.data(), ready_.data(),
+            strides5(projected), strides5(projected_stamps), grid_.size(),
+            theta_count_, 0, routeb_reconstruction_field_count - 1, 5,
+            pass_token});
+    Kokkos::parallel_for(
+        "routeb_reconstruction_accept_h0_projection",
+        Kokkos::RangePolicy<execution_space>(execution, 0, total),
+        routeb_reconstruction_detail::AcceptProjectedCurrentRange{
+            projected.data(), jets_.data(), values_.data(),
+            level_stamps_.data(), current_coefficients_.data(),
+            current_coefficient_stamps_.data(), ready_.data(),
+            strides5(projected), strides5(current_coefficients_),
+            strides5(jets_), strides5(values_), strides4(level_stamps_),
+            grid_.size(), theta_count_, 0, 0,
+            routeb_reconstruction_field_count - 1, 5, generation_});
+    initial_projected_ = true;
+  }
+
+  template <class ProjectedView, class ProjectedStampView>
+  void accept_pass1_projection(
+      const execution_space& execution, const ProjectedView& projected,
+      const ProjectedStampView& projected_stamps,
+      const std::uint64_t generation, const std::uint64_t pass_token) {
+    if (!initialized_ || phase_ != Phase::Pass2 || pass1_projected_ ||
+        generation != generation_ ||
+        pass_token != make_pass_token(current_level_, Phase::Pass1)) {
+      throw std::logic_error(
+          "Route-B reconstruction pass1 projection is unavailable");
+    }
+    accept_projected_next(execution, projected, projected_stamps, 0, 1,
+                          pass_token);
+    pass1_projected_ = true;
+  }
+
+  template <class ProjectedView, class ProjectedStampView>
+  void accept_pass2_projection(
+      const execution_space& execution, const ProjectedView& projected,
+      const ProjectedStampView& projected_stamps,
+      const std::uint64_t generation, const std::uint64_t pass_token) {
+    if (!initialized_ || phase_ != Phase::Pass3 || pass2_projected_ ||
+        generation != generation_ ||
+        pass_token != make_pass_token(current_level_, Phase::Pass2)) {
+      throw std::logic_error(
+          "Route-B reconstruction pass2 projection is unavailable");
+    }
+    accept_projected_next(execution, projected, projected_stamps, 2, 5,
+                          pass_token);
+    pass2_projected_ = true;
+  }
+
+  template <class ProjectedView, class ProjectedStampView>
+  void accept_pass3_projection(
+      const execution_space& execution, const ProjectedView& projected,
+      const ProjectedStampView& projected_stamps,
+      const std::uint64_t generation, const std::uint64_t pass_token) {
+    if (!initialized_ || current_level_ == 0 || pass3_projected_ ||
+        generation != generation_ ||
+        (phase_ != Phase::Pass1 && phase_ != Phase::Complete) ||
+        pass_token != make_pass_token(current_level_ - 1, Phase::Pass3)) {
+      throw std::logic_error(
+          "Route-B reconstruction pass3 projection is unavailable");
+    }
+    validate_projected_views(projected, projected_stamps);
+    Kokkos::deep_copy(execution, ready_, std::uint8_t{1});
+    const std::size_t active = 5 - current_level_;
+    const std::size_t total = mode_count_ * grid_.size() * theta_count_;
+    Kokkos::parallel_for(
+        "routeb_reconstruction_validate_pass3_projection",
+        Kokkos::RangePolicy<execution_space>(execution, 0, total),
+        routeb_reconstruction_detail::ValidateProjectedRange{
+            projected.data(), projected_stamps.data(), ready_.data(),
+            strides5(projected), strides5(projected_stamps), grid_.size(),
+            theta_count_, 6, 6, active, pass_token});
+    Kokkos::parallel_for(
+        "routeb_reconstruction_accept_pass3_projection",
+        Kokkos::RangePolicy<execution_space>(execution, 0, total),
+        routeb_reconstruction_detail::AcceptProjectedCurrentRange{
+            projected.data(), jets_.data(), values_.data(),
+            level_stamps_.data(), current_coefficients_.data(),
+            current_coefficient_stamps_.data(), ready_.data(),
+            strides5(projected), strides5(current_coefficients_),
+            strides5(jets_), strides5(values_), strides4(level_stamps_),
+            grid_.size(), theta_count_, current_level_, 6, 6, active,
+            generation_});
+    pass3_projected_ = true;
   }
 
  private:
   enum class Phase { Pass1, Pass2, Pass3, Complete };
+
+  [[nodiscard]] std::uint64_t initial_projection_token() const {
+    return generation_ ^ 0x6eed0e9da4d94a4fULL;
+  }
 
   [[nodiscard]] std::uint64_t make_pass_token(const std::size_t level,
                                               const Phase phase) const {
@@ -970,8 +1232,10 @@ class RouteBReconstructionJetTower {
 
   [[nodiscard]] static bool valid_generation_tokens(
       const std::uint64_t generation) {
-    std::array<std::uint64_t, 12> tokens{};
-    std::size_t index = 0;
+    std::array<std::uint64_t, 13> tokens{};
+    std::size_t index = 1;
+    tokens[0] = generation ^ 0x6eed0e9da4d94a4fULL;
+    if (tokens[0] == 0) return false;
     for (std::size_t level = 0; level < 4; ++level) {
       for (const Phase phase : {Phase::Pass1, Phase::Pass2, Phase::Pass3}) {
         const auto token =
@@ -1033,6 +1297,66 @@ class RouteBReconstructionJetTower {
            routeb_fornberg_detail::allocations_overlap(view, theta_) ||
            routeb_fornberg_detail::allocations_overlap(view, ready_) ||
            routeb_fornberg_detail::allocations_overlap(view, combined_pass1_);
+  }
+
+  template <class ProjectedView, class ProjectedStampView>
+  void validate_projected_views(
+      const ProjectedView& projected,
+      const ProjectedStampView& projected_stamps) const {
+    static_assert(ProjectedView::rank == 5 && ProjectedStampView::rank == 5);
+    static_assert(
+        std::is_same_v<typename ProjectedView::non_const_value_type, Complex> &&
+        std::is_same_v<typename ProjectedStampView::non_const_value_type,
+                       std::uint64_t>);
+    static_assert(Kokkos::SpaceAccessibility<
+                      execution_space,
+                      typename ProjectedView::memory_space>::accessible &&
+                  Kokkos::SpaceAccessibility<
+                      execution_space,
+                      typename ProjectedStampView::memory_space>::accessible);
+    const auto valid = [&](const auto& view) {
+      return view.data() != nullptr && view.extent(0) == mode_count_ &&
+             view.extent(1) == routeb_reconstruction_field_count &&
+             view.extent(2) == 5 && view.extent(3) == grid_.size() &&
+             view.extent(4) == theta_count_ &&
+             routeb_fornberg_detail::has_separated_strides<5>(view) &&
+             !overlaps_owned(view);
+    };
+    if (!valid(projected) || !valid(projected_stamps) ||
+        routeb_fornberg_detail::allocations_overlap(projected,
+                                                     projected_stamps)) {
+      throw std::invalid_argument(
+          "Route-B reconstruction projected coefficient views invalid");
+    }
+  }
+
+  template <class ProjectedView, class ProjectedStampView>
+  void accept_projected_next(const execution_space& execution,
+                             const ProjectedView& projected,
+                             const ProjectedStampView& projected_stamps,
+                             const std::size_t first_field,
+                             const std::size_t last_field,
+                             const std::uint64_t pass_token) {
+    validate_projected_views(projected, projected_stamps);
+    Kokkos::deep_copy(execution, ready_, std::uint8_t{1});
+    const std::size_t active = 4 - current_level_;
+    const std::size_t total = mode_count_ * grid_.size() * theta_count_;
+    Kokkos::parallel_for(
+        "routeb_reconstruction_validate_next_projection",
+        Kokkos::RangePolicy<execution_space>(execution, 0, total),
+        routeb_reconstruction_detail::ValidateProjectedRange{
+            projected.data(), projected_stamps.data(), ready_.data(),
+            strides5(projected), strides5(projected_stamps), grid_.size(),
+            theta_count_, first_field, last_field, active, pass_token});
+    Kokkos::parallel_for(
+        "routeb_reconstruction_accept_next_projection",
+        Kokkos::RangePolicy<execution_space>(execution, 0, total),
+        routeb_reconstruction_detail::AcceptProjectedNextRange{
+            projected.data(), jets_.data(), next_coefficients_.data(),
+            next_coefficient_stamps_.data(), ready_.data(),
+            strides5(projected), strides5(next_coefficients_),
+            strides5(jets_), grid_.size(), theta_count_, current_level_,
+            first_field, last_field, active, pass_token});
   }
 
   template <class ModeView, class SharpView, class ThetaView, class InputView,
@@ -1299,6 +1623,10 @@ class RouteBReconstructionJetTower {
   std::size_t current_level_ = 0;
   Phase phase_ = Phase::Complete;
   bool initialized_ = false;
+  bool initial_projected_ = false;
+  bool pass1_projected_ = false;
+  bool pass2_projected_ = false;
+  bool pass3_projected_ = false;
 };
 
 }  // namespace teuk
