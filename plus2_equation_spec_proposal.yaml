@@ -75,11 +75,35 @@ required_inputs:
   - {name: Psi0_1, spin: 2, boost: 2, scri_power: 5, current: derived_missing}
   - {name: Psi1_1, spin: 1, boost: 1, scri_power: 4, current: derived_missing}
   - {name: Psi2_1, spin: 0, boost: 0, scri_power: 3, current: stored_H}
-  - {name: sigma_1, spin: 2, boost: 1, scri_power: 2, current: derived_missing}
-  - {name: kappa_1, spin: 1, boost: 2, scri_power: 3, current: derived_missing}
-  - {name: rho_1, spin: 0, boost: 1, scri_power: 3, current: derived_missing}
-  - {name: tau_1, spin: 1, boost: 0, scri_power: 2, current: derived_missing}
+  - {name: sigma_1, spin: 2, boost: 1, scri_power: 2, current: derived_specified_not_implemented}
+  - {name: kappa_1, spin: 1, boost: 2, scri_power: 3, current: derived_specified_not_implemented}
+  - {name: rho_1, spin: 0, boost: 1, scri_power: 3, current: derived_specified_not_implemented}
+  - {name: tau_1, spin: 1, boost: 0, scri_power: 2, current: derived_specified_not_implemented}
   - {name: pi_1, spin: -1, boost: 0, scri_power: 2, current: stored_Pi}
+
+compact_raw_source:
+  status: symbolically_verified_conditional_on_regular_Z0_Z1
+  ledger: PLUS2_SOURCE_TERM_LEDGER.csv
+  derivation: docs/PLUS2_SOURCE_COMPACTIFICATION.md
+  stored_fields:
+    - "Psi0=R^5*Z0; Z0=Z_plus/(L^2-i*a*R*cos(theta))^4; Psi1=R^4*Z1; Psi2_1=R^3*H"
+    - "sigma1=R^2*Sig; kappa1=R^3*Kap"
+    - "rho1=R^3*Rh; tau1=R^2*Ta; pi1=R^2*Pi; epsilon1=R^2*Ep"
+    - "h_ll=R^2*V with V=U/mu0; h_lbar=R^2*C; h_lm=R^2*Csharp"
+    - "h_barbar=R*B; h_mm=R*Bsharp"
+  ordered_pair_families:
+    C12: "R^-6*C1_1[Psi1]_12"
+    B12: "R^-7*B0_1[Psi0]_12"
+    D12: "R^-6*D1_1[Psi1]_12"
+    Er12: "R^-4*Er_1[sigma]_12"
+    Et12: "R^-5*Et_1[kappa]_12"
+    J12: "R*C12+3*Sig1*H2"
+    K12: "R*B12-D12-3*Kap1*H2"
+    Q12: "Er12-R*Et12"
+  outer: "S0/R^6=thorn_5(J)-(4*rho0+rhobar0)*J+R*eth_6(K)+R^2*(-4*tau0+pibar0)*K-3*R*psi20*Q"
+  scri_result: "S0=O(R^6); coordinate forcing is O(R^3)"
+  horizon_result: finite_for_RH_positive
+  oracle: tools/symbolic/verify_plus2_compact_source.py
 
 homogeneous_operator:
   authority: "arXiv:2010.00162 compact common s=+/-2 master equation"
@@ -90,13 +114,11 @@ homogeneous_operator:
   coordinate_source_normalization:
     general: "forcing_s=(2*Sigma_BL/R)*S_s"
     both_signs: "2*(L^4+a^2*R^2*cos(theta)^2)*S_s/R^3"
-    scri_gate: "prove S0=O(R^3) after exact ORG/Bianchi cancellations"
+    scri_gate: "passed conditionally: regular Z0/Z1 imply S0=O(R^6) and finite forcing"
 
 production_gate:
   enabled: false
+  source_compactification_gate: passed
   blockers:
-    - full_source_ledger_and_rescaling
-    - independent_CAS_notebook_replay
     - cancellation_safe_Psi0_Psi1_oracle
-    - scri_and_horizon_compact_source_expansion
     - cpu_gpu_and_convergence_validation

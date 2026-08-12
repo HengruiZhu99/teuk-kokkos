@@ -1,6 +1,6 @@
 id,physical_definition,spin,boost,proposed_stored_definition,scri_power,sharp_relation,computed_from,differential_order,stage_tangent
-p0,Psi0^(1),2,2,"Psi0=R^5 Z0",5,none,"(D-rho-rhobar-3epsilon+epsilonbar)sigma-(delta+tau-pibar+alphabar+3beta)kappa",2,"Jet/product rule from same-stage metric and tangent"
-p1,Psi1^(1),1,1,"Psi1=R^4 Z1",4,none,"linearization of (D-rhobar+epsilonbar)beta-(delta+alphabar-pibar)epsilon-(alpha+pi)sigma+(mu+gamma)kappa; independent Bianchi transport oracle",2,"Jet/product rule or differentiated Bianchi transport at same RK stage"
+p0,Psi0^(1),2,2,"Psi0=R^5 Z0",5,none,"(thorn-rho-rhobar)sigma-(eth+pibar-tau)kappa; derived from Ricci identity rather than the inconsistent displayed Psi_0-1 formula in arXiv:2008.11770",2,"Jet/product rule from same-stage metric and tangent"
+p1,Psi1^(1),1,1,"Psi1=R^4 Z1",4,none,"linearization of (D-rhobar+epsilonbar)beta-(delta-alphabar+pibar)epsilon-(alpha+pi)sigma+(mu+gamma)kappa; independent Bianchi transport oracle",2,"Jet/product rule or differentiated Bianchi transport at same RK stage"
 p2,Psi2^(1),0,0,"Psi2=R^3 H",3,"field-specific reality relation not assumed",existing H,0,existing reconstruction tangent
 sig,sigma^(1),2,1,"sigma=R^2 Sigma1",2,none,"0.5(D-2epsilon+2epsilonbar+rho-rhobar)h_mm-(pibar+tau)h_lm",1,"Jet/product rule from Bsharp and Csharp"
 kap,kappa^(1),1,2,"kappa=R^3 Kappa1",3,none,"(D-2epsilon-rhobar)h_lm-0.5(delta-2alphabar-2beta+pibar+tau)h_ll",1,"Jet/product rule from Csharp and U"

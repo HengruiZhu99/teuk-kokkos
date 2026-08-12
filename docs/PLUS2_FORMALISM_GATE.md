@@ -256,8 +256,17 @@ formula needed for the first item is
 
 ```
 Psi0^(1) = (D-rho-rhobar-3 epsilon+epsilonbar) sigma^(1)
-         -(delta+tau-pibar+alphabar+3 beta) kappa^(1).
+         -(delta-3 beta-alphabar+pibar-tau) kappa^(1)
+         =(thorn-rho-rhobar)sigma^(1)
+          -(eth+pibar-tau)kappa^(1).
 ```
+
+The first equality follows by solving the Ricci identity in Appendix A of
+arXiv:2008.11770 and agrees with the exact Weyl formula in
+arXiv:gr-qc/9811019.  The separately displayed `Psi_0-1` formula in
+arXiv:2008.11770 has the opposite signs on all five connection terms in its
+`kappa` bracket and is inconsistent with that paper's own Ricci identity; it
+must not be used.
 
 The exact ORG formulas for `kappa^(1)` and `sigma^(1)` are
 
@@ -343,38 +352,29 @@ The plus-2 source must not substitute `conj(X_m)` for either sharp relation.
 Its source ledger therefore needs an explicit `prime_action` column separate
 from `sharp_action`.
 
-## 8. Blockers before production authority
+## 8. Remaining blockers before production authority
 
-1. **Variable decision across outputs.**  The raw/raw pairing above is the
-   only direct companion to the current raw `Psi4^(2)`.  If the project wants
-   the Spiers reduced variable instead, the minus-2 output must also expose
-   `Psi4L^(2)` (or the exact quadratic conversion `Psi4Q^(2)`).
-2. **Independent CAS replay.**  The supplemental notebook is Mathematica/xAct
-   and no Wolfram kernel is available in this worktree.  The compact ORG
-   operator substitutions have been checked independently with SymPy, but the
-   entire million-line notebook output has not been re-evaluated.
-3. **Source term ledger.**  The exact grouped source above must be expanded
-   into stable ordered-pair terms after choosing stored rescalings for every
-   new primitive.  Radial powers and the compact coordinate-forcing factor
-   must then be checked term by term at `R=0` and `R=R_H`.
-4. **Cancellation-safe `Psi0/Psi1`.**  Primary sources warn that direct
+The raw/raw output pairing is fixed for this proposal.  The full compact
+source ledger, independent SymPy oracle, and scri/horizon power gates are now
+closed by `docs/PLUS2_SOURCE_COMPACTIFICATION.md` and
+`tools/symbolic/verify_plus2_compact_source.py`.  The preserved Spiers
+notebook snapshot remains provenance for `TeukolskySource0`; replaying its
+unrelated reduced-effective-stress calculations is not a prerequisite for the
+independently checked raw source.
+
+1. **Cancellation-safe `Psi0/Psi1`.**  Primary sources warn that direct
    curvature formulas contain cancellations through `R^4` before the
    `Psi0=O(R^5)` remainder.  A high-precision host oracle and convergence
    comparison against the Bianchi/TSI route are mandatory.
-5. **Endpoint source regularity and normalization.**  `W_plus` and the exact
-   common normalization `forcing_plus=(2 Sigma_BL/R)S0_ORG` are established.
-   The grouped physical source must be shown to be `O(R^3)` or smaller so
-   `S0/R^3` is finite.  This is a hard symbolic gate: the derived curvature
-   primitives themselves contain leading-order cancellations, and no
-   term-by-term compact kernel may assume them without an exact expansion.
-   At `R=R_H>0` the normalization has no negative-power singularity, but the
-   full horizon limit still requires a generated random-point check.
-6. **Tetrad-output interpretation.**  `Psi0_raw^(2)` is fixed-convention, not
+2. **Tetrad-output interpretation.**  `Psi0_raw^(2)` is fixed-convention, not
    a claimed gauge- or tetrad-invariant observable.  Zero companion initial
    data fixes a homogeneous convention but does not prove common
    second-order-metric compatibility with independently initialized
    `Psi4^(2)`.
+3. **Implementation and qualification.**  No Kokkos source exists for this
+   proposal.  CPU/GPU oracle agreement, endpoint convergence, and waveform
+   extraction tests remain mandatory after the linear gate closes.
 
-Until blockers 2--5 are closed with generated evidence, production code must
+Until these blockers are closed with generated evidence, production code must
 keep the `+2` companion disabled and fail closed rather than treating the
 existing generic spin parameter as qualification.

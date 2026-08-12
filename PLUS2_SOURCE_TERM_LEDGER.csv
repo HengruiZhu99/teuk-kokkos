@@ -1,0 +1,52 @@
+id,family,physical_term,coefficient,rescaled_ordered_pair_term,output_spin,output_boost,physical_R_power,explicit_R_power_in_regular_family,sharp_action,verification
+c01,C12,-h_lm Delta Psi1,-1,-Csharp1 Delta_4 Z1_2,2,1,6,0,Csharp1=conj(C_-m1),ORG C1 operator; symbolic ordinary-NP to GHP check
+c02,C12,(1/2) h_mm ethprime Psi1,1/2,(1/2) Bsharp1 ethprime_4 Z1_2,2,1,6,0,Bsharp1=conj(B_-m1),ORG C1 operator; symbolic ordinary-NP to GHP check
+c03,C12,-(3/2) (Delta h_lm) Psi1,-3/2,-(3/2) (Delta_2 Csharp1) Z1_2,2,1,6,0,Csharp1=conj(C_-m1),ORG beta1/tau1 substitution
+c04,C12,-(1/2) (ethprime h_mm) Psi1,-1/2,-(1/2) (ethprime_1 Bsharp1) Z1_2,2,1,6,0,Bsharp1=conj(B_-m1),angular connection cancellation
+c05,C12,-(3/2) mu h_lm Psi1,-3/2,-(3/2) R mu0 Csharp1 Z1_2,2,1,7,1,Csharp1=conj(C_-m1),radial scaling
+c06,C12,+mubar h_lm Psi1,1,+R mubar0 Csharp1 Z1_2,2,1,7,1,Csharp1=conj(C_-m1),radial scaling
+c07,C12,+(5/2) pi h_mm Psi1,5/2,+(5/2) R pi0 Bsharp1 Z1_2,2,1,7,1,Bsharp1=conj(B_-m1),radial scaling
+c08,C12,+(1/2) taubar h_mm Psi1,1/2,+(1/2) R taubar0 Bsharp1 Z1_2,2,1,7,1,Bsharp1=conj(B_-m1),radial scaling
+b01,B12,-h_lbar Delta Psi0,-1,-C1 Delta_5 Z0_2,1,2,7,0,none,ORG B0 operator; raw fixed-tetrad Psi0 with Z0 peeling dependency
+b02,B12,+(1/2) h_barbar eth Psi0,1/2,+(1/2) B1 eth_5 Z0_2,1,2,7,0,none,ORG B0 operator; symbolic ordinary-NP to GHP check
+b03,B12,+(1/2) (Delta h_lbar) Psi0,1/2,+(1/2) (Delta_2 C1) Z0_2,1,2,7,0,none,ORG alpha1/pi1 substitution
+b04,B12,+(eth h_barbar) Psi0,1,+(eth_1 B1) Z0_2,1,2,7,0,none,angular connection cancellation
+b05,B12,-2 mu h_lbar Psi0,-2,-2 R mu0 C1 Z0_2,1,2,8,1,none,radial scaling
+b06,B12,+(1/2) mubar h_lbar Psi0,1/2,+(1/2) R mubar0 C1 Z0_2,1,2,8,1,none,radial scaling
+b07,B12,+pibar h_barbar Psi0,1,+R pibar0 B1 Z0_2,1,2,8,1,none,radial scaling
+b08,B12,+(1/2) tau h_barbar Psi0,1/2,+(1/2) R tau0 B1 Z0_2,1,2,8,1,none,radial scaling
+d01,D12,-(1/2) h_ll Delta Psi1,-1/2,-(1/2) V1 Delta_4 Z1_2,1,2,6,0,none,ORG D1 operator; symbolic ordinary-NP to GHP check
+d02,D12,+(1/2) (Delta h_ll) Psi1,1/2,+(1/2) (Delta_2 V1) Z1_2,1,2,6,0,none,ORG epsilon1/rho1 substitution
+d03,D12,+(5/2) (eth h_lbar) Psi1,5/2,+(5/2) R (eth_2 C1) Z1_2,1,2,7,1,none,angular connection cancellation
+d04,D12,-(5/2) (ethprime h_lm) Psi1,-5/2,-(5/2) R (ethprime_2 Csharp1) Z1_2,1,2,7,1,Csharp1=conj(C_-m1),angular connection cancellation
+d05,D12,-(5/2) mu h_ll Psi1,-5/2,-(5/2) R mu0 V1 Z1_2,1,2,7,1,none,radial scaling
+d06,D12,+(1/2) mubar h_ll Psi1,1/2,+(1/2) R mubar0 V1 Z1_2,1,2,7,1,none,radial scaling
+d07,D12,+(5/2) pibar h_lbar Psi1,5/2,+(5/2) R^2 pibar0 C1 Z1_2,1,2,8,2,none,radial scaling
+d08,D12,+5 tau h_lbar Psi1,5,+5 R^2 tau0 C1 Z1_2,1,2,8,2,none,radial scaling
+d09,D12,+(7/2) pi h_lm Psi1,7/2,+(7/2) R^2 pi0 Csharp1 Z1_2,1,2,8,2,Csharp1=conj(C_-m1),radial scaling
+d10,D12,+taubar h_lm Psi1,1,+R^2 taubar0 Csharp1 Z1_2,1,2,8,2,Csharp1=conj(C_-m1),radial scaling
+er01,Er12,-(1/2) h_ll Delta sigma,-1/2,-(1/2) V1 Delta_2 Sig2,2,2,4,0,none,ORG thorn1 on sigma
+er02,Er12,-3 epsilon1 sigma,-3,-3 Ep1 Sig2,2,2,4,0,none,ordinary-NP/GHP equality
+er03,Er12,+epsilonbar1 sigma,1,+Epsharp1 Sig2,2,2,4,0,Epsharp1=conj(Ep_-m1),ordinary-NP/GHP equality
+er04,Er12,-rho1 sigma,-1,-R Rh1 Sig2,2,2,5,1,none,radial scaling
+er05,Er12,-rhobar1 sigma,-1,-R Rhsharp1 Sig2,2,2,5,1,Rhsharp1=conj(Rh_-m1),radial scaling
+et01,Et12,-h_lm Delta kappa,-1,-Csharp1 Delta_3 Kap2,2,2,5,0,Csharp1=conj(C_-m1),ORG delta1 on kappa
+et02,Et12,+(1/2) h_mm ethprime kappa,1/2,+(1/2) Bsharp1 ethprime_3 Kap2,2,2,5,0,Bsharp1=conj(B_-m1),stable antisymmetric angular pair
+et03,Et12,-(1/2) (ethprime h_mm) kappa,-1/2,-(1/2) (ethprime_1 Bsharp1) Kap2,2,2,5,0,Bsharp1=conj(B_-m1),stable antisymmetric angular pair
+et04,Et12,+mubar h_lm kappa,1,+R mubar0 Csharp1 Kap2,2,2,6,1,Csharp1=conj(C_-m1),ordinary-NP connection reduction
+et05,Et12,+(3/2) pi h_mm kappa,3/2,+(3/2) R pi0 Bsharp1 Kap2,2,2,6,1,Bsharp1=conj(B_-m1),ordinary-NP connection reduction
+et06,Et12,+(1/2) taubar h_mm kappa,1/2,+(1/2) R taubar0 Bsharp1 Kap2,2,2,6,1,Bsharp1=conj(B_-m1),ordinary-NP connection reduction
+j01,J12,+C1_1[Psi1],1,+R C12,2,1,6,1,mixed,definition J12=R^-5 inner
+j02,J12,+3 sigma Psi2,3,+3 Sig1 H2,2,1,5,0,none,definition J12=R^-5 inner
+k01,K12,+B0_1[Psi0],1,+R B12,1,2,7,1,none,definition K12=R^-6 inner
+k02,K12,-D1_1[Psi1],-1,-D12,1,2,6,0,mixed,definition K12=R^-6 inner
+k03,K12,-3 kappa Psi2,-3,-3 Kap1 H2,1,2,6,0,none,definition K12=R^-6 inner
+q01,Q12,+Er_1[sigma],1,+Er12,2,2,4,0,mixed,definition Q12=R^-4 bracket
+q02,Q12,-Et_1[kappa],-1,-R Et12,2,2,5,1,mixed,definition Q12=R^-4 bracket
+s01,S0,thorn(R^5 J),1,+thorn_5 J,2,2,6,0,mixed,outer radial GHP scaling
+s02,S0,-4 rho R^5 J,-4,-4 rho0 J,2,2,6,0,none,outer radial scaling
+s03,S0,-rhobar R^5 J,-1,-rhobar0 J,2,2,6,0,background conjugate,outer radial scaling
+s04,S0,eth(R^6 K),1,+R eth_6 K,2,2,7,1,mixed,outer angular GHP scaling
+s05,S0,-4 tau R^6 K,-4,-4 R^2 tau0 K,2,2,8,2,none,outer angular scaling
+s06,S0,+pibar R^6 K,1,+R^2 pibar0 K,2,2,8,2,background conjugate,outer angular scaling
+s07,S0,-3 Psi2_background R^4 Q,-3,-3 R psi20 Q,2,2,7,1,none,raw fixed-tetrad source; power proof conditional on peeling-regular Z0 and Z1
