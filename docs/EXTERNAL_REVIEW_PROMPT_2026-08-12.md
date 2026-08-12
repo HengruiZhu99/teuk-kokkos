@@ -14,11 +14,13 @@ Begin by recording the exact branch, `git rev-parse HEAD`, parent, status,
 submodule revisions, compiler/runtime choices, and the complete diff from the
 review anchor `43e9300080140e3df4d05affd67ffa41b5ddbe57`. The scientific
 remediation is commit `5b5c356208ca2c470e13e2d24e76f8545c090df0`.
-The new standalone provider candidate is exact commit
-`92465cdddd3867b22f15b4be10350ac292404c37`; later commits update only the
-handoff documents unless your local diff proves otherwise. Do not rely on the
-root `SHA256SUMS`, `MANIFEST.md`, or `AUDIT_MANIFEST.md`: those describe an
-older spin-minus2 audit bundle, not the present tree.
+The standalone provider candidate began at exact commit
+`92465cdddd3867b22f15b4be10350ac292404c37`. Its independent-oracle and
+contract hardening is commit `51c0823b`; resolve the full object name locally
+and review its complete diff. Later commits update the handoff documents unless
+your local diff proves otherwise. Do not rely on the root `SHA256SUMS`,
+`MANIFEST.md`, or `AUDIT_MANIFEST.md`: those describe an older spin-minus2
+audit bundle, not the present tree.
 
 Read these files first and completely:
 
@@ -118,6 +120,20 @@ and `q1=[R]f1` weights
 -77/12, 107/6, -39/2, 61/6, -25/12.
 ```
 
+Also independently derive the promoted seven-positive-node `q0` operator used
+only by the complete curvature graph:
+
+```text
+319/45, -3929/120, 389/6, -2545/36, 134/3, -1849/120, 203/90.
+```
+
+Verify that it extracts power two and annihilates powers `0,1,3,4,5,6`.
+Confirm the repository kept the original six-node authority unchanged rather
+than silently replacing it. Determine whether the promoted operator is a
+scientifically justified fixed-stencil repair or an unjustified response to a
+single observed convergence window; audit its conditioning and roundoff
+sensitivity independently.
+
 Check exact moments, order, norms, generator reproducibility, 100-digit oracle,
 device parity, and the fixed `N=9,17,33` promotion matrix for Schwarzschild,
 positive/negative moderate spin, near-extremal spin, and both signed modes.
@@ -151,11 +167,16 @@ For every one of `Z0,Z1,Z0_T,Z1_T,Z0_TT,Z1_TT`, require separately:
 
 Trace every derivative slot emitted by the candidate into the live source and
 prove that all consumers see one immutable common-stage generation. The
-checked-in candidate test currently provides only a zero-tower check and an
-aggregate endpoint self-convergence matrix; treat all requirements above as
-open until independently demonstrated. Keep `N=65` as a red/nonpromotion
-conditioning probe. The candidate is not runtime-wired and must not be called
-production-qualified.
+checked-in hardening now claims a coordinate full-Weyl interior fixture,
+componentwise endpoint and peeling-residual gates, hostile contracts,
+linearity/sharp checks, and hot-stage instrumentation. Do not trust those
+claims from prose or pass counts: regenerate the coordinate fixture, inspect
+its independence, disaggregate every cell, and confirm the old aggregate test
+could not hide a remaining failure. The fixture does **not** presently cover
+scri or the exact future horizon and does not independently oracle all eight
+derivative slots. Same-stage live composition, physical replay, and current
+GPU runtime qualification remain open. Keep `N=65` non-promoting. The
+candidate is not runtime-wired and must not be called production-qualified.
 
 ### 3. Linear path
 
