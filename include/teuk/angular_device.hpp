@@ -4,11 +4,88 @@
 
 #include <cstddef>
 #include <stdexcept>
+#include <type_traits>
 
 #include "teuk/angular.hpp"
 #include "teuk/types.hpp"
 
 namespace teuk {
+
+namespace angular_device_detail {
+
+struct SynthesizeFunctor {
+  const Real* synthesis;
+  const Complex* modal;
+  Complex* nodal;
+  std::size_t nodes;
+  std::size_t modes;
+  std::size_t modal_stride0;
+  std::size_t modal_stride1;
+  std::size_t nodal_stride0;
+  std::size_t nodal_stride1;
+
+  KOKKOS_INLINE_FUNCTION void operator()(const std::size_t flat) const {
+    const std::size_t batch = flat / nodes;
+    const std::size_t node = flat - batch * nodes;
+    Complex value(0.0, 0.0);
+    for (std::size_t mode = 0; mode < modes; ++mode) {
+      value += synthesis[node * modes + mode] *
+               modal[batch * modal_stride0 + mode * modal_stride1];
+    }
+    nodal[batch * nodal_stride0 + node * nodal_stride1] = value;
+  }
+};
+
+struct AnalyzeFunctor {
+  const Real* analysis;
+  const Complex* nodal;
+  Complex* modal;
+  std::size_t nodes;
+  std::size_t modes;
+  std::size_t nodal_stride0;
+  std::size_t nodal_stride1;
+  std::size_t modal_stride0;
+  std::size_t modal_stride1;
+
+  KOKKOS_INLINE_FUNCTION void operator()(const std::size_t flat) const {
+    const std::size_t batch = flat / modes;
+    const std::size_t mode = flat - batch * modes;
+    Complex value(0.0, 0.0);
+    for (std::size_t node = 0; node < nodes; ++node) {
+      value += analysis[mode * nodes + node] *
+               nodal[batch * nodal_stride0 + node * nodal_stride1];
+    }
+    modal[batch * modal_stride0 + mode * modal_stride1] = value;
+  }
+};
+
+struct DiagonalFunctor {
+  const Complex* input;
+  Complex* output;
+  const Real* diagonal;
+  std::size_t modes;
+  std::size_t input_stride0;
+  std::size_t input_stride1;
+  std::size_t output_stride0;
+  std::size_t output_stride1;
+
+  KOKKOS_INLINE_FUNCTION void operator()(const std::size_t flat) const {
+    const std::size_t batch = flat / modes;
+    const std::size_t mode = flat - batch * modes;
+    output[batch * output_stride0 + mode * output_stride1] =
+        diagonal[mode] *
+        input[batch * input_stride0 + mode * input_stride1];
+  }
+};
+
+static_assert(std::is_trivially_copyable_v<SynthesizeFunctor>);
+static_assert(std::is_trivially_copyable_v<AnalyzeFunctor>);
+static_assert(std::is_trivially_copyable_v<DiagonalFunctor>);
+static_assert(sizeof(SynthesizeFunctor) < 1800);
+static_assert(sizeof(AnalyzeFunctor) < 1800);
+static_assert(sizeof(DiagonalFunctor) < 1800);
+
+}  // namespace angular_device_detail
 
 // Device-resident fixed-(s,m) angular plan. Construction is the only place
 // where host reference matrices are built or copied. Every launch below is an
@@ -115,15 +192,10 @@ class DeviceAngularPlan {
     Kokkos::parallel_for(
         "fixed_m_angular_synthesis",
         Kokkos::RangePolicy<execution_space>(execution, 0, total),
-        KOKKOS_LAMBDA(const std::size_t flat) {
-          const std::size_t batch = flat / nodes;
-          const std::size_t node = flat - batch * nodes;
-          Complex value(0.0, 0.0);
-          for (std::size_t mode = 0; mode < modes; ++mode) {
-            value += synthesis(node, mode) * modal(batch, mode);
-          }
-          nodal(batch, node) = value;
-        });
+        angular_device_detail::SynthesizeFunctor{
+            synthesis.data(), modal.data(), nodal.data(), nodes, modes,
+            modal.stride(0), modal.stride(1), nodal.stride(0),
+            nodal.stride(1)});
   }
 
   template <class NodalView, class ModalView>
@@ -143,15 +215,10 @@ class DeviceAngularPlan {
     Kokkos::parallel_for(
         "fixed_m_angular_analysis",
         Kokkos::RangePolicy<execution_space>(execution, 0, total),
-        KOKKOS_LAMBDA(const std::size_t flat) {
-          const std::size_t batch = flat / modes;
-          const std::size_t mode = flat - batch * modes;
-          Complex value(0.0, 0.0);
-          for (std::size_t node = 0; node < nodes; ++node) {
-            value += analysis(mode, node) * nodal(batch, node);
-          }
-          modal(batch, mode) = value;
-        });
+        angular_device_detail::AnalyzeFunctor{
+            analysis.data(), nodal.data(), modal.data(), nodes, modes,
+            nodal.stride(0), nodal.stride(1), modal.stride(0),
+            modal.stride(1)});
   }
 
   template <class InputView, class OutputView>
@@ -217,11 +284,10 @@ class DeviceAngularPlan {
     Kokkos::parallel_for(
         kernel_name,
         Kokkos::RangePolicy<execution_space>(execution, 0, total),
-        KOKKOS_LAMBDA(const std::size_t flat) {
-          const std::size_t batch = flat / modes;
-          const std::size_t mode = flat - batch * modes;
-          output(batch, mode) = diagonal(mode) * input(batch, mode);
-        });
+        angular_device_detail::DiagonalFunctor{
+            input.data(), output.data(), diagonal.data(), modes,
+            input.stride(0), input.stride(1), output.stride(0),
+            output.stride(1)});
   }
 
   int spin_;

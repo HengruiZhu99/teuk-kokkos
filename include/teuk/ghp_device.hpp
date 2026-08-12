@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <stdexcept>
+#include <type_traits>
 
 #include "teuk/angular_device.hpp"
 #include "teuk/background.hpp"
@@ -11,6 +12,117 @@
 #include "teuk/types.hpp"
 
 namespace teuk {
+
+namespace ghp_device_detail {
+
+struct AlignModalFunctor {
+  const Complex* input;
+  Complex* output;
+  int input_ell_min;
+  int output_ell_min;
+  std::size_t input_modes;
+  std::size_t output_modes;
+  std::size_t input_stride0;
+  std::size_t input_stride1;
+  std::size_t output_stride0;
+  std::size_t output_stride1;
+
+  KOKKOS_INLINE_FUNCTION void operator()(const std::size_t flat) const {
+    const std::size_t batch = flat / output_modes;
+    const std::size_t output_mode = flat - batch * output_modes;
+    const int ell = output_ell_min + static_cast<int>(output_mode);
+    const int input_mode = ell - input_ell_min;
+    output[batch * output_stride0 + output_mode * output_stride1] =
+        input_mode >= 0 &&
+                static_cast<std::size_t>(input_mode) < input_modes
+            ? input[batch * input_stride0 +
+                    static_cast<std::size_t>(input_mode) * input_stride1]
+            : Complex(0.0, 0.0);
+  }
+};
+
+struct ApplyEthFunctor {
+  const Complex* field;
+  const Complex* dt_field;
+  const Real* radius;
+  const Real* sin_theta;
+  const Real* cos_theta;
+  const Complex* angular_nodal;
+  Complex* output;
+  int spin;
+  int boost;
+  Real kerr_spin;
+  Real length;
+  std::size_t nodes;
+  std::size_t field_stride0;
+  std::size_t field_stride1;
+  std::size_t dt_stride0;
+  std::size_t dt_stride1;
+  std::size_t angular_stride0;
+  std::size_t angular_stride1;
+  std::size_t output_stride0;
+  std::size_t output_stride1;
+  std::size_t radius_stride;
+  std::size_t sin_stride;
+  std::size_t cos_stride;
+
+  KOKKOS_INLINE_FUNCTION void operator()(const std::size_t flat) const {
+    const std::size_t batch = flat / nodes;
+    const std::size_t node = flat - batch * nodes;
+    output[batch * output_stride0 + node * output_stride1] = eth_n_point(
+        field[batch * field_stride0 + node * field_stride1],
+        dt_field[batch * dt_stride0 + node * dt_stride1],
+        angular_nodal[batch * angular_stride0 + node * angular_stride1], spin,
+        boost, radius[batch * radius_stride], sin_theta[node * sin_stride],
+        cos_theta[node * cos_stride], kerr_spin, length);
+  }
+};
+
+struct ApplyEthPrimeFunctor {
+  const Complex* field;
+  const Complex* dt_field;
+  const Real* radius;
+  const Real* sin_theta;
+  const Real* cos_theta;
+  const Complex* angular_nodal;
+  Complex* output;
+  int spin;
+  int boost;
+  Real kerr_spin;
+  Real length;
+  std::size_t nodes;
+  std::size_t field_stride0;
+  std::size_t field_stride1;
+  std::size_t dt_stride0;
+  std::size_t dt_stride1;
+  std::size_t angular_stride0;
+  std::size_t angular_stride1;
+  std::size_t output_stride0;
+  std::size_t output_stride1;
+  std::size_t radius_stride;
+  std::size_t sin_stride;
+  std::size_t cos_stride;
+
+  KOKKOS_INLINE_FUNCTION void operator()(const std::size_t flat) const {
+    const std::size_t batch = flat / nodes;
+    const std::size_t node = flat - batch * nodes;
+    output[batch * output_stride0 + node * output_stride1] = ethprime_n_point(
+        field[batch * field_stride0 + node * field_stride1],
+        dt_field[batch * dt_stride0 + node * dt_stride1],
+        angular_nodal[batch * angular_stride0 + node * angular_stride1], spin,
+        boost, radius[batch * radius_stride], sin_theta[node * sin_stride],
+        cos_theta[node * cos_stride], kerr_spin, length);
+  }
+};
+
+static_assert(std::is_trivially_copyable_v<AlignModalFunctor>);
+static_assert(std::is_trivially_copyable_v<ApplyEthFunctor>);
+static_assert(std::is_trivially_copyable_v<ApplyEthPrimeFunctor>);
+static_assert(sizeof(AlignModalFunctor) < 1800);
+static_assert(sizeof(ApplyEthFunctor) < 1800);
+static_assert(sizeof(ApplyEthPrimeFunctor) < 1800);
+
+}  // namespace ghp_device_detail
 
 // Stage-local device plan for the angular parts of eth_n and eth'_n at fixed
 // (s,m). The three DeviceAngularPlans are initialized once. A caller constructs
@@ -134,17 +246,10 @@ class DeviceGhpAngularPlan {
     Kokkos::parallel_for(
         "align_spin_shifted_modal_band",
         Kokkos::RangePolicy<execution_space>(execution, 0, total),
-        KOKKOS_LAMBDA(const std::size_t flat) {
-          const std::size_t batch = flat / output_modes;
-          const std::size_t output_mode = flat - batch * output_modes;
-          const int ell = output_ell_min + static_cast<int>(output_mode);
-          const int input_mode = ell - input_ell_min;
-          output(batch, output_mode) =
-              input_mode >= 0 &&
-                      static_cast<std::size_t>(input_mode) < input_modes
-                  ? input(batch, static_cast<std::size_t>(input_mode))
-                  : Complex(0.0, 0.0);
-        });
+        ghp_device_detail::AlignModalFunctor{
+            input.data(), output.data(), input_ell_min, output_ell_min,
+            input_modes, output_modes, input.stride(0), input.stride(1),
+            output.stride(0), output.stride(1)});
   }
 
   template <class NodalView, class DtView, class RadiusView,
@@ -192,14 +297,14 @@ class DeviceGhpAngularPlan {
     Kokkos::parallel_for(
         "stage_local_eth_n",
         Kokkos::RangePolicy<execution_space>(execution, 0, total),
-        KOKKOS_LAMBDA(const std::size_t flat) {
-          const std::size_t batch = flat / nodes;
-          const std::size_t node = flat - batch * nodes;
-          output(batch, node) = eth_n_point(
-              field(batch, node), dt_field(batch, node),
-              raised_nodal(batch, node), spin, boost, radius(batch),
-              sin_theta(node), cos_theta(node), kerr_spin, length);
-        });
+        ghp_device_detail::ApplyEthFunctor{
+            field.data(), dt_field.data(), radius.data(), sin_theta.data(),
+            cos_theta.data(), raised_nodal.data(), output.data(), spin, boost,
+            kerr_spin, length, nodes, field.stride(0), field.stride(1),
+            dt_field.stride(0), dt_field.stride(1),
+            raised_nodal.stride(0), raised_nodal.stride(1),
+            output.stride(0), output.stride(1), radius.stride(0),
+            sin_theta.stride(0), cos_theta.stride(0)});
   }
 
   template <class NodalView, class DtView, class RadiusView,
@@ -222,14 +327,14 @@ class DeviceGhpAngularPlan {
     Kokkos::parallel_for(
         "stage_local_ethprime_n",
         Kokkos::RangePolicy<execution_space>(execution, 0, total),
-        KOKKOS_LAMBDA(const std::size_t flat) {
-          const std::size_t batch = flat / nodes;
-          const std::size_t node = flat - batch * nodes;
-          output(batch, node) = ethprime_n_point(
-              field(batch, node), dt_field(batch, node),
-              lowered_nodal(batch, node), spin, boost, radius(batch),
-              sin_theta(node), cos_theta(node), kerr_spin, length);
-        });
+        ghp_device_detail::ApplyEthPrimeFunctor{
+            field.data(), dt_field.data(), radius.data(), sin_theta.data(),
+            cos_theta.data(), lowered_nodal.data(), output.data(), spin, boost,
+            kerr_spin, length, nodes, field.stride(0), field.stride(1),
+            dt_field.stride(0), dt_field.stride(1),
+            lowered_nodal.stride(0), lowered_nodal.stride(1),
+            output.stride(0), output.stride(1), radius.stride(0),
+            sin_theta.stride(0), cos_theta.stride(0)});
   }
 
   int spin_;

@@ -11,6 +11,7 @@
 #include "teuk/plus2_companion_pipeline.hpp"
 #include "teuk/plus2_linear_spatial.hpp"
 #include "teuk/plus2_source_value_spatial.hpp"
+#include "teuk/plus2_transported_curvature.hpp"
 
 namespace teuk {
 
@@ -19,30 +20,8 @@ namespace teuk {
 // callers must supply their exact common-RK-stage values and first/second
 // tangents.  The missing production primitive/Bianchi spatial graph writes the
 // remaining typed slots through Plus2LiveSourceWriteTarget.
-enum class Plus2TransportedCurvatureComponent : std::size_t {
-  Z0 = 0,
-  Z1 = 1,
-  Z0T = 2,
-  Z1T = 3,
-  Z0TT = 4,
-  Z1TT = 5,
-  Count = 6,
-};
-
-using Plus2LiveStampView =
-    Kokkos::View<std::uint64_t****, Kokkos::LayoutRight, MemorySpace>;
-using Plus2LiveConstStampView =
-    Kokkos::View<const std::uint64_t****, Kokkos::LayoutRight, MemorySpace>;
 using Plus2LiveReadinessView =
     Kokkos::View<std::uint8_t**, Kokkos::LayoutRight, MemorySpace>;
-using Plus2TransportedCurvatureStorageView = Plus2SpatialRank4View;
-using Plus2TransportedCurvatureView =
-    Kokkos::View<const Complex****, Kokkos::LayoutRight, MemorySpace>;
-
-struct Plus2TransportedCurvatureStage {
-  Plus2TransportedCurvatureView fields;
-  Plus2LiveConstStampView stamps;
-};
 
 // These are scientific capabilities, not optional performance hints.  The
 // adapter rejects a stage before launching if any claim is absent.  In

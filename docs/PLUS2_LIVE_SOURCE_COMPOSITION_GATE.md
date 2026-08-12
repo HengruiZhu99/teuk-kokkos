@@ -8,7 +8,8 @@
 `Plus2LiveSourceComposition` fixes the stage order
 
 1. decoded first-order/reconstruction value, tangent, and second tangent;
-2. the D8-4 metric-curvature `Psi0` graph;
+2. the D10-5 metric-curvature `Psi0` graph required by the nested fourth-order
+   live path;
 3. externally supplied same-stage transported `Z0,Z1` values and first/second
    tangents;
 4. the typed fourteen-primitive and derivative views;
@@ -34,9 +35,10 @@ cannot write feedback into the primary or Bianchi state.
 
 The repository does not yet contain the allocation-free spatial graph that
 constructs all fourteen primitive rows and their production derivative slots
-from the live reconstruction stage. It also does not yet evolve the triangular
-Route A Bianchi transport state in the same coupled RK4 state as the primary
-and second-order companion.
+from the live reconstruction stage. `Plus2BianchiTransport` now supplies a
+standalone common-stage triangular Route-A `Z0,Z1` transport plus the six-field
+generation-stamped adapter, but it is deliberately not wired to the primary,
+live source, and second-order companion runtime.
 
 Consequently the live gate requires explicit capability claims and external
 same-stage curvature views. `Z0,Z1` must be either part of that common one-way
@@ -47,13 +49,15 @@ coefficients; neither endpoint extrapolation nor a zero coefficient is
 invented here.
 
 The source and outer callbacks are typed seams for the missing reviewed
-spatial graph. Their existence is not evidence that this graph, the Bianchi
-initial/boundary prescription, concurrent/replay equivalence, or a physical
-spin `+2` waveform has been qualified.
+spatial graph. Their existence, and the standalone transport, are not evidence
+that this graph, the physical Bianchi initial/boundary prescription,
+concurrent/replay equivalence, or a physical spin `+2` waveform has been
+qualified. See `PLUS2_BIANCHI_TRANSPORT.md` for the exact transported-state,
+restart, and fail-closed contracts.
 
 ## Current focused evidence
 
-The focused tests establish D8-4 selection, exact callback ordering,
+The focused tests establish D10-5 selection, exact callback ordering,
 generation-stamp fail closure, immutable activation behavior, target gather,
 quadratic common-amplitude scaling, and zero stage allocations/fences. The
 ordinary-NP algebra, signed sharp lookup, analytic `J/K` tangents, and compact
