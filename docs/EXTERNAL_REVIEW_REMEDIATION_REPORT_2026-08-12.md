@@ -13,6 +13,10 @@ Standalone Route-B curvature-provider candidate:
 Standalone provider hardening and independent-oracle commit:
 `51c0823b` (resolve the full object name with `git rev-parse 51c0823b`)
 
+Exact-future-horizon authority and concrete same-stage live-source seam:
+the current final `HEAD` containing this report (record its full object name
+before review).
+
 The exact report checkout is obtained with `git rev-parse HEAD`. This document
 is committed after the scientific-code remediation commit, so repository-only
 reviewers can audit the complete tree without any ignored `run/`, build, or
@@ -22,9 +26,14 @@ Exact handoff baseline `fee00bb076fc8ddd591461ad295a8ab65592cfc9`
 was freshly configured and built, passed the direct Serial unit suite
 `381/381`, and passed audit-enabled CTest `22/22`. During the subsequent
 provider-hardening work, a direct Serial run passed `384/384`; that run
-preceded the final scientific commit and was not repeated after commit. At the
-owner's explicit request, no build or test was run while wrapping up this
-report. Therefore the `384/384` result is development evidence, not
+preceded the final scientific commit and was not repeated after commit. The
+later horizon/live-source development run initially reported `384/385`: the
+sole failure was the scientifically invalid demand that a one-sided discrete
+horizon value equal the continuum coordinate oracle to an interior absolute
+tolerance. The corrected two-axis horizon test subsequently passed its focused
+`5/5` executable, and the concrete live-source seam passed its focused `1/1`
+executable. At the owner's explicit request, no full suite or new test was run
+while wrapping up this report. These are development results, not
 exact-final-document-HEAD qualification. A repository-only reviewer must run
 the commands requested in `docs/EXTERNAL_REVIEW_PROMPT_2026-08-12.md` before
 making any promotion claim.
@@ -229,12 +238,32 @@ truncated rotating-Kerr coefficient-induced angular content and produced a
 false milliscale mismatch. At the fixed qualified band the development maximum
 absolute errors were `9.36e-12` for `Z0` and `9.31e-12` for `Z1`.
 
-Important gaps remain. The coordinate-Weyl samples are interior points on
-`R in [0,.8]`, not the exact future horizon or scri. Endpoint authority is
-manufactured self-convergence plus independent peeling residuals, not a
-coordinate-Weyl endpoint fixture. The eight derivative slots still lack an
-independent coordinate derivative fixture. There is no same-stage live-source
-composition, primary-curvature-source-companion physical replay, exact-commit
+The coordinate-Weyl fixture now spans interior points and each spin's exact
+future compact horizon; scri remains absent. Interior values retain the
+`5e-11` absolute gate. The horizon uses two independent refinement axes:
+radial `N=9,17,33` at fixed `ell_max=24`, angular
+`ell_max=12,18,24` at fixed `N=33`, and an absolute continuum discrepancy
+bounded by the measured radial and angular remainders. The focused development
+run had minimum resolved radial ratio `148.299`, maximum fine continuum error
+`3.33941e-7`, 142 resolved cells, and 290 cells below the declared `5e-11`
+increment floor. Interior maxima were `3.17635e-11` for `Z0` and
+`4.27635e-11` for `Z1`. Attempts to raise the angular band beyond 24 entered a
+binary64 basis-evaluation ceiling and were not presented as promotion
+evidence. The reviewer should independently reproduce and challenge that
+classification.
+
+There is also now a concrete standalone same-stage seam. One immutable
+five-level Route-B tower is accepted with a single generation; curvature is
+evaluated once, levels zero through two are packed into the concrete primitive
+producer on device, and the reviewed pair/outer graph emits nonzero forcing.
+The focused regression checks exact stamps, global stale-`h4` rejection, and
+zero post-warmup Kokkos allocation/deep-copy/fence callbacks. This removes the
+earlier duplicate-callback composition gap, but is not a physical replay or
+runtime integration.
+
+Important gaps remain. The eight derivative slots still lack an independent
+coordinate derivative fixture. There is no scri coordinate-Weyl fixture,
+primary-curvature-source-companion concurrent/replay trajectory, exact-commit
 GPU runtime evidence, or solver/runtime wiring. The candidate is not included
 by `SpatialPipeline` or `solver_driver`, and `plus2.enabled` remains rejected.
 An external reviewer must treat it as a substantially hardened standalone
@@ -262,10 +291,11 @@ rather than silently reinterpreting them. Checkpoint replay is latched to the
 restored accepted time. Finding: **confirmed and remediated for the standalone
 companion checkpoint**.
 
-Generic replay equality is still structural. Because the live Route-B
-curvature provider is incomplete, there is no honest primary-curvature-source-
-companion physical replay trajectory. Finding: **confirmed; promotion gate
-remains open**.
+Generic replay equality is still structural. The new Route-B composition test
+proves a concrete single-stage curvature-to-source seam, not an RK trajectory.
+There is still no honest concurrent and replayed primary-curvature-source-
+companion physical evolution. Finding: **confirmed; promotion gate remains
+open**.
 
 ### Live source invalidation
 
@@ -331,8 +361,11 @@ convergence.
   device-inline operators, 100-digit verifier, curvature initializer, tests,
   and design note;
 - Route-B candidate: five-level tower consumer, six curvature fields, eight
-  derivative slots, nine peeling audits, coordinate full-Weyl fixture,
-  disaggregated endpoint/residual tests, and hostile contract tests;
+  derivative slots, nine peeling audits, interior plus exact-future-horizon
+  coordinate full-Weyl fixture, disaggregated endpoint/residual tests, and
+  hostile contract tests;
+- same-stage source seam: concrete Route-B curvature-to-primitive-to-pair/outer
+  composition and stale-generation/no-allocation regression;
 - provenance: companion checkpoint/replay, four-Weyl metadata, resolved config;
 - scope/docs: formalism, compactification, linear spatial gate, replay,
   Route-B blocker, validation status, proposal YAML, and dated handoff erratum;
@@ -350,11 +383,12 @@ pipeline, or solver enable gate was changed.
 | Raw/evolved source distinction | Met | typed `S0/R6` and `S0/R7` workspaces, two ledgers, versioned metadata |
 | Cancellation-safe scri forcing | Met standalone | exact optical identity and D10-5 outer convergence |
 | Route-B endpoint extraction | Met as component | rational generator, 100-digit audit, N9/17/33, residual gates |
-| Complete Route-B six-field curvature provider | Hardened standalone candidate only | independent interior coordinate-Weyl fixture, disaggregated scri/residual gates, hostile contracts, and hot-path instrumentation exist; endpoint coordinate oracle, derivative-slot oracle, live integration, replay, and GPU qualification remain open |
+| Complete Route-B six-field curvature provider | Hardened standalone candidate only | independent interior and exact-future-horizon coordinate-Weyl fixture, disaggregated scri/residual gates, hostile contracts, and hot-path instrumentation exist; scri coordinate authority, derivative-slot oracle, replay, runtime wiring, and GPU qualification remain open |
 | Linear `Psi0` production spatial graph | Not met | explicitly validation-only ordinary-NP path |
 | Companion checkpoint physical identity | Met standalone v3 | exhaustive mismatch/nonfinite/pre-mutation tests |
 | Live invalid diagnostics clear globally | Met | provenance/stamp and full workspace-zero regressions |
-| Concrete physics replay | Not met | structural replay only; candidate provider is not qualified or runtime-wired |
+| Concrete same-stage source composition | Met standalone | one immutable Route-B generation reaches curvature, primitive, pair/outer, and nonzero forcing with stale-stage fail closure |
+| Concrete physics replay | Not met | structural replay and one-stage scientific composition exist, but no shared-RK concurrent/replay trajectory |
 | Schwarzschild QNM | Met fixture | checked-in normalized interior fixture |
 | Moderate-Kerr real-frequency TSI | Met fixture | checked-in radial/angular/field fixture |
 | Moderate-Kerr complex QNM and endpoints | Open | no claim |
@@ -365,15 +399,16 @@ pipeline, or solver enable gate was changed.
 ## 9. Remaining promotion blockers
 
 1. Independently reproduce and try to falsify the new coordinate-Weyl,
-   disaggregated endpoint/residual, promoted-extractor, hostile contract, and
-   hot-path evidence. Add exact scri/future-horizon coordinate authority and an
-   independent oracle for all eight derivative slots. Keep `N=65` explicitly
-   non-promoting and do not tune the window after seeing results.
+   exact-future-horizon two-axis remainder budget, disaggregated scri/residual,
+   promoted-extractor, hostile contract, and hot-path evidence. Add exact scri
+   coordinate authority and an independent oracle for all eight derivative
+   slots. Keep `N=65` explicitly non-promoting and do not tune the window after
+   seeing results.
 2. Replace or retain as validation-only the singular-term ordinary-NP linear
    spatial path with a genuinely regular GHP provider.
-3. Run primary, curvature, source, and companion through one concurrent and
-   replay trajectory; then prove bitwise same-backend and physical residual
-   agreement.
+3. Starting from the now-concrete single-stage source seam, run primary,
+   curvature, source, and companion through one concurrent and replay
+   trajectory; then prove bitwise same-backend and physical residual agreement.
 4. Complete sourced four-field time/radial/angular residual convergence and
    current exact-head accelerator qualification.
 5. Add moderate-spin complex-frequency QNM and horizon/scri endpoint fixtures.

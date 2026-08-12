@@ -742,6 +742,28 @@ class Plus2RouteBCurvatureSpatialProvider {
   [[nodiscard]] std::uint64_t last_generation() const noexcept {
     return last_generation_;
   }
+  [[nodiscard]] bool accepts_generation(
+      const std::uint64_t generation) const noexcept {
+    return generation != 0 && generation > last_generation_;
+  }
+  [[nodiscard]] bool matches_configuration(
+      const ModeRegistry& registry, const UniformRadialGrid& grid,
+      const KerrParameters& parameters, const int ell_max,
+      const Plus2SpatialThetaView& cos_theta,
+      const Plus2SpatialThetaView& sin_theta) const noexcept {
+    return ell_max_ == ell_max && registry_.modes() == registry.modes() &&
+           registry_.parents() == registry.parents() &&
+           registry_.targets() == registry.targets() &&
+           grid_.size() == grid.size() &&
+           grid_.lower_radius() == grid.lower_radius() &&
+           grid_.upper_radius() == grid.upper_radius() &&
+           parameters_.mass == parameters.mass &&
+           parameters_.spin == parameters.spin &&
+           parameters_.compactification_length ==
+               parameters.compactification_length &&
+           cos_theta_.data() == cos_theta.data() &&
+           sin_theta_.data() == sin_theta.data();
+  }
 
   void evaluate(
       const execution_space& execution,

@@ -586,7 +586,7 @@ TEST_CASE("plus2 live composition rejects absent scri and common-stage authority
   }
   CHECK(scri_rejected);
   capability = fixture.capability();
-  capability.transported_curvature_in_common_rk_state = false;
+  capability.curvature_bound_to_common_rk_stage = false;
   bool stage_rejected = false;
   try {
     fixture.composition.evaluate_stage(

@@ -44,13 +44,12 @@ LENGTH = 2.0
 TIME = 0.19
 PHI = 0.27
 ELL = 4
-PROVIDER_ELL_MAX = 12
+PROVIDER_ELL_MAX = 24
 THETA_COUNT = 32
 RADIAL_COUNT = 33
-RADIAL_MAX = 0.8
 SPINS = (0.63, 0.999, -0.74)
 MODES = (-2, 2)
-RADIAL_INDICES = (8, 16, 24)
+RADIAL_INDICES = (8, 16, 32)
 THETA_INDICES = (6, 16, 25)
 LEVELS = (0, 1, 2)
 CASES = (0, 1, 2, 3)  # V only, C only, B only, all fields
@@ -72,6 +71,11 @@ LAMBDAS = (
 ALPHAS = (0.37, 0.43, 0.51)
 LINEAR = (0.14, -0.11, 0.09)
 QUADRATIC = (0.06, 0.08, -0.05)
+
+
+def future_horizon_radius(spin: float) -> float:
+    r_plus = MASS + math.sqrt(MASS * MASS - spin * spin)
+    return LENGTH * LENGTH / r_plus
 
 
 def wigner_d(ell: int, m_prime: int, m: int, theta: Jet2) -> Jet2:
@@ -144,7 +148,9 @@ def expected_value(
     level: int,
     case_index: int,
 ) -> tuple[complex, complex]:
-    radius_value = RADIAL_MAX * radial_index / (RADIAL_COUNT - 1)
+    radius_value = (
+        future_horizon_radius(spin) * radial_index / (RADIAL_COUNT - 1)
+    )
     point = (TIME, radius_value, theta, PHI)
     coordinates = tuple(
         Jet2.variable(point[index], index) for index in range(DIMENSION)
@@ -233,7 +239,9 @@ def render() -> str:
         f"inline constexpr int provider_ell_max = {PROVIDER_ELL_MAX};",
         f"inline constexpr int theta_count = {THETA_COUNT};",
         f"inline constexpr int radial_count = {RADIAL_COUNT};",
-        f"inline constexpr double radial_max = {RADIAL_MAX:.17e};",
+        "inline constexpr std::array<double, 3> radial_maxes{{"
+        + ", ".join(f"{future_horizon_radius(spin):.17e}" for spin in SPINS)
+        + "}};",
         "inline constexpr std::array<int, 2> modes{{-2, 2}};",
         "inline constexpr std::array<double, 3> spins{{"
         + ", ".join(f"{value:.17e}" for value in SPINS) + "}};",

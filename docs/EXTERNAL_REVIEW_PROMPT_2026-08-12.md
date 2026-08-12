@@ -17,8 +17,10 @@ remediation is commit `5b5c356208ca2c470e13e2d24e76f8545c090df0`.
 The standalone provider candidate began at exact commit
 `92465cdddd3867b22f15b4be10350ac292404c37`. Its independent-oracle and
 contract hardening is commit `51c0823b`; resolve the full object name locally
-and review its complete diff. Later commits update the handoff documents unless
-your local diff proves otherwise. Do not rely on the root `SHA256SUMS`,
+and review its complete diff. The current final commit also adds exact-future-
+horizon coordinate authority and a concrete same-stage Route-B live-source
+seam; identify that commit from `HEAD` and review it as scientific code, not a
+documentation-only update. Do not rely on the root `SHA256SUMS`,
 `MANIFEST.md`, or `AUDIT_MANIFEST.md`: those describe an older spin-minus2
 audit bundle, not the present tree.
 
@@ -41,8 +43,11 @@ Read these files first and completely:
 - `PLUS2_SOURCE_NORMALIZATION_LEDGER.csv`
 - `plus2_equation_spec_proposal.yaml`
 - `include/teuk/plus2_routeb_curvature_spatial.hpp`
+- `include/teuk/plus2_live_source_composition.hpp`
 - `include/teuk/plus2_source_primitive_spatial.hpp`
 - `tests/test_plus2_routeb_curvature_spatial.cpp`
+- `tests/test_plus2_routeb_live_source.cpp`
+- `tools/numerical/generate_plus2_routeb_curvature_coordinate_fixture.py`
 
 The YAML is explicitly a fail-closed proposal, not a production specification.
 Historical documents may contain commit-scoped test counts; do not reinterpret
@@ -172,11 +177,25 @@ componentwise endpoint and peeling-residual gates, hostile contracts,
 linearity/sharp checks, and hot-stage instrumentation. Do not trust those
 claims from prose or pass counts: regenerate the coordinate fixture, inspect
 its independence, disaggregate every cell, and confirm the old aggregate test
-could not hide a remaining failure. The fixture does **not** presently cover
-scri or the exact future horizon and does not independently oracle all eight
-derivative slots. Same-stage live composition, physical replay, and current
-GPU runtime qualification remain open. Keep `N=65` non-promoting. The
-candidate is not runtime-wired and must not be called production-qualified.
+could not hide a remaining failure. The fixture now includes the exact
+spin-dependent future compact horizon, but does **not** cover scri and does not
+independently oracle all eight derivative slots. At the horizon, audit the
+two-axis qualification rather than accepting a single absolute tolerance:
+radial `N=9,17,33` self-convergence at fixed `ell_max=24`, angular
+`ell_max=12,18,24` convergence, and a continuum coordinate-Weyl discrepancy
+bounded by the measured radial and angular remainders. Try to falsify the
+`5e-11` floor classification and the stated roundoff ceiling rather than
+silently relaxing either.
+
+A standalone same-generation seam now consumes one immutable five-level
+Route-B tower, evaluates curvature once, packs levels zero through two into the
+concrete primitive producer, and reaches the live pair/outer source forcing.
+Audit `evaluate_routeb_stage` and its test for duplicate authority, ordering,
+stale-level resurrection, hidden host copies, and configuration mismatches.
+This closes a structural same-stage composition seam only. A physical
+shared-RK primary-curvature-source-companion replay and current GPU runtime
+qualification remain open. Keep `N=65` non-promoting. The candidate is not
+runtime-wired and must not be called production-qualified.
 
 ### 3. Linear path
 
@@ -197,9 +216,11 @@ metadata and state and exact `time=step*dt`. Confirm legacy v1/v2 restoration is
 rejected, not silently reinterpreted, and that checkpoint replay continues from
 the restored accepted time.
 
-Do not call generic callback replay a physical replay. A physics-level replay
-requires one shared-stage primary-curvature-source-companion trajectory, which
-remains blocked by the incomplete live curvature provider.
+Do not call generic callback replay, or the new single-stage Route-B live-source
+test, a physical replay. A physics-level replay requires a complete concurrent
+and replayed shared-RK primary-curvature-source-companion trajectory, bitwise
+same-backend agreement, nonzero physical forcing/response, and no primary
+feedback. That trajectory is still absent.
 
 ### 5. Live invalidation and diagnostic zeroing
 

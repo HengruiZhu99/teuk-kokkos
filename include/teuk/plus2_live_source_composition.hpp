@@ -12,6 +12,7 @@
 
 #include "teuk/plus2_companion_pipeline.hpp"
 #include "teuk/plus2_linear_spatial.hpp"
+#include "teuk/plus2_routeb_curvature_spatial.hpp"
 #include "teuk/plus2_source_primitive_spatial.hpp"
 #include "teuk/plus2_source_outer_spatial.hpp"
 #include "teuk/plus2_source_value_spatial.hpp"
@@ -36,7 +37,7 @@ using Plus2LiveReadinessView =
 // peeling coefficient; the metric-curvature point graph correctly reports its
 // raw 0/0 quotient as invalid there.
 struct Plus2LiveSourceCapability {
-  bool transported_curvature_in_common_rk_state = false;
+  bool curvature_bound_to_common_rk_stage = false;
   bool independently_qualified_scri_coefficients = false;
   bool primitive_bianchi_spatial_graph_qualified = false;
   bool angular_projection_graph_qualified = false;
@@ -383,6 +384,61 @@ struct SetReadyFunctor {
   }
 };
 
+struct PackRouteBTowerLevelsFunctor {
+  const Complex* tower;
+  const std::uint64_t* tower_stamps;
+  Complex* value;
+  Complex* tangent;
+  Complex* second_tangent;
+  std::uint64_t* value_stamps;
+  std::uint64_t* tangent_stamps;
+  std::uint64_t* second_tangent_stamps;
+  std::size_t mode_count;
+  std::size_t tower_field_count;
+  std::size_t radial_count;
+  std::size_t theta_count;
+  std::size_t h_offset;
+  std::size_t pi_offset;
+  std::size_t b_offset;
+  std::size_t c_offset;
+  std::size_t u_offset;
+
+  KOKKOS_INLINE_FUNCTION void operator()(const std::size_t flat) const {
+    constexpr std::size_t output_fields = 5;
+    const std::size_t plane = radial_count * theta_count;
+    const std::size_t mode = flat / plane;
+    const std::size_t within = flat - mode * plane;
+    const std::size_t radial = within / theta_count;
+    const std::size_t theta = within - radial * theta_count;
+    const std::size_t offsets[output_fields]{h_offset, pi_offset, b_offset,
+                                             c_offset, u_offset};
+    Complex* outputs[3]{value, tangent, second_tangent};
+    std::uint64_t* output_stamps[3]{value_stamps, tangent_stamps,
+                                    second_tangent_stamps};
+    for (std::size_t level = 0; level < 3; ++level) {
+      const std::size_t stamp_index =
+          ((level * mode_count + mode) * radial_count + radial) *
+              theta_count +
+          theta;
+      for (std::size_t field = 0; field < output_fields; ++field) {
+        const std::size_t input_index =
+            ((((level * mode_count + mode) * tower_field_count +
+               offsets[field]) *
+                  radial_count +
+              radial) *
+                 theta_count +
+             theta);
+        const std::size_t output_index =
+            ((mode * output_fields + field) * radial_count + radial) *
+                theta_count +
+            theta;
+        outputs[level][output_index] = tower[input_index];
+        output_stamps[level][output_index] = tower_stamps[stamp_index];
+      }
+    }
+  }
+};
+
 static_assert(std::is_trivially_copyable_v<NormalizeSourceInputsFunctor>);
 static_assert(std::is_trivially_copyable_v<NormalizeOuterInputsFunctor>);
 static_assert(
@@ -390,6 +446,7 @@ static_assert(
 static_assert(std::is_trivially_copyable_v<GatherForcingFunctor>);
 static_assert(std::is_trivially_copyable_v<ZeroForcingFunctor>);
 static_assert(std::is_trivially_copyable_v<SetReadyFunctor>);
+static_assert(std::is_trivially_copyable_v<PackRouteBTowerLevelsFunctor>);
 static_assert(sizeof(NormalizeSourceInputsFunctor) < 1800);
 static_assert(sizeof(NormalizeOuterInputsFunctor) < 1800);
 
@@ -469,6 +526,21 @@ class Plus2LiveSourceComposition {
         outer_stamps_(Kokkos::view_alloc(Kokkos::WithoutInitializing,
                                           label + "_outer_stamps"),
                       outer_.layout()),
+        routeb_value_(label + "_routeb_value", registry.size(), 5,
+                      radial_grid.size(), theta_count),
+        routeb_tangent_(label + "_routeb_tangent", registry.size(), 5,
+                        radial_grid.size(), theta_count),
+        routeb_second_tangent_(label + "_routeb_second_tangent",
+                               registry.size(), 5, radial_grid.size(),
+                               theta_count),
+        routeb_value_stamps_(label + "_routeb_value_stamps", registry.size(),
+                             5, radial_grid.size(), theta_count),
+        routeb_tangent_stamps_(label + "_routeb_tangent_stamps",
+                               registry.size(), 5, radial_grid.size(),
+                               theta_count),
+        routeb_second_tangent_stamps_(
+            label + "_routeb_second_tangent_stamps", registry.size(), 5,
+            radial_grid.size(), theta_count),
         readiness_(label + "_readiness", radial_grid.size(), theta_count) {
     if (radial_grid.size() < radial_minimum_points(radial_discretization_) ||
         cos_theta.extent(0) != static_cast<std::size_t>(theta_count) ||
@@ -484,6 +556,10 @@ class Plus2LiveSourceComposition {
     Kokkos::deep_copy(execution, q_value_stamps_, std::uint64_t{0});
     Kokkos::deep_copy(execution, projected_stamps_, std::uint64_t{0});
     Kokkos::deep_copy(execution, outer_stamps_, std::uint64_t{0});
+    Kokkos::deep_copy(execution, routeb_value_stamps_, std::uint64_t{0});
+    Kokkos::deep_copy(execution, routeb_tangent_stamps_, std::uint64_t{0});
+    Kokkos::deep_copy(execution, routeb_second_tangent_stamps_,
+                      std::uint64_t{0});
     Kokkos::deep_copy(execution, readiness_, std::uint8_t{0});
   }
 
@@ -495,6 +571,69 @@ class Plus2LiveSourceComposition {
   linear_workspace() const { return linear_; }
   [[nodiscard]] const Plus2SourceValueSpatialWorkspace& source_workspace()
       const { return source_; }
+
+  // Complete local Route-B scientific path. The five-level tower is one
+  // immutable common-stage object. Curvature is evaluated exactly once, then
+  // levels h0/h1/h2 are packed into the concrete primitive producer without a
+  // host copy or a second authority. This remains standalone and is not a
+  // solver/runtime enablement seam.
+  void evaluate_routeb_stage(
+      const execution_space& execution, const double stage_time,
+      const Plus2RouteBCurvatureTowerStage& tower,
+      const SourceActivationState& activation_snapshot,
+      const Plus2StageSourceTarget& target,
+      Plus2RouteBCurvatureSpatialProvider<execution_space>&
+          curvature_provider,
+      Plus2SourcePrimitiveSpatialProducer<execution_space>& primitive_producer,
+      Plus2SourceOuterSpatialProducer<execution_space>& outer_producer,
+      const Plus2RouteBCurvatureOffsets tower_offsets = {}) {
+    const Plus2LiveSourceCapability capability{
+        true, true, true, true, RadialDiscretization::D105,
+        tower.generation};
+    if (!curvature_provider.accepts_generation(tower.generation) ||
+        !curvature_provider.matches_configuration(
+            registry_, radial_grid_, parameters_, ell_max_, cos_theta_,
+            sin_theta_) ||
+        primitive_producer.radial_discretization() !=
+            radial_discretization_ ||
+        !primitive_producer.accepts_generation(tower.generation) ||
+        !primitive_producer.matches_configuration(
+            registry_, radial_grid_, parameters_, ell_max_, cos_theta_,
+            sin_theta_) ||
+        outer_producer.radial_discretization() != radial_discretization_ ||
+        !outer_producer.matches_configuration(
+            registry_, radial_grid_, parameters_, ell_max_, cos_theta_,
+            sin_theta_)) {
+      throw std::invalid_argument(
+          "spin +2 Route-B source stage configuration mismatch");
+    }
+    validate_stage(capability, activation_snapshot, target,
+                   curvature_provider.curvature_stage(),
+                   curvature_provider.derivative_stage());
+    curvature_provider.evaluate(execution, tower, tower_offsets);
+    const std::size_t points =
+        registry_.size() * radial_grid_.size() * sin_theta_.extent(0);
+    Kokkos::parallel_for(
+        "pack_plus2_routeb_live_levels",
+        Kokkos::RangePolicy<execution_space>(execution, 0, points),
+        plus2_live_source_detail::PackRouteBTowerLevelsFunctor{
+            tower.fields.data(), tower.stamps.data(), routeb_value_.data(),
+            routeb_tangent_.data(), routeb_second_tangent_.data(),
+            routeb_value_stamps_.data(), routeb_tangent_stamps_.data(),
+            routeb_second_tangent_stamps_.data(), registry_.size(),
+            tower.fields.extent(2), radial_grid_.size(), sin_theta_.extent(0),
+            tower_offsets.H, tower_offsets.Pi, tower_offsets.B,
+            tower_offsets.C, tower_offsets.U});
+    evaluate_stage(
+        execution, stage_time,
+        Plus2PrimitiveReconstructionStage{
+            tower.generation, routeb_value_, routeb_tangent_,
+            routeb_second_tangent_, routeb_value_stamps_,
+            routeb_tangent_stamps_, routeb_second_tangent_stamps_},
+        curvature_provider.curvature_stage(),
+        curvature_provider.derivative_stage(), capability,
+        activation_snapshot, target, primitive_producer, outer_producer);
+  }
 
   // Scientific path: bind the complete stamped reconstruction stage directly
   // to the concrete primitive producer.  No generic source callback is
@@ -767,7 +906,7 @@ class Plus2LiveSourceComposition {
         !supports_nested_fourth_order ||
         capability.generation == 0 ||
         capability.generation <= last_generation_ ||
-        !capability.transported_curvature_in_common_rk_state ||
+        !capability.curvature_bound_to_common_rk_stage ||
         !capability.primitive_bianchi_spatial_graph_qualified ||
         !capability.angular_projection_graph_qualified ||
         (has_scri &&
@@ -831,6 +970,12 @@ class Plus2LiveSourceComposition {
   Plus2LiveStampView q_value_stamps_;
   Plus2LiveStampView projected_stamps_;
   Plus2LiveStampView outer_stamps_;
+  Plus2PrimitiveConstStageView::non_const_type routeb_value_;
+  Plus2PrimitiveConstStageView::non_const_type routeb_tangent_;
+  Plus2PrimitiveConstStageView::non_const_type routeb_second_tangent_;
+  Plus2LiveStampView routeb_value_stamps_;
+  Plus2LiveStampView routeb_tangent_stamps_;
+  Plus2LiveStampView routeb_second_tangent_stamps_;
   Plus2LiveReadinessView readiness_;
   std::uint64_t last_generation_ = 0;
 };

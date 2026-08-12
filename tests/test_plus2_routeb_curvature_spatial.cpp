@@ -261,12 +261,14 @@ struct CoordinateRun {
 };
 
 CoordinateRun run_coordinate_tower(const int spin_index,
-                                   const int case_index) {
+                                   const int case_index,
+                                   const std::size_t radial_count,
+                                   const int provider_ell_max) {
   namespace fixture = plus2_routeb_curvature_coordinate_fixture;
   teuk::ExecutionSpace execution;
   const teuk::ModeRegistry registry({-2, 2});
-  const teuk::UniformRadialGrid grid(fixture::radial_count, 0.0,
-                                     fixture::radial_max);
+  const teuk::UniformRadialGrid grid(radial_count, 0.0,
+                                     fixture::radial_maxes[spin_index]);
   const teuk::KerrParameters parameters{1.0, fixture::spins[spin_index], 2.0};
   const auto angular_grid = teuk::angular::gauss_legendre(fixture::theta_count);
   teuk::Plus2SpatialThetaView cos_theta("routeb_coordinate_cos",
@@ -285,9 +287,9 @@ CoordinateRun run_coordinate_tower(const int spin_index,
   constexpr std::size_t field_count = 7;
   teuk::Plus2RouteBTowerView tower(
       "routeb_coordinate_tower", 5, registry.size(), field_count,
-      fixture::radial_count, fixture::theta_count);
+      radial_count, fixture::theta_count);
   teuk::Plus2RouteBTowerStampView stamps(
-      "routeb_coordinate_stamps", 5, registry.size(), fixture::radial_count,
+      "routeb_coordinate_stamps", 5, registry.size(), radial_count,
       fixture::theta_count);
   auto host_tower = Kokkos::create_mirror_view(tower);
   auto host_stamps = Kokkos::create_mirror_view(stamps);
@@ -295,7 +297,7 @@ CoordinateRun run_coordinate_tower(const int spin_index,
     for (std::size_t mode_index = 0; mode_index < registry.size();
          ++mode_index) {
       const int mode = registry.modes()[mode_index];
-      for (int radial = 0; radial < fixture::radial_count; ++radial) {
+      for (std::size_t radial = 0; radial < radial_count; ++radial) {
         const double radius = grid.coordinate(radial);
         for (int theta = 0; theta < fixture::theta_count; ++theta) {
           for (std::size_t field = 0; field < field_count; ++field) {
@@ -343,7 +345,7 @@ CoordinateRun run_coordinate_tower(const int spin_index,
   Kokkos::deep_copy(execution, tower, host_tower);
   Kokkos::deep_copy(execution, stamps, host_stamps);
   teuk::Plus2RouteBCurvatureSpatialProvider provider(
-      execution, registry, grid, parameters, fixture::provider_ell_max, cos_theta,
+      execution, registry, grid, parameters, provider_ell_max, cos_theta,
       sin_theta, "routeb_coordinate_provider");
   provider.evaluate(execution, {47, tower, stamps});
   execution.fence();
@@ -454,9 +456,23 @@ TEST_CASE("Route-B curvature provider matches independent coordinate Weyl") {
   C worst_z1_actual{};
   std::array<double, 4> case_z0_error{};
   std::array<double, 4> case_z1_error{};
+  double minimum_horizon_ratio = std::numeric_limits<double>::infinity();
+  double maximum_horizon_fine = 0.0;
+  std::size_t resolved_horizon_cells = 0;
+  std::size_t horizon_floor_cells = 0;
   for (int case_index = 0; case_index < 4; ++case_index) {
     for (int spin_index = 0; spin_index < 3; ++spin_index) {
-      const auto run = run_coordinate_tower(spin_index, case_index);
+      const std::array<CoordinateRun, 3> runs{
+          run_coordinate_tower(spin_index, case_index, 9,
+                               fixture::provider_ell_max),
+          run_coordinate_tower(spin_index, case_index, 17,
+                               fixture::provider_ell_max),
+          run_coordinate_tower(spin_index, case_index, 33,
+                               fixture::provider_ell_max)};
+      const CoordinateRun angular12 =
+          run_coordinate_tower(spin_index, case_index, 33, 12);
+      const CoordinateRun angular18 =
+          run_coordinate_tower(spin_index, case_index, 33, 18);
       for (const auto& expected : fixture::expected) {
         if (expected.case_index != case_index ||
             expected.spin_index != spin_index) {
@@ -464,14 +480,100 @@ TEST_CASE("Route-B curvature provider matches independent coordinate Weyl") {
         }
       const std::size_t z0_field = 2 * expected.level;
       const std::size_t z1_field = z0_field + 1;
-      const C actual_z0 = run.curvature(
+      const C actual_z0 = runs[2].curvature(
           expected.mode_index, z0_field, expected.radial_index,
           expected.theta_index);
-      const C actual_z1 = run.curvature(
+      const C actual_z1 = runs[2].curvature(
           expected.mode_index, z1_field, expected.radial_index,
           expected.theta_index);
       const double z0_error = Kokkos::abs(actual_z0 - expected.z0);
       const double z1_error = Kokkos::abs(actual_z1 - expected.z1);
+      if (expected.radial_index == fixture::radial_count - 1) {
+        const std::size_t coarse_radial = 8;
+        const std::size_t medium_radial = 16;
+        const C coarse_values[2]{
+            runs[0].curvature(expected.mode_index, z0_field, coarse_radial,
+                              expected.theta_index),
+            runs[0].curvature(expected.mode_index, z1_field, coarse_radial,
+                              expected.theta_index)};
+        const C medium_values[2]{
+            runs[1].curvature(expected.mode_index, z0_field, medium_radial,
+                              expected.theta_index),
+            runs[1].curvature(expected.mode_index, z1_field, medium_radial,
+                              expected.theta_index)};
+        const C fine_values[2]{actual_z0, actual_z1};
+        const C angular12_values[2]{
+            angular12.curvature(expected.mode_index, z0_field,
+                                expected.radial_index,
+                                expected.theta_index),
+            angular12.curvature(expected.mode_index, z1_field,
+                                expected.radial_index,
+                                expected.theta_index)};
+        const C angular18_values[2]{
+            angular18.curvature(expected.mode_index, z0_field,
+                                expected.radial_index,
+                                expected.theta_index),
+            angular18.curvature(expected.mode_index, z1_field,
+                                expected.radial_index,
+                                expected.theta_index)};
+        const C exact_values[2]{expected.z0, expected.z1};
+        for (std::size_t field = 0; field < 2; ++field) {
+          const double coarse_medium =
+              Kokkos::abs(coarse_values[field] - medium_values[field]);
+          const double medium_fine =
+              Kokkos::abs(medium_values[field] - fine_values[field]);
+          const double fine_error =
+              Kokkos::abs(fine_values[field] - exact_values[field]);
+          const double angular_12_18 = Kokkos::abs(
+              angular12_values[field] - angular18_values[field]);
+          const double angular_18_24 =
+              Kokkos::abs(angular18_values[field] - fine_values[field]);
+          CHECK(std::isfinite(coarse_medium));
+          CHECK(std::isfinite(medium_fine));
+          CHECK(std::isfinite(fine_error));
+          CHECK(std::isfinite(angular_12_18));
+          CHECK(std::isfinite(angular_18_24));
+          maximum_horizon_fine = std::max(maximum_horizon_fine, fine_error);
+          if (medium_fine > 5.0e-11) {
+            if (!(coarse_medium > 15.0 * medium_fine)) {
+              std::cout
+                  << "Route-B coordinate horizon red case/spin/mode/level/"
+                     "theta/field/errors "
+                  << case_index << ' ' << spin_index << ' '
+                  << expected.mode_index << ' ' << expected.level << ' '
+                  << expected.theta_index << ' ' << field << ' '
+                  << coarse_medium << ' ' << medium_fine << ' ' << fine_error
+                  << " radial ratio " << coarse_medium / medium_fine
+                  << " angular increments " << angular_12_18 << ' '
+                  << angular_18_24 << '\n';
+            }
+            CHECK(coarse_medium > 15.0 * medium_fine);
+            minimum_horizon_ratio =
+                std::min(minimum_horizon_ratio,
+                         coarse_medium / medium_fine);
+            ++resolved_horizon_cells;
+          } else {
+            ++horizon_floor_cells;
+          }
+          if (angular_18_24 > 5.0e-11) {
+            if (!(angular_12_18 > 2.0 * angular_18_24)) {
+              std::cout
+                  << "Route-B coordinate angular red case/spin/mode/level/"
+                     "theta/field/increments "
+                  << case_index << ' ' << spin_index << ' '
+                  << expected.mode_index << ' ' << expected.level << ' '
+                  << expected.theta_index << ' ' << field << ' '
+                  << angular_12_18 << ' ' << angular_18_24 << '\n';
+            }
+            CHECK(angular_12_18 > 2.0 * angular_18_24);
+          } else {
+            CHECK(angular_18_24 < 5.0e-11);
+          }
+          CHECK(fine_error < medium_fine / 15.0 +
+                                 2.0 * angular_18_24 + 5.0e-11);
+        }
+        continue;
+      }
       case_z0_error[case_index] =
           std::max(case_z0_error[case_index], z0_error);
       case_z1_error[case_index] =
@@ -491,6 +593,10 @@ TEST_CASE("Route-B curvature provider matches independent coordinate Weyl") {
   }
   std::cout << "Route-B coordinate-Weyl maximum Z0/Z1 errors "
             << maximum_z0_error << ' ' << maximum_z1_error << '\n';
+  std::cout << "Route-B coordinate-Weyl horizon minimum ratio/fine "
+            << minimum_horizon_ratio << ' ' << maximum_horizon_fine
+            << " resolved/floor cells " << resolved_horizon_cells << ' '
+            << horizon_floor_cells << '\n';
   for (int case_index = 0; case_index < 4; ++case_index) {
     std::cout << "Route-B coordinate-Weyl case " << case_index
               << " Z0/Z1 errors " << case_z0_error[case_index] << ' '
@@ -512,6 +618,8 @@ TEST_CASE("Route-B curvature provider matches independent coordinate Weyl") {
   }
   CHECK(maximum_z0_error < 5.0e-11);
   CHECK(maximum_z1_error < 5.0e-11);
+  CHECK(resolved_horizon_cells > 0);
+  CHECK(minimum_horizon_ratio > 15.0);
 }
 
 TEST_CASE("Route-B curvature provider fails closed and stays hot") {
