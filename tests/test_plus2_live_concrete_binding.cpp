@@ -577,14 +577,22 @@ double binding_difference_norm(const std::vector<C>& left,
 }
 
 TEST_CASE("plus2 three-state live seam has fourth-order common-stage time RK4") {
+  // The graph is homogeneous in the primary amplitude and quadratic in its
+  // forcing.  This test-only scale keeps the fine-grid truncation error well
+  // above binary64 roundoff without changing the RK tableau or CFL scale.
+  constexpr double convergence_amplitude = 2000.0;
   const auto coarse =
-      run_binding_evolution(1.0, 2, 0.02, false, false).companion;
+      run_binding_evolution(convergence_amplitude, 2, 0.02, false, false)
+          .companion;
   const auto medium =
-      run_binding_evolution(1.0, 4, 0.02, false, false).companion;
+      run_binding_evolution(convergence_amplitude, 4, 0.02, false, false)
+          .companion;
   const auto fine =
-      run_binding_evolution(1.0, 8, 0.02, false, false).companion;
+      run_binding_evolution(convergence_amplitude, 8, 0.02, false, false)
+          .companion;
   const auto reference =
-      run_binding_evolution(1.0, 32, 0.02, false, false).companion;
+      run_binding_evolution(convergence_amplitude, 32, 0.02, false, false)
+          .companion;
   const double coarse_error = binding_difference_norm(coarse, reference);
   const double medium_error = binding_difference_norm(medium, reference);
   const double fine_error = binding_difference_norm(fine, reference);
@@ -592,6 +600,13 @@ TEST_CASE("plus2 three-state live seam has fourth-order common-stage time RK4") 
             << ' ' << medium_error << ' ' << fine_error << " ratios "
             << coarse_error / medium_error << ' '
             << medium_error / fine_error << '\n';
+  CHECK(std::isfinite(coarse_error));
+  CHECK(std::isfinite(medium_error));
+  CHECK(std::isfinite(fine_error));
+  CHECK(coarse_error > medium_error);
+  CHECK(medium_error > fine_error);
+  CHECK(fine_error > 1.0e-11);
+  CHECK(coarse_error < 1.0e-6);
   CHECK(coarse_error / medium_error > 12.0);
   CHECK(medium_error / fine_error > 12.0);
 }
