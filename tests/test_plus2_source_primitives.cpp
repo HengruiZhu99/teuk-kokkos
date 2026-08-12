@@ -22,7 +22,7 @@ namespace {
 
 using C = std::complex<double>;
 using KC = teuk::Complex;
-using Fields = teuk::Plus2OrgMetricFieldsT<KC>;
+using Fields = teuk::Plus2ReconstructionPrimitiveInputsT<KC>;
 using Derivatives = teuk::Plus2PrimitiveDerivativesT<KC>;
 using Primitives = teuk::Plus2SourcePrimitivesT<KC>;
 
@@ -400,8 +400,8 @@ using J = teuk::Jet1<KC>;
 
 J jet(const KC& z, const KC& dz) { return {z, dz}; }
 
-teuk::Plus2OrgMetricFieldsT<J> make_jets(const Fields& f,
-                                         const Fields& df) {
+teuk::Plus2ReconstructionPrimitiveInputsT<J> make_jets(
+    const Fields& f, const Fields& df) {
   return {jet(f.U, df.U), jet(f.Usharp, df.Usharp), jet(f.C, df.C),
           jet(f.Csharp, df.Csharp), jet(f.B, df.B),
           jet(f.Bsharp, df.Bsharp), jet(f.H, df.H), jet(f.Pi, df.Pi)};

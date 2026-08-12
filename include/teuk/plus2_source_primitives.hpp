@@ -47,7 +47,7 @@ plus2_primitive_background(const KerrParameters& parameters,
 // h_lm=R^2 Csharp, h_barbar=R B, and h_mm=R Bsharp.  H=Psi2/R^3 and
 // Pi=pi^(1)/R^2 are existing reconstruction outputs.
 template <class Scalar>
-struct Plus2OrgMetricFieldsT {
+struct Plus2ReconstructionPrimitiveInputsT {
   Scalar U;
   Scalar Usharp;
   Scalar C;
@@ -131,7 +131,8 @@ struct Plus2SourcePrimitivesT {
   Scalar psi1_quotient_residual;
 };
 
-using Plus2OrgMetricFields = Plus2OrgMetricFieldsT<Complex>;
+using Plus2ReconstructionPrimitiveInputs =
+    Plus2ReconstructionPrimitiveInputsT<Complex>;
 using Plus2PrimitiveDerivatives = Plus2PrimitiveDerivativesT<Complex>;
 using Plus2SourcePrimitives = Plus2SourcePrimitivesT<Complex>;
 
@@ -139,7 +140,7 @@ template <class Scalar>
 KOKKOS_INLINE_FUNCTION Plus2SourcePrimitivesT<Scalar>
 plus2_source_primitives(
     const double radius, const Plus2PrimitiveBackground& background,
-    const Plus2OrgMetricFieldsT<Scalar>& metric,
+    const Plus2ReconstructionPrimitiveInputsT<Scalar>& metric,
     const Plus2PrimitiveDerivativesT<Scalar>& d) {
   const Complex mu0 = background.kerr.mu0;
   const Complex mubar0 = Kokkos::conj(mu0);
