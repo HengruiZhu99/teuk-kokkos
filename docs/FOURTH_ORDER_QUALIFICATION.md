@@ -82,7 +82,10 @@ would invalidate both common-stage RK4 and this qualification.
 
 These tests qualify the D8-4 full spin `+2` RHS, its compatible dissipation,
 and the one-way common-stage RK4 mechanism. They do not by themselves qualify
-the complete four-field production run. That broader claim additionally
-requires the reconstruction derivatives, both second-order source paths,
-runtime selection/checkpoint metadata, angular/source band studies, and CPU to
-GPU parity to traverse the same D8-4 selection.
+the complete four-field production run. The endpoint-inclusive audit in
+`FULL_GRAPH_ORDER_GAP.md` now demonstrates that the D8-4 reconstruction/source
+composition is only third order at the source endpoints because it contains
+nested numerical radial derivatives. An overall-fourth-order production claim
+is therefore explicitly blocked pending that repair, followed by
+runtime/checkpoint, angular/source-band, and CPU-to-GPU qualification of the
+same selected operator.
