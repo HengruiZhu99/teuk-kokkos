@@ -30,6 +30,18 @@ inline constexpr const char* plus2_fixed_tetrad_raw_scaling =
     "Psi0_raw_fixed_tetrad=(R^5/(L^2-i*a*R*cos(theta))^4)*Z_plus";
 inline constexpr const char* plus2_signed_mode_registry =
     "signed-m-sharp-registry-v1";
+inline constexpr const char* plus2_binary64_format = "IEEE-754-binary64";
+inline constexpr const char* plus2_complex_component_order =
+    "real-then-imag";
+inline constexpr const char* plus2_state_storage_order =
+    "LayoutRight(mode,field,radial,theta);field-order=(P,Q,Z)";
+
+inline const char* plus2_native_byte_order() {
+  if constexpr (std::endian::native == std::endian::little) return "little";
+  if constexpr (std::endian::native == std::endian::big) return "big";
+  throw std::runtime_error(
+      "mixed-endian plus2 checkpoint storage is unsupported");
+}
 
 struct Plus2CheckpointProgress {
   double time = 0.0;
@@ -39,6 +51,10 @@ struct Plus2CheckpointProgress {
 struct Plus2CheckpointMetadata {
   std::string schema = plus2_checkpoint_schema;
   std::uint32_t version = plus2_checkpoint_format_version;
+  std::string byte_order = plus2_native_byte_order();
+  std::string floating_point_format = plus2_binary64_format;
+  std::string complex_component_order = plus2_complex_component_order;
+  std::string state_storage_order = plus2_state_storage_order;
   std::string scaling = plus2_fixed_tetrad_raw_scaling;
   std::string registry_schema = plus2_signed_mode_registry;
   std::vector<int> parent_modes;
@@ -107,9 +123,20 @@ inline void validate_expectations(const Plus2CheckpointExpectations& expected) {
 inline void validate_metadata(const Plus2CheckpointMetadata& metadata) {
   if (metadata.schema != plus2_checkpoint_schema ||
       metadata.version != plus2_checkpoint_format_version ||
+      metadata.byte_order != plus2_native_byte_order() ||
+      metadata.floating_point_format != plus2_binary64_format ||
+      metadata.complex_component_order != plus2_complex_component_order ||
+      metadata.state_storage_order != plus2_state_storage_order ||
       metadata.scaling.empty() || metadata.registry_schema.empty() ||
       metadata.radial_count == 0 || metadata.theta_count == 0) {
-    throw std::invalid_argument("invalid plus2 checkpoint schema or shape");
+    throw std::invalid_argument(
+        "invalid plus2 checkpoint schema, representation, or shape");
+  }
+  if (sizeof(double) != 8 || !std::numeric_limits<double>::is_iec559 ||
+      std::numeric_limits<double>::digits != 53 ||
+      std::numeric_limits<double>::max_exponent != 1024) {
+    throw std::runtime_error(
+        "host does not provide the required IEEE-754 binary64 format");
   }
   require_sorted_sharp_registry(metadata.parent_modes, "parent registry");
   require_sorted_sharp_registry(metadata.target_modes, "target registry");
@@ -213,6 +240,10 @@ inline void write_payload(std::ostream& output,
   output.write(magic.data(), static_cast<std::streamsize>(magic.size()));
   write_string(output, metadata.schema);
   write_scalar(output, metadata.version);
+  write_string(output, metadata.byte_order);
+  write_string(output, metadata.floating_point_format);
+  write_string(output, metadata.complex_component_order);
+  write_string(output, metadata.state_storage_order);
   write_string(output, metadata.scaling);
   write_string(output, metadata.registry_schema);
   write_modes(output, metadata.parent_modes);
@@ -244,6 +275,11 @@ inline std::pair<Plus2CheckpointMetadata, std::vector<Complex>> read_payload(
   Plus2CheckpointMetadata metadata;
   metadata.schema = read_string(input, "schema");
   metadata.version = read_scalar<std::uint32_t>(input, "version");
+  metadata.byte_order = read_string(input, "byte order");
+  metadata.floating_point_format = read_string(input, "floating-point format");
+  metadata.complex_component_order =
+      read_string(input, "complex component order");
+  metadata.state_storage_order = read_string(input, "state storage order");
   metadata.scaling = read_string(input, "scaling");
   metadata.registry_schema = read_string(input, "registry schema");
   metadata.parent_modes = read_modes(input, "parent modes");

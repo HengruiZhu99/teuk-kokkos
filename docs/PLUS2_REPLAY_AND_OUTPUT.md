@@ -47,16 +47,28 @@ The independent companion checkpoint schema is
 - the exact raw fixed-tetrad scaling
   `Psi0_raw_fixed_tetrad=(R^5/(L^2-i*a*R*cos(theta))^4)*Z_plus`;
 - the signed-m registry schema and explicit parent/target registries;
-- companion radial/angular extents and the three-field ordering `(P,Q,Z)`;
+- native byte order and the required IEEE-754 binary64 representation;
+- complex serialization order `real-then-imag`;
+- companion radial/angular extents and the exact
+  `LayoutRight(mode,field,radial,theta)` storage order with field order
+  `(P,Q,Z)`;
 - accepted time and step;
 - the shared accepted-state source-activation latch;
 - an FNV-1a checksum over binary64 real and imaginary components.
 
 Loading reads and validates the magic, schema, version, scaling, registries,
-shape, byte count, activation history, trailing-data condition, and checksum
-against host-owned temporary data. Only after all checks pass is the companion
-device state mutated. Checkpoint targets must be new paths, preventing an
-implicit overwrite.
+native byte order, floating-point format, component/storage order, shape, byte
+count, activation history, trailing-data condition, and checksum against
+host-owned temporary data. Only after all checks pass is the companion device
+state mutated. Checkpoint targets must be new paths, preventing an implicit
+overwrite.
+
+The companion checkpoint does not currently store the resolved timestep.
+Consequently, the loader can require a finite nonnegative progress time and
+check activation times against it, but it cannot prove a relation such as
+`time == step * dt`. The primary resolved configuration/checkpoint remains the
+authority for that consistency check; the orchestration layer must not infer a
+timestep from the two progress fields.
 
 ## Determinism evidence and present limitation
 

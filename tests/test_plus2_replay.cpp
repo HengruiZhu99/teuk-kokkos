@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -260,6 +261,44 @@ class TemporaryCheckpoint {
   std::filesystem::path path_;
 };
 
+void replace_checkpoint_bytes(const std::filesystem::path& path,
+                              const std::string& original,
+                              const std::string& replacement) {
+  if (original.size() != replacement.size()) {
+    throw std::invalid_argument("checkpoint replacement must preserve size");
+  }
+  std::ifstream input(path, std::ios::binary);
+  std::vector<char> bytes((std::istreambuf_iterator<char>(input)),
+                          std::istreambuf_iterator<char>());
+  const auto match = std::search(bytes.begin(), bytes.end(), original.begin(),
+                                 original.end());
+  if (match == bytes.end()) {
+    throw std::runtime_error("checkpoint marker was not found");
+  }
+  std::copy(replacement.begin(), replacement.end(), match);
+  std::ofstream output(path, std::ios::binary | std::ios::trunc);
+  output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+  if (!output) throw std::runtime_error("failed to corrupt checkpoint marker");
+}
+
+teuk::Plus2CheckpointMetadata checkpoint_metadata() {
+  teuk::Plus2CheckpointMetadata metadata;
+  metadata.parent_modes = {-1, 1};
+  metadata.target_modes = {-2, 0, 2};
+  metadata.progress = {0.5, 5};
+  metadata.source_activation = {true, 0.1, 2, 0.4};
+  return metadata;
+}
+
+teuk::Plus2CheckpointExpectations checkpoint_expectations() {
+  return {teuk::plus2_fixed_tetrad_raw_scaling,
+          teuk::plus2_signed_mode_registry,
+          {-1, 1},
+          {-2, 0, 2},
+          2,
+          2};
+}
+
 }  // namespace
 
 TEST_CASE("plus2 modes and initial policies are strict and typed") {
@@ -350,28 +389,23 @@ TEST_CASE("plus2 checkpoint round trip validates before device mutation") {
   Kokkos::deep_copy(execution, storage.flat_state(), host);
   execution.fence("set plus2 checkpoint test state");
 
-  teuk::Plus2CheckpointMetadata metadata;
-  metadata.parent_modes = {-1, 1};
-  metadata.target_modes = {-2, 0, 2};
-  metadata.progress = {0.5, 5};
-  metadata.source_activation = {true, 0.1, 2, 0.4};
+  auto metadata = checkpoint_metadata();
   TemporaryCheckpoint checkpoint;
   const auto saved = teuk::save_plus2_checkpoint(
       execution, checkpoint.path(), storage, metadata);
   CHECK(saved.schema == teuk::plus2_checkpoint_schema);
   CHECK(saved.version == teuk::plus2_checkpoint_format_version);
+  CHECK(saved.byte_order == teuk::plus2_native_byte_order());
+  CHECK(saved.floating_point_format == teuk::plus2_binary64_format);
+  CHECK(saved.complex_component_order ==
+        teuk::plus2_complex_component_order);
+  CHECK(saved.state_storage_order == teuk::plus2_state_storage_order);
   CHECK(saved.scaling == teuk::plus2_fixed_tetrad_raw_scaling);
   CHECK(saved.registry_schema == teuk::plus2_signed_mode_registry);
   CHECK(saved.state_checksum != 0);
 
   Kokkos::deep_copy(execution, storage.flat_state(), teuk::Complex(0.0, 0.0));
-  const teuk::Plus2CheckpointExpectations expectations{
-      teuk::plus2_fixed_tetrad_raw_scaling,
-      teuk::plus2_signed_mode_registry,
-      {-1, 1},
-      {-2, 0, 2},
-      2,
-      2};
+  const auto expectations = checkpoint_expectations();
   const auto loaded = teuk::load_plus2_checkpoint(
       execution, checkpoint.path(), storage, expectations);
   CHECK(loaded.progress.time == 0.5);
@@ -384,6 +418,22 @@ TEST_CASE("plus2 checkpoint round trip validates before device mutation") {
 
   Kokkos::deep_copy(execution, storage.flat_state(), teuk::Complex(9.0, -4.0));
   execution.fence("set plus2 checkpoint mutation sentinel");
+  auto mismatched_expectations = expectations;
+  mismatched_expectations.scaling = "a-different-plus2-scaling";
+  bool mismatch_rejected = false;
+  try {
+    static_cast<void>(teuk::load_plus2_checkpoint(
+        execution, checkpoint.path(), storage, mismatched_expectations));
+  } catch (const std::runtime_error&) {
+    mismatch_rejected = true;
+  }
+  CHECK(mismatch_rejected);
+  const auto unchanged_after_mismatch = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, storage.flat_state());
+  for (std::size_t i = 0; i < unchanged_after_mismatch.extent(0); ++i) {
+    CHECK(unchanged_after_mismatch(i) == teuk::Complex(9.0, -4.0));
+  }
+
   {
     std::fstream corrupt(checkpoint.path(), std::ios::binary | std::ios::in |
                                                 std::ios::out);
@@ -407,6 +457,50 @@ TEST_CASE("plus2 checkpoint round trip validates before device mutation") {
       Kokkos::HostSpace{}, storage.flat_state());
   for (std::size_t i = 0; i < unchanged.extent(0); ++i) {
     CHECK(unchanged(i) == teuk::Complex(9.0, -4.0));
+  }
+}
+
+TEST_CASE("plus2 checkpoint rejects representation metadata corruption") {
+  const teuk::ExecutionSpace execution;
+  auto storage = teuk::Plus2CompanionStorage::enabled(
+      3, 2, 2, "plus2_representation_checkpoint_test");
+  const auto expectations = checkpoint_expectations();
+  struct Corruption {
+    std::string original;
+    std::string replacement;
+  };
+  const std::vector<Corruption> corruptions{
+      {teuk::plus2_native_byte_order(),
+       std::string(std::string(teuk::plus2_native_byte_order()).size(), 'x')},
+      {teuk::plus2_binary64_format, "IEEE-754-binary32"},
+      {teuk::plus2_complex_component_order, "imag-then-real"},
+      {teuk::plus2_state_storage_order,
+       "LayoutRight(mode,field,radial,theta);field-order=(Z,Q,P)"}};
+
+  for (const auto& corruption : corruptions) {
+    Kokkos::deep_copy(execution, storage.flat_state(),
+                      teuk::Complex(1.25, -0.5));
+    TemporaryCheckpoint checkpoint;
+    static_cast<void>(teuk::save_plus2_checkpoint(
+        execution, checkpoint.path(), storage, checkpoint_metadata()));
+    replace_checkpoint_bytes(checkpoint.path(), corruption.original,
+                             corruption.replacement);
+    Kokkos::deep_copy(execution, storage.flat_state(),
+                      teuk::Complex(-8.0, 3.0));
+    execution.fence("set representation-corruption mutation sentinel");
+    bool rejected = false;
+    try {
+      static_cast<void>(teuk::load_plus2_checkpoint(
+          execution, checkpoint.path(), storage, expectations));
+    } catch (const std::invalid_argument&) {
+      rejected = true;
+    }
+    CHECK(rejected);
+    const auto unchanged = Kokkos::create_mirror_view_and_copy(
+        Kokkos::HostSpace{}, storage.flat_state());
+    for (std::size_t i = 0; i < unchanged.extent(0); ++i) {
+      CHECK(unchanged(i) == teuk::Complex(-8.0, 3.0));
+    }
   }
 }
 
