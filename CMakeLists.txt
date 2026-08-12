@@ -113,6 +113,12 @@ if(BUILD_TESTING)
       COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/numerical/verify_routeb_fornberg.py)
     add_test(
+      NAME teuk.routeb_teukolsky_primary_fixture_generation
+      COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/numerical/generate_routeb_teukolsky_primary_fixture.py
+        --check
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/routeb_teukolsky_primary_fixture.hpp)
+    add_test(
       NAME teuk.plus2_tsi_schwarzschild_radial
       COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/numerical/verify_plus2_tsi_schwarzschild_radial_fixture.py)
