@@ -49,12 +49,65 @@ struct Plus2PrimitiveBackground {
   KerrBackgroundPoint kerr;
   Complex alpha0;
   Complex beta0;
+  // Stationary background derivatives used by the linearized Psi1 Ricci
+  // identity.  In the repository coordinates (y=cos(theta)),
+  //
+  //   capital_delta1_beta0    = Delta(R beta0)/R,
+  //   capital_delta2_epsilon0 = Delta(R^2 epsilon0)/R^2,
+  //   bardelta2_epsilon0      = bardelta(R^2 epsilon0)/R^3.
+  //
+  // These are regular radial-rescaled quantities.  beta0 itself and its
+  // Delta derivative retain the ordinary NP polar-coordinate singularity;
+  // production angular combinations must use interior Gauss-Legendre nodes.
+  Complex capital_delta1_beta0;
+  Complex capital_delta2_epsilon0;
+  Complex bardelta2_epsilon0;
 };
+
+namespace plus2_primitive_background_detail {
+
+// Minimal coordinate jet for transparent, device-callable differentiation of
+// stationary Kerr background expressions.  The two derivative components are
+// partial_R and partial_y at y=cos(theta); no automatic-differentiation
+// dependency enters production.
+struct CoordinateJet {
+  Complex value;
+  Complex radial;
+  Complex angular;
+};
+
+KOKKOS_INLINE_FUNCTION CoordinateJet add(const CoordinateJet& lhs,
+                                         const CoordinateJet& rhs) {
+  return {lhs.value + rhs.value, lhs.radial + rhs.radial,
+          lhs.angular + rhs.angular};
+}
+
+KOKKOS_INLINE_FUNCTION CoordinateJet multiply(const CoordinateJet& lhs,
+                                              const CoordinateJet& rhs) {
+  return {lhs.value * rhs.value,
+          lhs.radial * rhs.value + lhs.value * rhs.radial,
+          lhs.angular * rhs.value + lhs.value * rhs.angular};
+}
+
+KOKKOS_INLINE_FUNCTION CoordinateJet reciprocal(const CoordinateJet& x) {
+  const Complex inverse = Complex(1.0, 0.0) / x.value;
+  const Complex minus_inverse_squared = -inverse * inverse;
+  return {inverse, minus_inverse_squared * x.radial,
+          minus_inverse_squared * x.angular};
+}
+
+KOKKOS_INLINE_FUNCTION CoordinateJet divide(const CoordinateJet& numerator,
+                                            const CoordinateJet& denominator) {
+  return multiply(numerator, reciprocal(denominator));
+}
+
+}  // namespace plus2_primitive_background_detail
 
 KOKKOS_INLINE_FUNCTION Plus2PrimitiveBackground
 plus2_primitive_background(const KerrParameters& parameters,
                            const double radius, const double cos_theta,
                            const double sin_theta) {
+  using namespace plus2_primitive_background_detail;
   const double length2 = parameters.compactification_length *
                          parameters.compactification_length;
   const double sqrt_two = Kokkos::sqrt(2.0);
@@ -71,8 +124,73 @@ plus2_primitive_background(const KerrParameters& parameters,
        imaginary_unit * parameters.spin * radius * sin_theta *
            (1.0 / (sin_theta * sin_theta) + 1.0)) /
       (2.0 * sqrt_two * minus_denominator * minus_denominator);
+
+  // Evaluate the exact coordinate expressions and their first derivatives.
+  // For stationary axisymmetric f(R,y), the repository tetrad gives
+  //
+  //   Delta f    = R^2/L^2 partial_R f,
+  //   bardelta f = R sin(theta)/(sqrt(2)(L^2+i a R y)) partial_y f.
+  //
+  // Differentiating the compact background formulas before applying these
+  // vectors preserves the cancellations at scri and the horizon.
+  const CoordinateJet R{{radius, 0.0}, {1.0, 0.0}, {0.0, 0.0}};
+  const CoordinateJet y{{cos_theta, 0.0}, {0.0, 0.0}, {1.0, 0.0}};
+  const CoordinateJet sine{{sin_theta, 0.0}, {0.0, 0.0},
+                           {-cos_theta / sin_theta, 0.0}};
+  const CoordinateJet one{{1.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}};
+  const CoordinateJet dm = add(
+      CoordinateJet{{length2, 0.0}, {0.0, 0.0}, {0.0, 0.0}},
+      multiply(CoordinateJet{{0.0, -parameters.spin}, {0.0, 0.0},
+                             {0.0, 0.0}},
+               multiply(R, y)));
+  const CoordinateJet dp = add(
+      CoordinateJet{{length2, 0.0}, {0.0, 0.0}, {0.0, 0.0}},
+      multiply(CoordinateJet{{0.0, parameters.spin}, {0.0, 0.0},
+                             {0.0, 0.0}},
+               multiply(R, y)));
+  const CoordinateJet beta_numerator = add(
+      multiply(CoordinateJet{{-length2, 0.0}, {0.0, 0.0}, {0.0, 0.0}},
+               divide(y, sine)),
+      multiply(
+          CoordinateJet{{0.0, parameters.spin}, {0.0, 0.0}, {0.0, 0.0}},
+          multiply(multiply(R, sine),
+                   add(reciprocal(multiply(sine, sine)), one))));
+  const CoordinateJet beta_jet = divide(
+      beta_numerator,
+      multiply(CoordinateJet{{2.0 * sqrt_two, 0.0}, {0.0, 0.0},
+                             {0.0, 0.0}},
+               multiply(dm, dm)));
+  const CoordinateJet epsilon_numerator = add(
+      CoordinateJet{{0.5 * length2 * parameters.mass, 0.0},
+                    {0.0, 0.0}, {0.0, 0.0}},
+      add(multiply(CoordinateJet{{-0.5 * parameters.spin * parameters.spin,
+                                  0.0},
+                                 {0.0, 0.0}, {0.0, 0.0}},
+                   R),
+          multiply(
+              CoordinateJet{{0.0, -0.5 * parameters.spin}, {0.0, 0.0},
+                             {0.0, 0.0}},
+              multiply(add(CoordinateJet{{length2, 0.0}, {0.0, 0.0},
+                                         {0.0, 0.0}},
+                           multiply(CoordinateJet{{-parameters.mass, 0.0},
+                                                  {0.0, 0.0}, {0.0, 0.0}},
+                                    R)),
+                       y))));
+  const CoordinateJet epsilon_jet =
+      divide(epsilon_numerator, multiply(multiply(dm, dm), dp));
+  const Complex capital_delta1_beta0 =
+      radius / length2 * (beta_jet.value + radius * beta_jet.radial);
+  const Complex capital_delta2_epsilon0 =
+      (2.0 * radius * epsilon_jet.value +
+       radius * radius * epsilon_jet.radial) /
+      length2;
+  const Complex bardelta2_epsilon0 =
+      sin_theta * epsilon_jet.angular /
+      (sqrt_two * Complex(length2,
+                          parameters.spin * radius * cos_theta));
   return {kerr_background_point(parameters, radius, cos_theta, sin_theta),
-          alpha0, beta0};
+          alpha0, beta0, capital_delta1_beta0,
+          capital_delta2_epsilon0, bardelta2_epsilon0};
 }
 
 // Existing reconstructed ORG fields for one signed mode.  Sharp values must

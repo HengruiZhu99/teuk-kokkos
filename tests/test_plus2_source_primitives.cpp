@@ -635,6 +635,142 @@ TEST_CASE("spin plus2 primitive construction has host device parity") {
   check_maps(flatten_all(copied(0)), flatten_all(expected), 1.0e-14);
 }
 
+TEST_CASE("stationary Kerr background derivatives have exact Schwarzschild limit") {
+  constexpr double sqrt_two = 1.41421356237309504880168872420969808;
+  const teuk::KerrParameters parameters{1.3, 0.0, 1.2};
+  const double length2 = parameters.compactification_length *
+                         parameters.compactification_length;
+  const double length4 = length2 * length2;
+  const double length6 = length4 * length2;
+  for (const double r : {0.0, 0.17, 0.83}) {
+    for (const double y : {-0.8, 0.0, 0.64}) {
+      const double sine = std::sqrt(1.0 - y * y);
+      const auto background =
+          teuk::plus2_primitive_background(parameters, r, y, sine);
+      CHECK_COMPLEX_NEAR(
+          background.capital_delta1_beta0,
+          KC(-r * y / (2.0 * sqrt_two * length4 * sine), 0.0), 2.0e-15);
+      CHECK_COMPLEX_NEAR(background.capital_delta2_epsilon0,
+                         KC(parameters.mass * r / length6, 0.0), 2.0e-15);
+      CHECK_COMPLEX_NEAR(background.bardelta2_epsilon0, KC{}, 2.0e-15);
+    }
+  }
+}
+
+TEST_CASE("stationary Kerr background derivative jets match independent differences") {
+  using SC = std::complex<double>;
+  const auto beta = [](const teuk::KerrParameters& p, const double r,
+                       const double y) {
+    const double l2 = p.compactification_length * p.compactification_length;
+    const double sine = std::sqrt(1.0 - y * y);
+    const SC dm(l2, -p.spin * r * y);
+    return (-l2 * y / sine +
+            SC(0.0, p.spin * r * sine * (1.0 / (sine * sine) + 1.0))) /
+           (2.0 * std::sqrt(2.0) * dm * dm);
+  };
+  const auto epsilon = [](const teuk::KerrParameters& p, const double r,
+                          const double y) {
+    const double l2 = p.compactification_length * p.compactification_length;
+    const SC dm(l2, -p.spin * r * y);
+    const SC dp(l2, p.spin * r * y);
+    return SC(l2 * p.mass - p.spin * p.spin * r,
+              -p.spin * (l2 - p.mass * r) * y) /
+           (2.0 * dm * dm * dp);
+  };
+  const auto derivative = [](const auto& f, const double x,
+                             const double h) {
+    return (-f(x + 2.0 * h) + 8.0 * f(x + h) - 8.0 * f(x - h) +
+            f(x - 2.0 * h)) /
+           (12.0 * h);
+  };
+  const std::array<teuk::KerrParameters, 4> parameters{{
+      {1.0, 0.0, 1.0}, {1.0, 0.63, 1.3},
+      {1.0, 0.999, 1.0}, {1.2, -0.71, 0.9}}};
+  for (const auto& p : parameters) {
+    const double horizon =
+        p.compactification_length * p.compactification_length /
+        (p.mass + std::sqrt(p.mass * p.mass - p.spin * p.spin));
+    for (const double r : {0.0, 0.24, horizon}) {
+      constexpr double y = 0.37;
+      const double sine = std::sqrt(1.0 - y * y);
+      const auto actual = teuk::plus2_primitive_background(p, r, y, sine);
+      constexpr double hr = 2.0e-5;
+      const SC beta_r = derivative(
+          [&](const double x) { return beta(p, x, y); }, r, hr);
+      const SC epsilon_r = derivative(
+          [&](const double x) { return epsilon(p, x, y); }, r, hr);
+      constexpr double hy = 2.0e-5;
+      const SC epsilon_y = derivative(
+          [&](const double x) { return epsilon(p, r, x); }, y, hy);
+      const double l2 = p.compactification_length *
+                        p.compactification_length;
+      const SC expected_delta_beta =
+          r / l2 * (beta(p, r, y) + r * beta_r);
+      const SC expected_delta_epsilon =
+          (2.0 * r * epsilon(p, r, y) + r * r * epsilon_r) / l2;
+      const SC expected_bardelta_epsilon =
+          sine * epsilon_y /
+          (std::sqrt(2.0) * SC(l2, p.spin * r * y));
+      CHECK(std::abs(host(actual.capital_delta1_beta0) -
+                     expected_delta_beta) < 2.0e-10);
+      CHECK(std::abs(host(actual.capital_delta2_epsilon0) -
+                     expected_delta_epsilon) < 2.0e-10);
+      CHECK(std::abs(host(actual.bardelta2_epsilon0) -
+                     expected_bardelta_epsilon) < 2.0e-10);
+    }
+  }
+}
+
+TEST_CASE("stationary Kerr background derivatives have host device parity") {
+  struct Sample {
+    teuk::KerrParameters parameters;
+    double radius;
+    double y;
+  };
+  const std::array<Sample, 5> samples{{
+      {{1.0, 0.0, 1.0}, 0.0, 0.2},
+      {{1.0, 0.63, 1.3}, 0.0, -0.41},
+      {{1.0, 0.63, 1.3}, 0.951419361092763, 0.37},
+      {{1.0, 0.999, 1.0}, 0.95624606825604, 1.0 - 1.0e-12},
+      {{1.2, -0.71, 0.9}, 0.24, -1.0 + 1.0e-12},
+  }};
+  Kokkos::View<double**> input("background_derivative_input", samples.size(),
+                               6);
+  Kokkos::View<KC**> output("background_derivative_output", samples.size(),
+                            3);
+  auto input_host = Kokkos::create_mirror_view(input);
+  for (std::size_t i = 0; i < samples.size(); ++i) {
+    input_host(i, 0) = samples[i].parameters.mass;
+    input_host(i, 1) = samples[i].parameters.spin;
+    input_host(i, 2) = samples[i].parameters.compactification_length;
+    input_host(i, 3) = samples[i].radius;
+    input_host(i, 4) = samples[i].y;
+    input_host(i, 5) = std::sqrt(1.0 - samples[i].y * samples[i].y);
+  }
+  Kokkos::deep_copy(input, input_host);
+  Kokkos::parallel_for(
+      "plus2_background_derivative_device_parity", samples.size(),
+      KOKKOS_LAMBDA(const std::size_t i) {
+        const teuk::KerrParameters p{input(i, 0), input(i, 1), input(i, 2)};
+        const auto background = teuk::plus2_primitive_background(
+            p, input(i, 3), input(i, 4), input(i, 5));
+        output(i, 0) = background.capital_delta1_beta0;
+        output(i, 1) = background.capital_delta2_epsilon0;
+        output(i, 2) = background.bardelta2_epsilon0;
+      });
+  const auto copied =
+      Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{}, output);
+  for (std::size_t i = 0; i < samples.size(); ++i) {
+    const double sine = std::sqrt(1.0 - samples[i].y * samples[i].y);
+    const auto expected = teuk::plus2_primitive_background(
+        samples[i].parameters, samples[i].radius, samples[i].y, sine);
+    CHECK_COMPLEX_NEAR(copied(i, 0), expected.capital_delta1_beta0, 2.0e-14);
+    CHECK_COMPLEX_NEAR(copied(i, 1),
+                       expected.capital_delta2_epsilon0, 2.0e-14);
+    CHECK_COMPLEX_NEAR(copied(i, 2), expected.bardelta2_epsilon0, 2.0e-14);
+  }
+}
+
 TEST_CASE("spin plus2 primitive point evaluator allocates nothing") {
   std::mt19937_64 g(424242);
   auto f = random_fields(g);

@@ -99,6 +99,10 @@ if(BUILD_TESTING)
       COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/symbolic/verify_plus2_bianchi_closure.py)
     add_test(
+      NAME teuk.plus2_background_derivative_gate
+      COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/symbolic/verify_plus2_background_derivatives.py)
+    add_test(
       NAME teuk.plus2_tsi_schwarzschild_radial
       COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/numerical/verify_plus2_tsi_schwarzschild_radial_fixture.py)
