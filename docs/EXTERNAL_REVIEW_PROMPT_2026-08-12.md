@@ -6,13 +6,17 @@ plots, build trees, `/tmp` virtual environments, GPU driver logs, or any other
 locally generated artifacts. Treat every statement about those artifacts as a
 frozen diagnostic handoff, not as evidence you can reproduce from Git.
 
-Your task is to perform a skeptical, independent, full-tree review of the spin
-`+2` companion/source work and the associated spin `-2` late-time diagnostic.
+Your task is to perform a skeptical, independent, full-tree review of the
+current repository, with special depth on the spin `+2` companion/source work,
+the standalone Route-B curvature-provider candidate, and the associated spin
+`-2` late-time diagnostic.
 Begin by recording the exact branch, `git rev-parse HEAD`, parent, status,
 submodule revisions, compiler/runtime choices, and the complete diff from the
 review anchor `43e9300080140e3df4d05affd67ffa41b5ddbe57`. The scientific
-remediation is commit `5b5c356208ca2c470e13e2d24e76f8545c090df0`; the following
-documentation commit only adds the review report and this prompt. Do not rely on the
+remediation is commit `5b5c356208ca2c470e13e2d24e76f8545c090df0`.
+The new standalone provider candidate is exact commit
+`92465cdddd3867b22f15b4be10350ac292404c37`; later commits update only the
+handoff documents unless your local diff proves otherwise. Do not rely on the
 root `SHA256SUMS`, `MANIFEST.md`, or `AUDIT_MANIFEST.md`: those describe an
 older spin-minus2 audit bundle, not the present tree.
 
@@ -25,12 +29,18 @@ Read these files first and completely:
 - `docs/PLUS2_SOURCE_COMPACTIFICATION.md`
 - `docs/PLUS2_CONSTRAINED_ENDPOINT_EXTRACTION.md`
 - `docs/PLUS2_ROUTE_B_LOCAL_CURVATURE_BLOCKER.md`
+- `docs/PLUS2_ROUTE_B_RADIAL_JET_TEUKOLSKY.md`
+- `docs/PLUS2_ROUTE_B_RADIAL_JET_RECONSTRUCTION.md`
+- `docs/PLUS2_ROUTE_B_ANGULAR_JET_COORDINATOR.md`
 - `docs/PLUS2_LINEAR_PSI0_PRODUCTION_GATE.md`
 - `docs/PLUS2_REPLAY_AND_OUTPUT.md`
 - `docs/FOUR_WEYL_FIELD_VALIDATION.md`
 - `PLUS2_SOURCE_INPUT_MANIFEST.csv`
 - `PLUS2_SOURCE_NORMALIZATION_LEDGER.csv`
 - `plus2_equation_spec_proposal.yaml`
+- `include/teuk/plus2_routeb_curvature_spatial.hpp`
+- `include/teuk/plus2_source_primitive_spatial.hpp`
+- `tests/test_plus2_routeb_curvature_spatial.cpp`
 
 The YAML is explicitly a fail-closed proposal, not a production specification.
 Historical documents may contain commit-scoped test counts; do not reinterpret
@@ -93,7 +103,7 @@ Run and inspect, rather than merely trust:
 
 Require the historical normalization to fail a negative control.
 
-### 2. Route-B constrained endpoint extraction
+### 2. Route-B constrained endpoint extraction and provider candidate
 
 Re-solve the exact positive-node moment systems without importing the generated
 header. Confirm the `q0=[R^2]f0` weights
@@ -115,10 +125,37 @@ Verify that peeling residuals `f0(0)`, `f0'(0)`, and `f1(0)` are measured
 independently and are not silently overwritten. Treat `N=65` as a nonpromotion
 conditioning probe.
 
-Most importantly, verify the scope boundary: this extraction component does
-not supply the missing same-stage live numerator graph for all six value/T/TT
-curvature fields. The rotating scri dependency on `h4[1]` must remain an open
-blocker; no partial adapter may be advertised as a complete Route-B provider.
+The historical direct-`D1(h4)` remedy was rejected because fixed-window cells
+failed the non-weakened convergence gate. Confirm that it remains absent. Then
+audit candidate `92465cd`, which instead consumes the five generation-stamped
+Route-B levels, forms the reviewed curvature numerators independently at time
+levels 0, 1, and 2, and applies the constrained quotient extractor directly.
+Do not accept the implementation merely because it emits six fields.
+
+For every one of `Z0,Z1,Z0_T,Z1_T,Z0_TT,Z1_TT`, require separately:
+
+- both signed modes and every theta node, not an aggregate maximum alone;
+- scri, interior, and future-horizon comparison to an independent oracle;
+- fixed `N=9,17,33` endpoint ratios without selecting a friendlier window;
+- separately convergent `f0(0)`, `f0'(0)`, and `f1(0)` residuals at all three
+  time levels;
+- a coordinate full-Weyl comparison that includes Ricci trace subtraction and
+  the perturbed ORG tetrad, not a restatement of the production NP algebra;
+- exact amplitude linearity, signed-sharp ownership, rotating and
+  near-extremal fixtures, and a negative control that distinguishes a wrong
+  formula;
+- stale generation, stale sharp partner, generation zero, NaN/Inf, wrong
+  shape, alias, replay, and partial-readiness fail closure;
+- deterministic zeroing/stamps and zero post-construction allocation, copy,
+  and fence events on the hot stage.
+
+Trace every derivative slot emitted by the candidate into the live source and
+prove that all consumers see one immutable common-stage generation. The
+checked-in candidate test currently provides only a zero-tower check and an
+aggregate endpoint self-convergence matrix; treat all requirements above as
+open until independently demonstrated. Keep `N=65` as a red/nonpromotion
+conditioning probe. The candidate is not runtime-wired and must not be called
+production-qualified.
 
 ### 3. Linear path
 
@@ -177,6 +214,50 @@ under-resolution warning rather than demonstrated instability. Confirm that a
 disabled spin-plus2 source-normalization defect cannot cause that spin-minus2
 campaign. Recommend an unfiltered radial/angular/timestep refinement matrix;
 treat filtering only as a later sensitivity test.
+
+## Full-tree coverage beyond the priority findings
+
+Do not limit the review to files named `plus2`. Inventory every tracked source,
+header, test, generator, configuration, script, document, and third-party
+notice. Build a dependency map from runtime parsing through `solver_driver`,
+`SpatialPipeline`, angular/radial operators, RK stages, source activation,
+checkpoint/restart, diagnostics, waveform/output packing, and QNM support.
+For each public configuration key, verify parsing, validation, resolved output,
+checkpoint provenance, defaults, and disabled behavior.
+
+Audit the production spin `-2` path independently for:
+
+- D4-2, D8-4, and D10-5 radial selection and minimum-grid constraints;
+- RK4 stage times/state ownership, reduction constraints, damping, source
+  activation snapshots, and compatible dissipation signs/scaling;
+- the scheme-aware pure-dissipation timestep guard and its exact scope (it is
+  not a combined hyperbolic-dissipative stability proof);
+- signed-mode angular transforms, exact-product padding, retained-band
+  truncation, endpoint regularity, and the explicit absence of angular
+  filtering;
+- checkpoint representation, legacy compatibility, checksums, Git/config
+  identity, coordinate uniformity tolerance, and fail-before-mutation rules;
+- output conventions at scri/horizon, raw versus regularized Weyl fields,
+  metadata round trips, and the fact that horizon values are not fluxes;
+- allocation, deep-copy, and fence claims on actual hot paths rather than only
+  synthetic callbacks.
+
+Audit the complete standalone `+2` graph in dependency order: homogeneous
+coefficients, linear `Psi0`, Route-B jet towers and angular coordinator,
+curvature/primitive/source producers, pair/outer projections, companion RK4,
+checkpoint/replay, four-Weyl output, TSI/QNM fixtures, and runtime fail-closed
+settings. Identify duplicate authority, stale adapters, incomplete seams,
+unreachable code, hidden same-stage assumptions, and documents whose claims no
+longer match code. Confirm that no standalone validation type is accidentally
+reachable from production enablement.
+
+Review test methodology, not just pass counts. Classify each test as algebraic
+identity, production-parity, independent oracle, manufactured convergence,
+structural integration, backend compilation, or actual device runtime. Flag
+circular oracles, aggregate norms that can hide a failing component, fixed-grid
+RK tests presented as joint space-time convergence, roundoff-floor exceptions,
+and stale commit-scoped counts. Inspect ignored/generated-file policy and state
+exactly which conclusions cannot be reconstructed from Git alone.
 
 ## Verification expectations
 

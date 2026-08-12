@@ -7,19 +7,22 @@ Review anchor: `43e9300080140e3df4d05affd67ffa41b5ddbe57`
 Scientific remediation commit:
 `5b5c356208ca2c470e13e2d24e76f8545c090df0`
 
+Standalone Route-B curvature-provider candidate:
+`92465cdddd3867b22f15b4be10350ac292404c37`
+
 The exact report checkout is obtained with `git rev-parse HEAD`. This document
 is committed after the scientific-code remediation commit, so repository-only
 reviewers can audit the complete tree without any ignored `run/`, build, or
 generated campaign artifacts.
 
-The final edited checkout was not rebuilt or rerun after the last provenance
-and configuration edits, at the owner's explicit request to wrap up without
-another run. The strongest exact baseline evidence is recorded below. An
-intermediate post-normalization direct unit run reached `379/379`, but later
-metadata/configuration edits were made after that run; it is therefore not
-presented as exact-final-tree qualification. A repository-only reviewer should
-run the commands in `docs/EXTERNAL_REVIEW_PROMPT_2026-08-12.md` before making a
-promotion claim.
+Exact pre-candidate commit `15b1b7e8e9124b163bf40950e72b62fa913ef823`
+was clean-built and passed the direct unit suite `379/379` and audit-enabled
+CTest `22/22`. During development, the source tree that became candidate
+`92465cd` passed a direct Serial unit run `381/381`. The candidate was then
+committed and this handoff was edited without another build or test run, at the
+owner's explicit request. Therefore neither count is exact-final-document-HEAD
+qualification. A repository-only reviewer must run the commands requested in
+`docs/EXTERNAL_REVIEW_PROMPT_2026-08-12.md` before making any promotion claim.
 
 The root `SHA256SUMS`, `MANIFEST.md`, and `AUDIT_MANIFEST.md` belong to an older
 spin-minus2 audit bundle and do not describe this current plus2 checkout. They
@@ -140,12 +143,13 @@ the raw and evolved quantities. C++ tests cover Schwarzschild, moderate Kerr,
 near-extremal Kerr, scri/interior/horizon, signed modes, Jet1, host, and device
 paths.
 
-## 4. Route-B endpoint result
+## 4. Route-B endpoint and standalone provider candidate
 
-The dependency audit confirms that rotating scri `Z0_TT` and `Z1_TT` need the
-radial coefficient `h4[1]`, while the approved tower exposes only `h4[0]`.
-The live six-field local-curvature provider is therefore still unavailable.
-That finding is **confirmed**.
+The dependency audit confirmed that rotating scri `Z0_TT` and `Z1_TT` need the
+information represented by the radial coefficient `h4[1]`, while the approved
+tower exposes only `h4[0]`. Directly differentiating the computed `h4` profile
+failed the predeclared convergence windows, so that rejected prototype remains
+absent. That original blocker is **confirmed**.
 
 The constrained extraction candidates were independently solved as exact
 moment systems. On positive nodes `R_j=jh`, the six `q0=[R^2]f0` weights are
@@ -172,9 +176,24 @@ near-extremal spin, and both signed modes. `N=65` remains a non-promotion
 conditioning probe because the complete Route-B tower is already red at that
 resolution.
 
-This is a **partial remediation**: the endpoint operator is qualified, but the
-same-stage live numerator graph for all six value/T/TT fields is not
-implemented. No partial curvature adapter is fabricated.
+Candidate `92465cd` explores a different closure that does not reconstruct
+`h4[1]` by differentiating `h4`. It consumes a generation-stamped five-level
+Route-B reconstruction tower, evaluates the reviewed connection and curvature
+numerators at each time level, and applies the constrained positive-node
+quotient extraction directly to each numerator profile. It emits all six
+`Z0,Z1,Z0_T,Z1_T,Z0_TT,Z1_TT` fields, the eight Bianchi derivative slots, and
+all nine peeling residual audits. It is allocation-free after construction,
+generation-stamped, and globally fail-closed on stale or nonfinite tower data.
+
+This is a **standalone candidate, not a closed remediation or production
+provider**. The checked-in tests presently establish the zero tower and one
+aggregate endpoint self-convergence matrix over `a/M=0,.63,-.74,.999` and
+signed `m=+/-2`. They do not yet provide a disaggregated six-field/mode/theta
+gate, an independent coordinate-Weyl fixture, a complete hostile contract and
+no-allocation/no-fence suite, a live-source composition test, or exact-commit
+GPU/runtime evidence. The candidate is not wired into `SpatialPipeline` or
+`solver_driver`, and `plus2.enabled` remains rejected. An external reviewer
+must treat the provider as an auditable hypothesis and try to falsify it.
 
 ## 5. Other review findings and remediation
 
@@ -265,6 +284,8 @@ convergence.
   outer workspaces, live composition, normalization ledger and symbolic gates;
 - endpoint extraction: exact generator, generated weight header, device-inline
   operator, 100-digit verifier, curvature initializer, tests, and design note;
+- Route-B candidate: five-level tower consumer, six curvature fields, eight
+  derivative slots, nine peeling audits, and aggregate endpoint tests;
 - provenance: companion checkpoint/replay, four-Weyl metadata, resolved config;
 - scope/docs: formalism, compactification, linear spatial gate, replay,
   Route-B blocker, validation status, proposal YAML, and dated handoff erratum;
@@ -282,11 +303,11 @@ pipeline, or solver enable gate was changed.
 | Raw/evolved source distinction | Met | typed `S0/R6` and `S0/R7` workspaces, two ledgers, versioned metadata |
 | Cancellation-safe scri forcing | Met standalone | exact optical identity and D10-5 outer convergence |
 | Route-B endpoint extraction | Met as component | rational generator, 100-digit audit, N9/17/33, residual gates |
-| Complete Route-B six-field curvature provider | Not met | missing live same-stage numerator graph; N65 full-tower conditioning red |
+| Complete Route-B six-field curvature provider | Candidate only | standalone five-level provider exists, but independent oracle, disaggregated gates, hostile contracts, live integration, replay, and GPU qualification remain open |
 | Linear `Psi0` production spatial graph | Not met | explicitly validation-only ordinary-NP path |
 | Companion checkpoint physical identity | Met standalone v3 | exhaustive mismatch/nonfinite/pre-mutation tests |
 | Live invalid diagnostics clear globally | Met | provenance/stamp and full workspace-zero regressions |
-| Concrete physics replay | Not met | structural replay only; provider unavailable |
+| Concrete physics replay | Not met | structural replay only; candidate provider is not qualified or runtime-wired |
 | Schwarzschild QNM | Met fixture | checked-in normalized interior fixture |
 | Moderate-Kerr real-frequency TSI | Met fixture | checked-in radial/angular/field fixture |
 | Moderate-Kerr complex QNM and endpoints | Open | no claim |
@@ -296,9 +317,12 @@ pipeline, or solver enable gate was changed.
 
 ## 9. Remaining promotion blockers
 
-1. Construct and qualify the complete live same-stage Route-B curvature
-   numerator graph for all six fields, including independent coordinate-Weyl
-   comparison and the fixed `N=9,17,33` matrix; keep `N=65` red/non-gating.
+1. Independently audit and qualify or reject candidate `92465cd`: require a
+   full coordinate-Weyl comparison, disaggregated six-field/signed-mode/theta
+   `N=9,17,33` gates, independent peeling-residual convergence, hostile
+   stale/nonfinite/shape/alias/replay cases, amplitude and sharp tests, and
+   post-construction no-allocation/no-fence evidence. Keep `N=65` explicitly
+   red/non-gating and do not tune the window after seeing results.
 2. Replace or retain as validation-only the singular-term ordinary-NP linear
    spatial path with a genuinely regular GHP provider.
 3. Run primary, curvature, source, and companion through one concurrent and
