@@ -13,7 +13,8 @@
 3. externally supplied same-stage, read-only Bianchi adapters containing
    transported `Z0,Z1` values and first/second tangents plus the four Route-A
    derivative pairs;
-4. the typed fourteen-primitive and remaining producer-owned derivative views;
+4. the concrete D10-5 producer for the twelve non-curvature primitives, seven
+   remaining `J/K` pairs, and three value-only `Q` derivatives;
 5. value-only ordered-pair source evaluation;
 6. projected `J,K,Q`, outer derivatives, coordinate forcing, and target-mode
    gather.
@@ -42,30 +43,31 @@ rows. Thus even hostile callback writes cannot replace the common-stage
 transport values. The other seven `J/K` rows and all three `Q` rows remain
 producer-owned and require current-generation producer stamps.
 
-## Exact remaining blocker
+## Concrete binding and remaining blockers
 
-The repository does not yet contain the allocation-free spatial graph that
-constructs all fourteen primitive rows and their production derivative slots
-from the live reconstruction stage. `Plus2BianchiTransport` now supplies a
-standalone common-stage triangular Route-A `Z0,Z1` transport plus the six-field
-curvature and eight-field derivative adapters. Those adapters now connect
-directly to this standalone live gate, but neither component is wired to the
-primary and second-order companion runtime.
+The scientific `evaluate_stage` overload accepts a generation-stamped
+`Plus2PrimitiveReconstructionStage` and invokes
+`Plus2SourcePrimitiveSpatialProducer` directly. The caller cannot substitute
+a generic primitive callback on this path. The older callback overload is
+retained only as a low-level component-test seam. `Plus2BianchiTransport`
+supplies the triangular Route-A `Z0,Z1` transport plus the six-field curvature
+and eight-field derivative adapters, completing the fourteen primitive rows
+and all production inner-derivative slots at a common generation.
 
-Consequently the live gate requires explicit capability claims and external
-same-stage curvature and derivative views. `Z0,Z1` and their four derivative
-pairs must be either part of that common one-way RK state or supplied from an
-exact deterministic replay stage. They must not be hidden mutable state in a
-source callback. A grid containing scri is rejected unless the caller asserts
-independently qualified peeling coefficients; neither endpoint extrapolation
-nor a zero coefficient is invented here.
+The standalone binding is still not `solver_driver` wiring. The outer
+projection/derivative producer remains an explicit reviewed seam, and physical
+Bianchi initialization, horizon/scri boundary data, and peeling coefficients
+remain external evidence requirements. `Z0,Z1` and their four derivative
+pairs must come from the common one-way RK state or exact deterministic replay;
+they cannot be hidden mutable state in a source callback. A grid containing
+scri is rejected unless the caller asserts independently qualified peeling
+coefficients; neither endpoint extrapolation nor a zero coefficient is
+invented here.
 
-The source and outer callbacks are typed seams for the missing reviewed
-spatial graph. Their existence, and the standalone transport, are not evidence
-that this graph, the physical Bianchi initial/boundary prescription,
-concurrent/replay equivalence, or a physical spin `+2` waveform has been
-qualified. See `PLUS2_BIANCHI_TRANSPORT.md` for the exact transported-state,
-restart, and fail-closed contracts.
+The binding and its manufactured seam test are not evidence for the physical
+Bianchi initial/boundary prescription, a complete runtime integration, or a
+physical spin `+2` waveform. See `PLUS2_BIANCHI_TRANSPORT.md` for the exact
+transported-state, restart, and fail-closed contracts.
 
 ## Current focused evidence
 
@@ -77,5 +79,10 @@ immutable activation behavior, target gather, quadratic common-amplitude
 scaling, and zero stage allocations/fences. The
 ordinary-NP algebra, signed sharp lookup, analytic `J/K` tangents, and compact
 outer source remain independently tested by their existing point and spatial
-test suites. Those component tests do not replace the missing full live-graph
-qualification described above.
+test suites. A one-step manufactured seam additionally exercises all four
+common RK stages from the passive Bianchi observer through the concrete
+primitive producer and live composition into companion forcing. It verifies
+generations `1..4`, immutable activation, no primary feedback, nonzero forcing,
+quadratic scaling, global stale-stage fail closure, D10-5, and no per-stage
+allocation or fence. It deliberately supplies only a test outer adapter and
+test-only boundary evidence; it is not runtime or boundary qualification.

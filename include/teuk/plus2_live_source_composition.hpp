@@ -2,14 +2,17 @@
 
 #include <Kokkos_Core.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <utility>
 
 #include "teuk/plus2_companion_pipeline.hpp"
 #include "teuk/plus2_linear_spatial.hpp"
+#include "teuk/plus2_source_primitive_spatial.hpp"
 #include "teuk/plus2_source_value_spatial.hpp"
 #include "teuk/plus2_transported_curvature.hpp"
 
@@ -18,8 +21,8 @@ namespace teuk {
 // This is the narrow live-composition gate between the already qualified
 // kernels.  It intentionally does not hide Z0/Z1 as mutable adapter state:
 // callers must supply their exact common-RK-stage values and first/second
-// tangents.  The missing production primitive/Bianchi spatial graph writes the
-// remaining typed slots through Plus2LiveSourceWriteTarget.
+// tangents.  The scientific overload below binds the concrete primitive
+// spatial producer; the callback overload remains a low-level test seam.
 using Plus2LiveReadinessView =
     Kokkos::View<std::uint8_t**, Kokkos::LayoutRight, MemorySpace>;
 
@@ -412,6 +415,47 @@ class Plus2LiveSourceComposition {
   [[nodiscard]] const Plus2SourceValueSpatialWorkspace& source_workspace()
       const { return source_; }
 
+  // Scientific path: bind the complete stamped reconstruction stage directly
+  // to the concrete primitive producer.  No generic source callback is
+  // accepted by this overload.
+  template <class OuterProducer>
+  void evaluate_stage(
+      const execution_space& execution, const double stage_time,
+      const Plus2PrimitiveReconstructionStage& reconstruction,
+      const Plus2TransportedCurvatureStage& curvature,
+      const Plus2BianchiDerivativeStage& bianchi_derivatives,
+      const Plus2LiveSourceCapability& capability,
+      const SourceActivationState& activation_snapshot,
+      const Plus2StageSourceTarget& target,
+      Plus2SourcePrimitiveSpatialProducer<execution_space>& primitive_producer,
+      OuterProducer&& outer_producer,
+      const Plus2PrimitiveReconstructionOffsets offsets = {}) {
+    validate_reconstruction_stage_shape(reconstruction, offsets);
+    if (reconstruction.generation != capability.generation ||
+        primitive_producer.radial_discretization() !=
+            radial_discretization_) {
+      throw std::invalid_argument(
+          "spin +2 concrete source stage generation/scheme mismatch");
+    }
+    const Plus2ReconstructionMetricOffsets metric_offsets{
+        offsets.B, offsets.C, offsets.U};
+    if (!prepare_stage(execution, reconstruction.value,
+                       reconstruction.tangent,
+                       reconstruction.second_tangent, curvature,
+                       bianchi_derivatives, capability, activation_snapshot,
+                       target, metric_offsets)) {
+      return;
+    }
+    primitive_producer.evaluate(execution, reconstruction, curvature,
+                                bianchi_derivatives,
+                                source_write_target(capability.generation),
+                                offsets);
+    finish_stage(execution, stage_time, curvature, bianchi_derivatives,
+                 capability, target,
+                 std::forward<OuterProducer>(outer_producer));
+  }
+
+  // Low-level callback seam retained for isolated composition tests.
   template <class ReconstructionView, class SourceProducer,
             class OuterProducer>
   void evaluate_stage(
@@ -426,6 +470,75 @@ class Plus2LiveSourceComposition {
       const Plus2StageSourceTarget& target,
       SourceProducer&& source_producer, OuterProducer&& outer_producer,
       const Plus2ReconstructionMetricOffsets offsets = {}) {
+    if (!prepare_stage(execution, reconstruction, tangent, second_tangent,
+                       curvature, bianchi_derivatives, capability,
+                       activation_snapshot, target, offsets)) {
+      return;
+    }
+    const auto source_target = source_write_target(capability.generation);
+    using const_reconstruction_view = typename ReconstructionView::const_type;
+    const const_reconstruction_view read_only_reconstruction = reconstruction;
+    const const_reconstruction_view read_only_tangent = tangent;
+    const const_reconstruction_view read_only_second_tangent = second_tangent;
+    source_producer(execution, stage_time, read_only_reconstruction,
+                    read_only_tangent, read_only_second_tangent,
+                    linear_.z_plus(), linear_.z_plus_valid(), curvature,
+                    bianchi_derivatives, source_target);
+    finish_stage(execution, stage_time, curvature, bianchi_derivatives,
+                 capability, target,
+                 std::forward<OuterProducer>(outer_producer));
+  }
+
+ private:
+  void validate_reconstruction_stage_shape(
+      const Plus2PrimitiveReconstructionStage& reconstruction,
+      const Plus2PrimitiveReconstructionOffsets offsets) const {
+    const std::size_t largest =
+        std::max({offsets.H, offsets.Pi, offsets.B, offsets.C, offsets.U});
+    const auto valid_shape = [&](const auto& view) {
+      return view.extent(0) == registry_.size() &&
+             view.extent(1) > largest &&
+             view.extent(2) == radial_grid_.size() &&
+             view.extent(3) == sin_theta_.extent(0);
+    };
+    if (!valid_shape(reconstruction.value) ||
+        !valid_shape(reconstruction.tangent) ||
+        !valid_shape(reconstruction.second_tangent) ||
+        !valid_shape(reconstruction.value_stamps) ||
+        !valid_shape(reconstruction.tangent_stamps) ||
+        !valid_shape(reconstruction.second_tangent_stamps)) {
+      throw std::invalid_argument(
+          "spin +2 concrete reconstruction stage extent mismatch");
+    }
+  }
+
+  [[nodiscard]] Plus2LiveSourceWriteTarget source_write_target(
+      const std::uint64_t generation) const {
+    return {generation,
+            primitive_value_,
+            primitive_tangent_,
+            jk_value_,
+            jk_tangent_,
+            q_value_,
+            primitive_value_stamps_,
+            primitive_tangent_stamps_,
+            jk_value_stamps_,
+            jk_tangent_stamps_,
+            q_value_stamps_};
+  }
+
+  template <class ReconstructionView>
+  bool prepare_stage(
+      const execution_space& execution,
+      const ReconstructionView& reconstruction,
+      const ReconstructionView& tangent,
+      const ReconstructionView& second_tangent,
+      const Plus2TransportedCurvatureStage& curvature,
+      const Plus2BianchiDerivativeStage& bianchi_derivatives,
+      const Plus2LiveSourceCapability& capability,
+      const SourceActivationState& activation_snapshot,
+      const Plus2StageSourceTarget& target,
+      const Plus2ReconstructionMetricOffsets offsets) {
     validate_stage(capability, activation_snapshot, target, curvature,
                    bianchi_derivatives);
     last_generation_ = capability.generation;
@@ -436,36 +549,24 @@ class Plus2LiveSourceComposition {
                                                target.coordinate_forcing.size()),
           plus2_live_source_detail::ZeroForcingFunctor{
               target.coordinate_forcing.data()});
-      return;
+      return false;
     }
-
     linear_.pack_reconstruction_metric(
         execution, radial_grid_, parameters_, sin_theta_, cos_theta_,
         reconstruction, tangent, second_tangent, offsets);
     linear_.evaluate_packed_metric(execution, radial_grid_, parameters_,
                                    sin_theta_, cos_theta_);
+    return true;
+  }
 
-    const Plus2LiveSourceWriteTarget source_target{
-        capability.generation,
-        primitive_value_,
-        primitive_tangent_,
-        jk_value_,
-        jk_tangent_,
-        q_value_,
-        primitive_value_stamps_,
-        primitive_tangent_stamps_,
-        jk_value_stamps_,
-        jk_tangent_stamps_,
-        q_value_stamps_};
-    using const_reconstruction_view = typename ReconstructionView::const_type;
-    const const_reconstruction_view read_only_reconstruction = reconstruction;
-    const const_reconstruction_view read_only_tangent = tangent;
-    const const_reconstruction_view read_only_second_tangent = second_tangent;
-    source_producer(execution, stage_time, read_only_reconstruction,
-                    read_only_tangent, read_only_second_tangent,
-                    linear_.z_plus(), linear_.z_plus_valid(), curvature,
-                    bianchi_derivatives, source_target);
-
+  template <class OuterProducer>
+  void finish_stage(
+      const execution_space& execution, const double stage_time,
+      const Plus2TransportedCurvatureStage& curvature,
+      const Plus2BianchiDerivativeStage& bianchi_derivatives,
+      const Plus2LiveSourceCapability& capability,
+      const Plus2StageSourceTarget& target,
+      OuterProducer&& outer_producer) {
     Kokkos::parallel_for(
         "initialize_plus2_live_readiness",
         Kokkos::RangePolicy<execution_space>(execution, 0, readiness_.size()),
@@ -485,12 +586,10 @@ class Plus2LiveSourceComposition {
             curvature.stamps.data(), bianchi_derivatives.stamps.data(),
             readiness_.data(), capability.generation, registry_.size(),
             radial_grid_.size(), sin_theta_.extent(0)});
-
     evaluate_plus2_production_ordered_pair_values(
         execution, radial_grid_, parameters_, cos_theta_, sin_theta_,
         primitive_value_, primitive_tangent_, jk_value_, jk_tangent_, q_value_,
         source_);
-
     const Plus2LiveOuterWriteTarget outer_target{
         capability.generation, projected_, outer_, projected_stamps_,
         outer_stamps_};
@@ -516,7 +615,6 @@ class Plus2LiveSourceComposition {
             radial_grid_.size(), sin_theta_.extent(0)});
   }
 
- private:
   void validate_stage(const Plus2LiveSourceCapability& capability,
                       const SourceActivationState& activation,
                       const Plus2StageSourceTarget& target,

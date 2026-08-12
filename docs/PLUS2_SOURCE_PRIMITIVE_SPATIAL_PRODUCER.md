@@ -1,8 +1,8 @@
 # Spin `+2` source primitive spatial producer
 
-**Status:** standalone, allocation-free D10-5 producer for the source-owned
-common-stage inputs; not runtime wiring or a physical Bianchi boundary-data
-qualification.
+**Status:** allocation-free D10-5 producer bound directly into the standalone
+live-source scientific overload; not runtime wiring or a physical Bianchi
+boundary-data qualification.
 
 `Plus2SourcePrimitiveSpatialProducer` consumes generation-stamped
 reconstruction `h[0]`, `h[1]`, and `h[2]` views together with the read-only
@@ -18,8 +18,10 @@ exactly the producer-owned production slots:
 `Z0,Z1` and the four curvature derivative pairs
 `Delta4Z1,ethprime4Z1,Delta5Z0,eth5Z0` remain owned by the Bianchi transport.
 The producer neither writes nor stamps those six output slots. Composition
-must copy them through the existing typed transport adapter; there is no
-second authority and no curvature recomputation.
+copies them through the existing typed transport adapter; there is no second
+authority and no curvature recomputation. The scientific live overload invokes
+this producer directly from the stamped reconstruction stage; generic source
+callbacks remain confined to low-level composition tests.
 
 The formulas use the reviewed ordinary-NP primitive evaluator algebra, the
 repository GHP angular operators, exact stage tangents, signed
