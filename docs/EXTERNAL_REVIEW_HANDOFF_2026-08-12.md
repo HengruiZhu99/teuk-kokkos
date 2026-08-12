@@ -1,5 +1,12 @@
 # External review handoff: spin `-2` stability and spin `+2` companion
 
+> **Remediation note (later on 2026-08-12).** This handoff describes the
+> pre-remediation anchor and is not current mathematical authority. Subsequent
+> work corrects the complete spin+2 source normalization, separates raw
+> `S0/R^6` from evolved `S0/R^7`, versions checkpoint physical provenance,
+> and adds constrained endpoint extraction. Use the final remediation report
+> and the dated errata in the formalism/source documents for current claims.
+
 Date: 2026-08-12 (America/New_York)
 
 Scientific-code head before this report: `8a2de93`

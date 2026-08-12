@@ -75,8 +75,10 @@ class Plus2SourceValueSpatialWorkspace {
             label + "_summed_jk_tangent", registry.size(),
             static_cast<std::size_t>(Plus2ProductionJkAggregate::Count),
             radial_points, theta_points),
-        source_value_(label + "_source_value", registry.size(), radial_points,
-                      theta_points),
+        source_over_r6_value_(label + "_source_over_r6_value",
+                              registry.size(), radial_points, theta_points),
+        source_over_r7_value_(label + "_source_over_r7_value",
+                              registry.size(), radial_points, theta_points),
         forcing_value_(label + "_forcing_value", registry.size(),
                        radial_points, theta_points) {
     if (!registry.is_closed_under_sharp()) {
@@ -106,7 +108,8 @@ class Plus2SourceValueSpatialWorkspace {
     Kokkos::deep_copy(pair_family_value_, Complex{});
     Kokkos::deep_copy(summed_value_, Complex{});
     Kokkos::deep_copy(summed_jk_tangent_, Complex{});
-    Kokkos::deep_copy(source_value_, Complex{});
+    Kokkos::deep_copy(source_over_r6_value_, Complex{});
+    Kokkos::deep_copy(source_over_r7_value_, Complex{});
     Kokkos::deep_copy(forcing_value_, Complex{});
   }
 
@@ -137,8 +140,11 @@ class Plus2SourceValueSpatialWorkspace {
   [[nodiscard]] Plus2SpatialRank4View summed_jk_tangent() const {
     return summed_jk_tangent_;
   }
-  [[nodiscard]] Plus2SpatialRank3View source_value() const {
-    return source_value_;
+  [[nodiscard]] Plus2SpatialRank3View source_over_r6_value() const {
+    return source_over_r6_value_;
+  }
+  [[nodiscard]] Plus2SpatialRank3View source_over_r7_value() const {
+    return source_over_r7_value_;
   }
   [[nodiscard]] Plus2SpatialRank3View forcing_value() const {
     return forcing_value_;
@@ -154,7 +160,8 @@ class Plus2SourceValueSpatialWorkspace {
   Plus2SpatialRank4View pair_family_value_;
   Plus2SpatialRank4View summed_value_;
   Plus2SpatialRank4View summed_jk_tangent_;
-  Plus2SpatialRank3View source_value_;
+  Plus2SpatialRank3View source_over_r6_value_;
+  Plus2SpatialRank3View source_over_r7_value_;
   Plus2SpatialRank3View forcing_value_;
 };
 
@@ -357,7 +364,8 @@ struct Plus2ProductionOuterFunctor {
   const Complex* projected_sum_value;
   const Complex* outer_derivative_value;
   const std::size_t* target_indices;
-  Complex* source_value;
+  Complex* source_over_r6_value;
+  Complex* source_over_r7_value;
   Complex* forcing_value;
   double activation;
   std::size_t radial_points;
@@ -388,7 +396,7 @@ struct Plus2ProductionOuterFunctor {
     };
     const KerrBackgroundPoint background = kerr_background_point(
         parameters, radius, cos_theta[theta], sin_theta[theta]);
-    const Complex raw = plus2_compact_outer_source_over_r6(
+    const Complex raw_over_r6 = plus2_compact_outer_source_over_r6(
                             radius, background,
                             aggregate(Plus2SpatialAggregate::J),
                             aggregate(Plus2SpatialAggregate::K),
@@ -399,13 +407,23 @@ struct Plus2ProductionOuterFunctor {
                                 derivative(
                                     Plus2SpatialOuterDerivative::Eth6K)})
                             .total();
-    const Complex activated = activation * raw;
-    const Complex forcing = plus2_coordinate_forcing_from_source_over_r6(
+    const Complex raw_over_r7 = plus2_compact_outer_source_over_r7(
+        radius, background, aggregate(Plus2SpatialAggregate::K),
+        aggregate(Plus2SpatialAggregate::Q),
+        Plus2RegularizedOuterDerivativesT<Complex>{
+            derivative(Plus2SpatialOuterDerivative::
+                           RegularizedThorn5JMinusOpticalJOverR),
+            derivative(Plus2SpatialOuterDerivative::Eth6K)})
+                                    .total();
+    const Complex activated_over_r6 = activation * raw_over_r6;
+    const Complex activated_over_r7 = activation * raw_over_r7;
+    const Complex forcing = plus2_coordinate_forcing_from_source_over_r7(
         radius, cos_theta[theta], parameters.spin,
-        parameters.compactification_length, activated);
+        parameters.compactification_length, activated_over_r7);
     const std::size_t index = plus2_flat_rank3(
         mode, radial, theta, radial_points, theta_points);
-    source_value[index] = activated;
+    source_over_r6_value[index] = activated_over_r6;
+    source_over_r7_value[index] = activated_over_r7;
     forcing_value[index] = forcing;
   }
 };
@@ -545,11 +563,15 @@ void evaluate_plus2_production_outer_source_value(
                                     outer_derivative_value);
   const bool aliases_output =
       detail::plus2_same_allocation(projected_sum_value,
-                                    workspace.source_value()) ||
+                                    workspace.source_over_r6_value()) ||
+      detail::plus2_same_allocation(projected_sum_value,
+                                    workspace.source_over_r7_value()) ||
       detail::plus2_same_allocation(projected_sum_value,
                                     workspace.forcing_value()) ||
       detail::plus2_same_allocation(outer_derivative_value,
-                                    workspace.source_value()) ||
+                                    workspace.source_over_r6_value()) ||
+      detail::plus2_same_allocation(outer_derivative_value,
+                                    workspace.source_over_r7_value()) ||
       detail::plus2_same_allocation(outer_derivative_value,
                                     workspace.forcing_value());
   if (!std::isfinite(source_activation_multiplier) ||
@@ -575,7 +597,8 @@ void evaluate_plus2_production_outer_source_value(
       projected_sum_value.data(),
       outer_derivative_value.data(),
       workspace.target_indices().data(),
-      workspace.source_value().data(),
+      workspace.source_over_r6_value().data(),
+      workspace.source_over_r7_value().data(),
       workspace.forcing_value().data(),
       source_activation_multiplier,
       radial_points,

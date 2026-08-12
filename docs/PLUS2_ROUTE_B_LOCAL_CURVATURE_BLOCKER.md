@@ -1,5 +1,13 @@
 # Route-B local curvature provider: exact remaining data blocker
 
+> **2026-08-12 remediation update.** Exact constrained positive-node
+> extractors for `[R^2]f0` and `[R]f1` are now implemented and independently
+> qualified; see `PLUS2_CONSTRAINED_ENDPOINT_EXTRACTION.md`. This removes the
+> need to divide by `R` or silently impose peeling at the extraction step. It
+> does not supply the missing live six-profile numerator graph or cure the
+> complete tower's red `N=65` binary64 conditioning, so the production
+> Route-B provider and plus2 runtime remain fail-closed.
+
 **Status:** the linear `Psi1` authority is independently closed, but the
 standalone six-field local provider is withheld because the approved closed
 `h0..h4` graph does not publish the one radial derivative of `h4` required at

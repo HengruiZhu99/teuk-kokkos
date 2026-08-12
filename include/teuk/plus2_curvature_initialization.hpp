@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "teuk/background.hpp"
+#include "teuk/plus2_endpoint_extraction.hpp"
 #include "teuk/grid.hpp"
 #include "teuk/radial_discretization.hpp"
 #include "teuk/types.hpp"
@@ -84,6 +85,7 @@ enum class Plus2CurvatureFormulaId {
 enum class Plus2PeelingEndpointOperatorId {
   Unknown,
   D105NestedLhopitalV1,
+  ConstrainedPositiveNodesV2,
 };
 
 enum class Plus2RadialBoundaryPolicyId {
@@ -177,11 +179,10 @@ KOKKOS_INLINE_FUNCTION constexpr std::size_t flat4(
          theta;
 }
 
-enum class Scratch : std::size_t { Df0, Df1, Ddf0, Count };
+enum class Scratch : std::size_t { Df0, Count };
 
 struct FirstDerivativeFunctor {
   const Complex* f0;
-  const Complex* f1;
   Complex* scratch;
   std::size_t radial_count;
   std::size_t theta_count;
@@ -200,36 +201,6 @@ struct FirstDerivativeFunctor {
         radial_first_derivative_strided_at(
             RadialDiscretization::D105, f0 + input, radial_count, radial,
             inverse_spacing, theta_count);
-    scratch[flat4(mode, static_cast<std::size_t>(Scratch::Df1), radial,
-                  theta, fields, radial_count, theta_count)] =
-        radial_first_derivative_strided_at(
-            RadialDiscretization::D105, f1 + input, radial_count, radial,
-            inverse_spacing, theta_count);
-  }
-};
-
-struct SecondDerivativeFunctor {
-  const Complex* scratch_input;
-  Complex* scratch_output;
-  std::size_t radial_count;
-  std::size_t theta_count;
-  double inverse_spacing;
-
-  KOKKOS_INLINE_FUNCTION void operator()(const std::size_t flat) const {
-    constexpr std::size_t fields = static_cast<std::size_t>(Scratch::Count);
-    const std::size_t plane = radial_count * theta_count;
-    const std::size_t mode = flat / plane;
-    const std::size_t within = flat - mode * plane;
-    const std::size_t radial = within / theta_count;
-    const std::size_t theta = within - radial * theta_count;
-    const std::size_t input = flat4(
-        mode, static_cast<std::size_t>(Scratch::Df0), 0, theta, fields,
-        radial_count, theta_count);
-    scratch_output[flat4(mode, static_cast<std::size_t>(Scratch::Ddf0),
-                         radial, theta, fields, radial_count, theta_count)] =
-        radial_first_derivative_strided_at(
-            RadialDiscretization::D105, scratch_input + input, radial_count,
-            radial, inverse_spacing, theta_count);
   }
 };
 
@@ -261,15 +232,16 @@ struct FinalizeFunctor {
     const Complex df0 = scratch[flat4(
         mode, static_cast<std::size_t>(Scratch::Df0), radial, theta,
         scratch_fields, radial_count, theta_count)];
-    const Complex df1 = scratch[flat4(
-        mode, static_cast<std::size_t>(Scratch::Df1), radial, theta,
-        scratch_fields, radial_count, theta_count)];
-    const Complex ddf0 = scratch[flat4(
-        mode, static_cast<std::size_t>(Scratch::Ddf0), radial, theta,
-        scratch_fields, radial_count, theta_count)];
-    const Complex q0 = radius == 0.0 ? 0.5 * ddf0
-                                     : f0[input] / (radius * radius);
-    const Complex q1 = radius == 0.0 ? df1 : f1[input] / radius;
+    const Complex q0 =
+        radius == 0.0
+            ? plus2_extract_q0_at_scri(f0 + input, radial_count,
+                                       1.0 / grid.spacing(), theta_count)
+            : f0[input] / (radius * radius);
+    const Complex q1 =
+        radius == 0.0
+            ? plus2_extract_q1_at_scri(f1 + input, radial_count,
+                                       1.0 / grid.spacing(), theta_count)
+            : f1[input] / radius;
     state[flat4(mode, 0, radial, theta, state_fields, radial_count,
                 theta_count)] = q0 + z0_regular[input];
     state[flat4(mode, 1, radial, theta, state_fields, radial_count,
@@ -285,7 +257,6 @@ struct FinalizeFunctor {
 };
 
 static_assert(std::is_trivially_copyable_v<FirstDerivativeFunctor>);
-static_assert(std::is_trivially_copyable_v<SecondDerivativeFunctor>);
 static_assert(std::is_trivially_copyable_v<FinalizeFunctor>);
 
 }  // namespace plus2_curvature_initialization_detail
@@ -471,15 +442,9 @@ class Plus2CurvatureInitializationWorkspace {
     Kokkos::parallel_for(
         "plus2_curvature_initial_first_radial",
         Kokkos::RangePolicy<execution_space>(execution, 0, points),
-        FirstDerivativeFunctor{f0.data(), f1.data(), scratch_.data(),
+        FirstDerivativeFunctor{f0.data(), scratch_.data(),
                                radial_count_, theta_count_,
                                1.0 / grid.spacing()});
-    Kokkos::parallel_for(
-        "plus2_curvature_initial_second_radial",
-        Kokkos::RangePolicy<execution_space>(execution, 0, points),
-        SecondDerivativeFunctor{scratch_.data(), scratch_.data(),
-                                radial_count_, theta_count_,
-                                1.0 / grid.spacing()});
     Kokkos::parallel_for(
         "plus2_curvature_initial_finalize",
         Kokkos::RangePolicy<execution_space>(execution, 0, points),
@@ -577,7 +542,7 @@ class Plus2CurvatureInitializationWorkspace {
         contract.formula !=
             Plus2CurvatureFormulaId::OrgRicciPeelingNumeratorsV1 ||
         contract.endpoint_operator !=
-            Plus2PeelingEndpointOperatorId::D105NestedLhopitalV1 ||
+            Plus2PeelingEndpointOperatorId::ConstrainedPositiveNodesV2 ||
         contract.boundary_policy !=
             Plus2RadialBoundaryPolicyId::
                 ContinuumNoIncomingButWeaklyHyperbolicV1) {

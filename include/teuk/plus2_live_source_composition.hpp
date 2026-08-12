@@ -263,22 +263,86 @@ struct NormalizeOuterInputsFunctor {
     const std::size_t within = flat - mode * plane;
     const std::size_t radial = within / theta_count;
     const std::size_t theta = within - radial * theta_count;
-    bool valid = true;
+    // Determine validity completely before mutating any diagnostic.  The
+    // source-stage readiness reduction is authoritative: a stale primitive in
+    // any signed parent invalidates every exposed target diagnostic at this
+    // (R,theta) point even when the outer producer wrote fresh stamps.
+    bool valid = ready[radial * theta_count + theta] != 0;
     for (std::size_t field = 0; field < aggregate_count; ++field) {
       const std::size_t index = flat4(mode, field, radial, theta,
                                       aggregate_count, radial_count,
                                       theta_count);
       valid = valid && projected_stamps[index] == generation;
-      if (!valid) projected[index] = Complex{};
     }
     for (std::size_t field = 0; field < outer_count; ++field) {
       const std::size_t index = flat4(mode, field, radial, theta, outer_count,
                                       radial_count, theta_count);
       valid = valid && outer_stamps[index] == generation;
-      if (!valid) outer[index] = Complex{};
     }
-    if (!valid) Kokkos::atomic_exchange(&ready[radial * theta_count + theta],
-                                         static_cast<std::uint8_t>(0));
+    if (!valid) {
+      for (std::size_t field = 0; field < aggregate_count; ++field) {
+        projected[flat4(mode, field, radial, theta, aggregate_count,
+                        radial_count, theta_count)] = Complex{};
+      }
+      for (std::size_t field = 0; field < outer_count; ++field) {
+        outer[flat4(mode, field, radial, theta, outer_count, radial_count,
+                    theta_count)] = Complex{};
+      }
+      Kokkos::atomic_exchange(&ready[radial * theta_count + theta],
+                              static_cast<std::uint8_t>(0));
+    }
+  }
+};
+
+// Source workspaces are intentionally inspectable for diagnostics.  Once the
+// registry-wide readiness reduction rejects a point, clear every exposed
+// pair, target sum, raw S0/R6, regular S0/R7, and evolved-forcing value there.
+// This runs after the pair and outer kernels so no invalid intermediate can be
+// mistaken for a usable diagnostic merely because final forcing was gated.
+struct ClearInvalidSourceDiagnosticsFunctor {
+  Complex* pair_families;
+  Complex* summed;
+  Complex* summed_jk_tangent;
+  Complex* source_over_r6;
+  Complex* source_over_r7;
+  Complex* forcing;
+  const std::uint8_t* ready;
+  std::size_t pair_count;
+  std::size_t mode_count;
+  std::size_t radial_count;
+  std::size_t theta_count;
+
+  KOKKOS_INLINE_FUNCTION void operator()(const std::size_t point) const {
+    if (ready[point] != 0) return;
+    constexpr std::size_t family_count =
+        static_cast<std::size_t>(Plus2SpatialPairFamily::Count);
+    constexpr std::size_t aggregate_count =
+        static_cast<std::size_t>(Plus2SpatialAggregate::Count);
+    constexpr std::size_t tangent_count =
+        static_cast<std::size_t>(Plus2ProductionJkAggregate::Count);
+    const std::size_t radial = point / theta_count;
+    const std::size_t theta = point - radial * theta_count;
+    for (std::size_t pair = 0; pair < pair_count; ++pair) {
+      for (std::size_t field = 0; field < family_count; ++field) {
+        pair_families[flat4(pair, field, radial, theta, family_count,
+                            radial_count, theta_count)] = Complex{};
+      }
+    }
+    for (std::size_t mode = 0; mode < mode_count; ++mode) {
+      for (std::size_t field = 0; field < aggregate_count; ++field) {
+        summed[flat4(mode, field, radial, theta, aggregate_count,
+                     radial_count, theta_count)] = Complex{};
+      }
+      for (std::size_t field = 0; field < tangent_count; ++field) {
+        summed_jk_tangent[flat4(mode, field, radial, theta, tangent_count,
+                                radial_count, theta_count)] = Complex{};
+      }
+      const std::size_t index =
+          (mode * radial_count + radial) * theta_count + theta;
+      source_over_r6[index] = Complex{};
+      source_over_r7[index] = Complex{};
+      forcing[index] = Complex{};
+    }
   }
 };
 
@@ -321,6 +385,8 @@ struct SetReadyFunctor {
 
 static_assert(std::is_trivially_copyable_v<NormalizeSourceInputsFunctor>);
 static_assert(std::is_trivially_copyable_v<NormalizeOuterInputsFunctor>);
+static_assert(
+    std::is_trivially_copyable_v<ClearInvalidSourceDiagnosticsFunctor>);
 static_assert(std::is_trivially_copyable_v<GatherForcingFunctor>);
 static_assert(std::is_trivially_copyable_v<ZeroForcingFunctor>);
 static_assert(std::is_trivially_copyable_v<SetReadyFunctor>);
@@ -409,6 +475,16 @@ class Plus2LiveSourceComposition {
         sin_theta.extent(0) != static_cast<std::size_t>(theta_count)) {
       throw std::invalid_argument("spin +2 live source geometry is invalid");
     }
+    // WithoutInitializing is intentional for setup cost, but no uninitialized
+    // stamp may accidentally equal the first accepted generation.
+    Kokkos::deep_copy(execution, primitive_value_stamps_, std::uint64_t{0});
+    Kokkos::deep_copy(execution, primitive_tangent_stamps_, std::uint64_t{0});
+    Kokkos::deep_copy(execution, jk_value_stamps_, std::uint64_t{0});
+    Kokkos::deep_copy(execution, jk_tangent_stamps_, std::uint64_t{0});
+    Kokkos::deep_copy(execution, q_value_stamps_, std::uint64_t{0});
+    Kokkos::deep_copy(execution, projected_stamps_, std::uint64_t{0});
+    Kokkos::deep_copy(execution, outer_stamps_, std::uint64_t{0});
+    Kokkos::deep_copy(execution, readiness_, std::uint8_t{0});
   }
 
   [[nodiscard]] RadialDiscretization radial_discretization() const noexcept {
@@ -653,6 +729,17 @@ class Plus2LiveSourceComposition {
     evaluate_plus2_production_outer_source_value(
         execution, radial_grid_, parameters_, cos_theta_, sin_theta_,
         projected_, outer_, 1.0, source_);
+    Kokkos::parallel_for(
+        "clear_invalid_plus2_live_source_diagnostics",
+        Kokkos::RangePolicy<execution_space>(execution, 0, readiness_.size()),
+        plus2_live_source_detail::ClearInvalidSourceDiagnosticsFunctor{
+            source_.pair_family_value().data(), source_.summed_value().data(),
+            source_.summed_jk_tangent().data(),
+            source_.source_over_r6_value().data(),
+            source_.source_over_r7_value().data(),
+            source_.forcing_value().data(), readiness_.data(),
+            source_.pair_count(), registry_.size(), radial_grid_.size(),
+            sin_theta_.extent(0)});
     Kokkos::parallel_for(
         "gather_plus2_live_target_forcing",
         Kokkos::RangePolicy<execution_space>(

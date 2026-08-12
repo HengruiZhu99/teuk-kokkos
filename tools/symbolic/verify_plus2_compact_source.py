@@ -379,10 +379,11 @@ def check_random_oracle() -> None:
 
 def check_endpoint_and_mode_gates() -> None:
     Rv, L, a, yy, Shat, RH = sp.symbols("Rv L a yy Shat RH", positive=True, finite=True, real=True)
-    S0 = Rv**6 * Shat
-    forcing = 2 * (L**4 + a**2 * Rv**2 * yy**2) * S0 / Rv**3
-    check("S0 stronger than required scri order", sp.limit(S0 / Rv**3, Rv, 0) == 0)
-    check("coordinate forcing finite and O(R^3)", sp.limit(forcing / Rv**3, Rv, 0) == 2 * L**4 * Shat)
+    dminus = L**2 - sp.I * a * Rv * yy
+    S0 = Rv**7 * Shat
+    forcing = 2 * (L**4 + a**2 * Rv**2 * yy**2) * dminus**4 * S0 / Rv**7
+    check("S0 has corrected scri order seven", sp.limit(S0 / Rv**7, Rv, 0) == Shat)
+    check("coordinate forcing finite and generically nonzero", sp.limit(forcing, Rv, 0) == 2 * L**12 * Shat)
     check("horizon forcing finite expression", not forcing.subs(Rv, RH).has(sp.zoo, sp.nan, sp.oo, -sp.oo))
     denom = (L**2 - I * a * RH * yy) * (L**2 + I * a * RH * yy)
     check("endpoint denominator positive form", sp.expand(denom) == L**4 + a**2 * RH**2 * yy**2)

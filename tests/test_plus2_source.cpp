@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "teuk/jet.hpp"
+#include "teuk/ghp.hpp"
 #include "teuk/modes.hpp"
 #include "teuk/plus2_source.hpp"
 
@@ -28,6 +29,9 @@ using Derivatives = teuk::Plus2OrderedPairDerivativesT<KC>;
 using Source = teuk::Plus2OrderedPairSourceT<KC>;
 using OuterDerivatives = teuk::Plus2OuterDerivativesT<KC>;
 using Outer = teuk::Plus2OuterSourceTermsT<KC>;
+using RegularizedOuterDerivatives =
+    teuk::Plus2RegularizedOuterDerivativesT<KC>;
+using OuterR7 = teuk::Plus2OuterSourceOverR7TermsT<KC>;
 
 int plus2_source_allocations = 0;
 
@@ -40,12 +44,41 @@ C host(const KC& value) { return {value.real(), value.imag()}; }
 KC device(const C& value) { return {value.real(), value.imag()}; }
 
 struct HostBackground {
-  C mu0, tau0, pi0, psi20, rho0;
+  C mu0, tau0, pi0, psi20, rho0, epsilon0;
 };
 
 HostBackground host(const teuk::KerrBackgroundPoint& b) {
   return {host(b.mu0), host(b.tau0), host(b.pi0), host(b.psi20),
-          host(b.rho0)};
+          host(b.rho0), host(b.epsilon0)};
+}
+
+C host_regularized_radial_j(
+    const C J, const C JT, const C JR, const int mode, const double radius,
+    const double cosine, const teuk::KerrParameters& p,
+    const HostBackground& bg) {
+  const C ii(0.0, 1.0);
+  const double l2 = p.compactification_length * p.compactification_length;
+  const double l4 = l2 * l2;
+  const double D = l4 + p.spin * p.spin * radius * radius * cosine * cosine;
+  const double E = l2 - 2.0 * p.mass * radius +
+                   p.spin * p.spin * radius * radius / l2;
+  const double A = 2.0 * p.mass *
+                   (2.0 * p.mass - p.spin * p.spin * radius / l2) / D;
+  const double b = -0.5 * E / D;
+  const C cancellation =
+      ii * p.spin * cosine * E *
+      (3.0 * l2 + 5.0 * ii * p.spin * radius * cosine) / (2.0 * D * D);
+  const C coefficient =
+      cancellation + ii * p.spin * static_cast<double>(mode) / D -
+                        3.0 * bg.epsilon0 + std::conj(bg.epsilon0);
+  return A * JT + b * JR + coefficient * J;
+}
+
+C host_source_over_r7(const double radius, const HostBackground& bg,
+                      const C K, const C Q, const C regularized_radial_j,
+                      const C eth6_k) {
+  return regularized_radial_j + eth6_k - 4.0 * radius * bg.tau0 * K +
+         radius * std::conj(bg.pi0) * K - 3.0 * bg.psi20 * Q;
 }
 
 template <class Scalar, class Extract>
@@ -510,24 +543,111 @@ TEST_CASE("spin plus2 source is quadratic in common real amplitude") {
   }
 }
 
-TEST_CASE("spin plus2 coordinate forcing retains regular R cubed factor") {
-  const KC source_over_r6(0.37, -0.28);
+TEST_CASE("spin plus2 evolved forcing uses complete field normalization") {
+  const KC source_over_r7(0.37, -0.28);
   const double radius = 0.19;
   const double cosine = -0.42;
   const double spin = 0.999;
   const double length = 1.6;
-  const double expected_factor =
-      2.0 * (std::pow(length, 4) +
-             spin * spin * radius * radius * cosine * cosine) *
-      std::pow(radius, 3);
-  CHECK_COMPLEX_NEAR(
-      teuk::plus2_coordinate_forcing_from_source_over_r6(
-          radius, cosine, spin, length, source_over_r6),
-      expected_factor * source_over_r6, 2.0e-17);
-  CHECK_COMPLEX_NEAR(
-      teuk::plus2_coordinate_forcing_from_source_over_r6(
-          0.0, cosine, spin, length, source_over_r6),
-      KC(0.0, 0.0), 0.0);
+  const double D = std::pow(length, 4) +
+                   spin * spin * radius * radius * cosine * cosine;
+  const KC dminus(length * length, -spin * radius * cosine);
+  const KC expected_factor = 2.0 * D * dminus * dminus * dminus * dminus;
+  const KC actual = teuk::plus2_coordinate_forcing_from_source_over_r7(
+      radius, cosine, spin, length, source_over_r7);
+  const KC expected = expected_factor * source_over_r7;
+  CHECK(Kokkos::abs(actual - expected) /
+            std::max(Kokkos::abs(expected), 1.0) <
+        5.0e-16);
+  const KC scri_actual = teuk::plus2_coordinate_forcing_from_source_over_r7(
+      0.0, cosine, spin, length, source_over_r7);
+  const KC scri_expected =
+      KC(2.0 * std::pow(length, 12), 0.0) * source_over_r7;
+  CHECK_COMPLEX_NEAR(scri_actual, scri_expected, 2.0e-14);
+}
+
+TEST_CASE("spin plus2 S0 over R7 radial cancellation is exact and finite") {
+  const KC J(0.37, -0.21), JT(-0.18, 0.44), JR(0.52, 0.09);
+  const KC K(-0.31, 0.23), Q(0.11, -0.47), eth6K(0.63, 0.17);
+  const int mode = -3;
+  for (const auto parameters :
+       {teuk::KerrParameters{1.0, 0.0, 1.3},
+        teuk::KerrParameters{1.0, 0.67, 1.1},
+        teuk::KerrParameters{1.0, 0.999, 1.0}}) {
+    const double horizon =
+        parameters.compactification_length *
+        parameters.compactification_length /
+        (parameters.mass +
+         std::sqrt(parameters.mass * parameters.mass -
+                   parameters.spin * parameters.spin));
+    for (const double radius : {0.0, 0.23 * horizon, horizon}) {
+      const double cosine = -0.41;
+      const double sine = std::sqrt(1.0 - cosine * cosine);
+      const auto background = teuk::kerr_background_point(
+          parameters, radius, cosine, sine);
+      const KC regularized =
+          teuk::plus2_regularized_thorn5_j_minus_optical_over_r(
+              J, JT, JR, mode, radius, cosine, parameters, background);
+      const C expected_radial = host_regularized_radial_j(
+          host(J), host(JT), host(JR), mode, radius, cosine, parameters,
+          host(background));
+      CHECK(std::abs(host(regularized) - expected_radial) < 3.0e-14);
+      CHECK(std::isfinite(regularized.real()));
+      CHECK(std::isfinite(regularized.imag()));
+      const auto compact = teuk::plus2_compact_outer_source_over_r7(
+          radius, background, K, Q,
+          RegularizedOuterDerivatives{regularized, eth6K});
+      const C expected = host_source_over_r7(
+          radius, host(background), host(K), host(Q), expected_radial,
+          host(eth6K));
+      CHECK(std::abs(host(compact.total()) - expected) < 4.0e-14);
+      if (radius > 0.0) {
+        const KC thorn5 = teuk::thorn_n_point(
+            J, JT, JR, 5, 2, 1, mode, radius, cosine, parameters.mass,
+            parameters.spin, parameters.compactification_length,
+            background.epsilon0);
+        const auto raw = teuk::plus2_compact_outer_source_over_r6(
+            radius, background, J, K, Q,
+            OuterDerivatives{thorn5, eth6K});
+        CHECK(std::abs(host(raw.total() / radius) - expected) < 8.0e-13);
+      }
+    }
+  }
+}
+
+TEST_CASE("spin plus2 regularized S0 over R7 supports Jet and device parity") {
+  using J1 = teuk::Jet1<KC>;
+  const teuk::KerrParameters parameters{1.0, -0.74, 1.2};
+  const double radius = 0.27, cosine = 0.36;
+  const auto background = teuk::kerr_background_point(
+      parameters, radius, cosine, std::sqrt(1.0 - cosine * cosine));
+  const J1 value{KC(0.4, -0.2), KC(-0.13, 0.09)};
+  const J1 dt{KC(-0.2, 0.5), KC(0.17, -0.11)};
+  const J1 dr{KC(0.7, 0.1), KC(-0.08, 0.15)};
+  const J1 host_result =
+      teuk::plus2_regularized_thorn5_j_minus_optical_over_r(
+          value, dt, dr, 2, radius, cosine, parameters, background);
+  Kokkos::View<J1*> result("plus2_r7_device", 1);
+  Kokkos::parallel_for(
+      "plus2_r7_device_parity", 1, KOKKOS_LAMBDA(const int) {
+        result(0) = teuk::plus2_regularized_thorn5_j_minus_optical_over_r(
+            value, dt, dr, 2, radius, cosine, parameters, background);
+      });
+  const auto copy = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{},
+                                                         result);
+  CHECK_COMPLEX_NEAR(copy(0).value, host_result.value, 2.0e-14);
+  CHECK_COMPLEX_NEAR(copy(0).dt, host_result.dt, 2.0e-14);
+  constexpr double epsilon = 2.0e-6;
+  const auto shifted_result = [&](const double sign) {
+    return teuk::plus2_regularized_thorn5_j_minus_optical_over_r(
+        value.value + sign * epsilon * value.dt,
+        dt.value + sign * epsilon * dt.dt,
+        dr.value + sign * epsilon * dr.dt, 2, radius, cosine, parameters,
+        background);
+  };
+  const KC finite_difference =
+      (shifted_result(1.0) - shifted_result(-1.0)) / (2.0 * epsilon);
+  CHECK_COMPLEX_NEAR(host_result.dt, finite_difference, 2.0e-10);
 }
 
 TEST_CASE("spin plus2 Jet tangent matches every directional derivative") {

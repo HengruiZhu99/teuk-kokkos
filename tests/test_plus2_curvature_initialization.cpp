@@ -62,7 +62,7 @@ ManufacturedResult manufactured(const std::size_t points,
   const auto q1 = [&](const std::size_t mode, const std::size_t theta,
                       const double radius) {
     return (C(0.3, -0.17) + amplitude(mode, theta)) *
-           Kokkos::exp(C(-0.4 * radius, 0.31 * radius));
+           Kokkos::exp(C(0.4 * radius, 0.31 * radius));
   };
   for (std::size_t mode = 0; mode < modes; ++mode) {
     for (std::size_t radial = 0; radial < points; ++radial) {
@@ -96,19 +96,15 @@ ManufacturedResult manufactured(const std::size_t points,
             radial, inverse_spacing, theta_count);
       }
       const C df0_scri = df0[0];
-      const C ddf0_scri = teuk::radial_first_derivative_at(
-          teuk::RadialDiscretization::D105, df0.data(), points, 0,
-          inverse_spacing);
-      const C df1_scri = teuk::radial_first_derivative_strided_at(
-          teuk::RadialDiscretization::D105, f1.data() + base, points, 0,
-          inverse_spacing, theta_count);
       residual = std::max(
           residual,
           std::max({Kokkos::abs(f0[base]), Kokkos::abs(df0_scri),
                     Kokkos::abs(f1[base])}));
       const std::size_t point = mode * theta_count + theta;
-      z0_scri[point] = 0.5 * ddf0_scri;
-      z1_scri[point] = df1_scri;
+      z0_scri[point] = teuk::plus2_extract_q0_at_scri(
+          f0.data() + base, points, inverse_spacing, theta_count);
+      z1_scri[point] = teuk::plus2_extract_q1_at_scri(
+          f1.data() + base, points, inverse_spacing, theta_count);
     }
   }
 
@@ -160,7 +156,7 @@ ManufacturedResult manufactured(const std::size_t points,
       signed_modes, cos_theta_nodes, points);
   const teuk::Plus2CurvatureInitializationContract contract{
       teuk::Plus2CurvatureFormulaId::OrgRicciPeelingNumeratorsV1,
-      teuk::Plus2PeelingEndpointOperatorId::D105NestedLhopitalV1,
+      teuk::Plus2PeelingEndpointOperatorId::ConstrainedPositiveNodesV2,
       teuk::Plus2RadialBoundaryPolicyId::
           ContinuumNoIncomingButWeaklyHyperbolicV1,
       profile_id, "manufactured-org-curvature-v1", *certificate,
@@ -289,7 +285,7 @@ TEST_CASE("plus2 peeling certificate is bound before state mutation") {
       {-2, 2}, {-0.6, 0.0, 0.6}, points);
   const teuk::Plus2CurvatureInitializationContract contract{
       teuk::Plus2CurvatureFormulaId::OrgRicciPeelingNumeratorsV1,
-      teuk::Plus2PeelingEndpointOperatorId::D105NestedLhopitalV1,
+      teuk::Plus2PeelingEndpointOperatorId::ConstrainedPositiveNodesV2,
       teuk::Plus2RadialBoundaryPolicyId::
           ContinuumNoIncomingButWeaklyHyperbolicV1,
       fine.sample.profile_id, "bad-data-must-not-mutate", certificate,

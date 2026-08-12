@@ -1,5 +1,14 @@
 # Standalone production gate for linear `Psi0`
 
+> **2026-08-12 scope erratum.** The point formula is a qualified standalone
+> transcription, but `plus2_linear_spatial.hpp` remains **validation-only**.
+> Its spatial graph evaluates ordinary-NP terms separately and its scri value
+> requires an independently supplied `lim Psi0/R^5`; it is not a
+> cancellation-safe regular GHP production provider. D4-2 and D8-4 coverage
+> is historical convergence evidence, not production authority. Nested source
+> composition requires the independently qualified D10-5 path, and plus2
+> runtime remains fail-closed.
+
 Status: qualified point operator, deliberately disconnected from
 `SpatialPipeline`
 

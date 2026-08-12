@@ -95,6 +95,10 @@ if(BUILD_TESTING)
       COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/symbolic/verify_plus2_compact_source.py)
     add_test(
+      NAME teuk.plus2_source_normalization_gate
+      COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/symbolic/verify_plus2_source_normalization.py)
+    add_test(
       NAME teuk.plus2_bianchi_closure_gate
       COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/symbolic/verify_plus2_bianchi_closure.py)
@@ -108,6 +112,15 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/numerical/generate_routeb_fornberg_weights.py
         --check
         ${CMAKE_CURRENT_SOURCE_DIR}/include/teuk/routeb_fornberg_weights.hpp)
+    add_test(
+      NAME teuk.plus2_endpoint_extraction_generation
+      COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/numerical/generate_plus2_endpoint_extraction.py
+        --check)
+    add_test(
+      NAME teuk.plus2_endpoint_extraction_arbitrary_precision
+      COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/numerical/verify_plus2_endpoint_extraction.py)
     add_test(
       NAME teuk.routeb_fornberg_arbitrary_precision
       COMMAND ${Python3_EXECUTABLE}

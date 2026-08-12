@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstddef>
 #include <filesystem>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -35,6 +36,19 @@ struct Plus2ReplayConfiguration {
   std::size_t radial_count = 0;
   std::size_t theta_count = 0;
   RadialDiscretization radial_discretization = RadialDiscretization::D42;
+  double mass = 0.0;
+  double spin = 0.0;
+  double compactification_length = 0.0;
+  std::vector<double> radial_coordinates;
+  std::vector<double> theta_coordinates;
+  double time_step = 0.0;
+  std::string reduction_mode;
+  double reduction_damping = 0.0;
+  double dissipation = 0.0;
+  std::uint32_t source_normalization_version =
+      plus2_source_normalization_version;
+  std::string source_normalization_name = plus2_source_normalization_name;
+  std::string primary_checkpoint_identity;
   std::string git_commit;
   int runtime_config_schema_version = 0;
 };
@@ -152,6 +166,20 @@ inline Plus2CheckpointExpectations plus2_checkpoint_expectations(
   expected.radial_count = configuration.radial_count;
   expected.theta_count = configuration.theta_count;
   expected.radial_discretization = configuration.radial_discretization;
+  expected.mass = configuration.mass;
+  expected.spin = configuration.spin;
+  expected.compactification_length = configuration.compactification_length;
+  expected.radial_coordinates = configuration.radial_coordinates;
+  expected.theta_coordinates = configuration.theta_coordinates;
+  expected.time_step = configuration.time_step;
+  expected.reduction_mode = configuration.reduction_mode;
+  expected.reduction_damping = configuration.reduction_damping;
+  expected.dissipation = configuration.dissipation;
+  expected.source_normalization_version =
+      configuration.source_normalization_version;
+  expected.source_normalization_name = configuration.source_normalization_name;
+  expected.primary_checkpoint_identity =
+      configuration.primary_checkpoint_identity;
   return expected;
 }
 
@@ -222,6 +250,7 @@ class Plus2ReplayOrchestrator {
     auto metadata = load_plus2_checkpoint(
         execution, configuration_.checkpoint, companion_, expected);
     companion_initialized_ = true;
+    restored_accepted_time_ = metadata.progress.time;
     return metadata;
   }
 
@@ -299,6 +328,16 @@ class Plus2ReplayOrchestrator {
     }
     plus2_replay_detail::validate_accepted_activation(accepted_activation,
                                                        accepted_time);
+    if (restored_accepted_time_) {
+      const double scale =
+          std::max({1.0, std::abs(*restored_accepted_time_),
+                    std::abs(accepted_time)});
+      if (std::abs(accepted_time - *restored_accepted_time_) >
+          8.0 * std::numeric_limits<double>::epsilon() * scale) {
+        throw std::invalid_argument(
+            "plus2 replay continuation does not match restored accepted time");
+      }
+    }
     const SourceActivationState activation_snapshot = accepted_activation;
     auto stage_companion_rhs =
         [&companion_rhs, activation_snapshot](
@@ -312,6 +351,7 @@ class Plus2ReplayOrchestrator {
         execution, primary, companion_.flat_state(), accepted_time, step,
         std::forward<PrimaryRightHandSide>(primary_rhs), stage_companion_rhs,
         primary_workspace, companion_.rk_workspace());
+    if (restored_accepted_time_) *restored_accepted_time_ = accepted_time + step;
   }
 
   Plus2ReplayConfiguration configuration_;
@@ -321,6 +361,7 @@ class Plus2ReplayOrchestrator {
       replay_primary_workspace_;
   bool companion_initialized_ = false;
   bool replay_primary_initialized_ = false;
+  std::optional<double> restored_accepted_time_;
 };
 
 }  // namespace teuk

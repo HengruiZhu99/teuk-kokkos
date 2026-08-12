@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -19,13 +20,16 @@
 
 #include "teuk/plus2_companion_storage.hpp"
 #include "teuk/plus2_runtime_types.hpp"
+#include "teuk/plus2_source.hpp"
 #include "teuk/radial_discretization.hpp"
 #include "teuk/source_activation.hpp"
 #include "teuk/types.hpp"
 
 namespace teuk {
 
-inline constexpr std::uint32_t plus2_checkpoint_format_version = 2;
+inline constexpr std::uint32_t plus2_checkpoint_format_version = 3;
+inline constexpr std::uint32_t plus2_checkpoint_legacy_representation_version =
+    2;
 inline constexpr std::uint32_t plus2_checkpoint_legacy_d42_version = 1;
 inline constexpr const char* plus2_checkpoint_schema =
     "teuk.plus2-companion-checkpoint";
@@ -80,6 +84,19 @@ struct Plus2CheckpointMetadata {
   std::size_t radial_count = 0;
   std::size_t theta_count = 0;
   RadialDiscretization radial_discretization = RadialDiscretization::D42;
+  double mass = 0.0;
+  double spin = 0.0;
+  double compactification_length = 0.0;
+  std::vector<double> radial_coordinates;
+  std::vector<double> theta_coordinates;
+  double time_step = 0.0;
+  std::string reduction_mode;
+  double reduction_damping = 0.0;
+  double dissipation = 0.0;
+  std::uint32_t source_normalization_version =
+      plus2_source_normalization_version;
+  std::string source_normalization_name = plus2_source_normalization_name;
+  std::string primary_checkpoint_identity;
   Plus2CheckpointProgress progress;
   SourceActivationState source_activation;
   std::uint64_t state_checksum = 0;
@@ -100,6 +117,19 @@ struct Plus2CheckpointExpectations {
   std::size_t radial_count = 0;
   std::size_t theta_count = 0;
   RadialDiscretization radial_discretization = RadialDiscretization::D42;
+  double mass = 0.0;
+  double spin = 0.0;
+  double compactification_length = 0.0;
+  std::vector<double> radial_coordinates;
+  std::vector<double> theta_coordinates;
+  double time_step = 0.0;
+  std::string reduction_mode;
+  double reduction_damping = 0.0;
+  double dissipation = 0.0;
+  std::uint32_t source_normalization_version =
+      plus2_source_normalization_version;
+  std::string source_normalization_name = plus2_source_normalization_name;
+  std::string primary_checkpoint_identity;
 };
 
 namespace plus2_checkpoint_detail {
@@ -185,6 +215,45 @@ inline void validate_activation(const SourceActivationState& activation,
   }
 }
 
+inline void validate_physical_problem(
+    const double mass, const double spin, const double length,
+    const std::vector<double>& radial_coordinates,
+    const std::vector<double>& theta_coordinates, const double time_step,
+    const std::string& reduction_mode, const double reduction_damping,
+    const double dissipation, const std::uint32_t normalization_version,
+    const std::string& normalization_name,
+    const std::string& primary_checkpoint_identity,
+    const std::size_t radial_count, const std::size_t theta_count) {
+  const auto finite_coordinates = [](const std::vector<double>& coordinates) {
+    return std::all_of(coordinates.begin(), coordinates.end(),
+                       [](const double value) { return std::isfinite(value); });
+  };
+  const bool radial_strict =
+      std::adjacent_find(radial_coordinates.begin(), radial_coordinates.end(),
+                         std::greater_equal<double>()) ==
+      radial_coordinates.end();
+  const bool theta_strict =
+      std::adjacent_find(theta_coordinates.begin(), theta_coordinates.end(),
+                         std::greater_equal<double>()) ==
+      theta_coordinates.end();
+  if (!std::isfinite(mass) || !std::isfinite(spin) ||
+      !std::isfinite(length) || mass <= 0.0 || std::abs(spin) > mass ||
+      length <= 0.0 || radial_coordinates.size() != radial_count ||
+      theta_coordinates.size() != theta_count || !finite_coordinates(radial_coordinates) ||
+      !finite_coordinates(theta_coordinates) || !radial_strict || !theta_strict ||
+      !std::isfinite(time_step) || time_step <= 0.0 ||
+      (reduction_mode != "free_damped" &&
+       reduction_mode != "stage_constrained") ||
+      !std::isfinite(reduction_damping) || reduction_damping < 0.0 ||
+      !std::isfinite(dissipation) || dissipation < 0.0 ||
+      normalization_version != plus2_source_normalization_version ||
+      normalization_name != plus2_source_normalization_name ||
+      primary_checkpoint_identity.empty()) {
+    throw std::invalid_argument(
+        "incomplete or nonfinite plus2 physical-problem provenance");
+  }
+}
+
 inline void validate_expectations(const Plus2CheckpointExpectations& expected) {
   if (expected.scaling.empty() || expected.registry_schema.empty() ||
       expected.radial_count == 0 || expected.theta_count == 0) {
@@ -198,11 +267,21 @@ inline void validate_expectations(const Plus2CheckpointExpectations& expected) {
       expected.initial_policy, expected.git_commit,
       expected.runtime_config_schema_version);
   (void)radial_discretization_name(expected.radial_discretization);
+  validate_physical_problem(
+      expected.mass, expected.spin, expected.compactification_length,
+      expected.radial_coordinates, expected.theta_coordinates,
+      expected.time_step, expected.reduction_mode,
+      expected.reduction_damping, expected.dissipation,
+      expected.source_normalization_version,
+      expected.source_normalization_name,
+      expected.primary_checkpoint_identity, expected.radial_count,
+      expected.theta_count);
 }
 
 inline void validate_metadata(const Plus2CheckpointMetadata& metadata) {
   if (metadata.schema != plus2_checkpoint_schema ||
       (metadata.version != plus2_checkpoint_format_version &&
+       metadata.version != plus2_checkpoint_legacy_representation_version &&
        metadata.version != plus2_checkpoint_legacy_d42_version) ||
       metadata.byte_order != plus2_native_byte_order() ||
       metadata.floating_point_format != plus2_binary64_format ||
@@ -228,6 +307,28 @@ inline void validate_metadata(const Plus2CheckpointMetadata& metadata) {
       metadata.runtime_config_schema_version);
   validate_activation(metadata.source_activation, metadata.progress.time);
   (void)radial_discretization_name(metadata.radial_discretization);
+  if (metadata.version == plus2_checkpoint_format_version) {
+    validate_physical_problem(
+        metadata.mass, metadata.spin, metadata.compactification_length,
+        metadata.radial_coordinates, metadata.theta_coordinates,
+        metadata.time_step, metadata.reduction_mode,
+        metadata.reduction_damping, metadata.dissipation,
+        metadata.source_normalization_version,
+        metadata.source_normalization_name,
+        metadata.primary_checkpoint_identity, metadata.radial_count,
+        metadata.theta_count);
+    const double expected_time =
+        static_cast<double>(metadata.progress.step) * metadata.time_step;
+    const double scale =
+        std::max({1.0, std::abs(expected_time),
+                  std::abs(metadata.progress.time)});
+    if (!std::isfinite(expected_time) ||
+        std::abs(expected_time - metadata.progress.time) >
+            8.0 * std::numeric_limits<double>::epsilon() * scale) {
+      throw std::invalid_argument(
+          "plus2 checkpoint time is inconsistent with step and dt");
+    }
+  }
 }
 
 inline std::size_t checked_value_count(const Plus2CheckpointMetadata& metadata) {
@@ -263,6 +364,14 @@ inline std::uint64_t checksum(const std::vector<Complex>& values) {
     }
   }
   return result;
+}
+
+inline void require_finite_state(const std::vector<Complex>& values) {
+  for (const Complex value : values) {
+    if (!std::isfinite(value.real()) || !std::isfinite(value.imag())) {
+      throw std::runtime_error("nonfinite plus2 checkpoint state");
+    }
+  }
 }
 
 template <class Value>
@@ -321,6 +430,26 @@ inline std::vector<int> read_modes(std::istream& input, const char* label) {
   return modes;
 }
 
+inline void write_coordinates(std::ostream& output,
+                              const std::vector<double>& coordinates) {
+  write_scalar(output, static_cast<std::uint64_t>(coordinates.size()));
+  for (const double coordinate : coordinates) write_scalar(output, coordinate);
+}
+
+inline std::vector<double> read_coordinates(std::istream& input,
+                                            const char* label) {
+  constexpr std::uint64_t maximum_coordinate_count = 1ULL << 24;
+  const auto count = read_scalar<std::uint64_t>(input, label);
+  if (count > maximum_coordinate_count) {
+    throw std::runtime_error("unreasonable coordinate count in plus2 checkpoint");
+  }
+  std::vector<double> coordinates(static_cast<std::size_t>(count));
+  for (double& coordinate : coordinates) {
+    coordinate = read_scalar<double>(input, label);
+  }
+  return coordinates;
+}
+
 inline void write_payload(std::ostream& output,
                           const Plus2CheckpointMetadata& metadata,
                           const std::vector<Complex>& values) {
@@ -345,9 +474,23 @@ inline void write_payload(std::ostream& output,
                            metadata.runtime_config_schema_version));
   write_scalar(output, static_cast<std::uint64_t>(metadata.radial_count));
   write_scalar(output, static_cast<std::uint64_t>(metadata.theta_count));
-  if (metadata.version >= plus2_checkpoint_format_version) {
+  if (metadata.version >= plus2_checkpoint_legacy_representation_version) {
     write_string(output,
                  radial_discretization_name(metadata.radial_discretization));
+  }
+  if (metadata.version >= plus2_checkpoint_format_version) {
+    write_scalar(output, metadata.mass);
+    write_scalar(output, metadata.spin);
+    write_scalar(output, metadata.compactification_length);
+    write_coordinates(output, metadata.radial_coordinates);
+    write_coordinates(output, metadata.theta_coordinates);
+    write_scalar(output, metadata.time_step);
+    write_string(output, metadata.reduction_mode);
+    write_scalar(output, metadata.reduction_damping);
+    write_scalar(output, metadata.dissipation);
+    write_scalar(output, metadata.source_normalization_version);
+    write_string(output, metadata.source_normalization_name);
+    write_string(output, metadata.primary_checkpoint_identity);
   }
   write_scalar(output, metadata.progress.time);
   write_scalar(output, metadata.progress.step);
@@ -405,6 +548,25 @@ inline std::pair<Plus2CheckpointMetadata, std::vector<Complex>> read_payload(
           ? RadialDiscretization::D42
           : parse_radial_discretization(
                 read_string(input, "radial discretization"));
+  if (metadata.version >= plus2_checkpoint_format_version) {
+    metadata.mass = read_scalar<double>(input, "mass");
+    metadata.spin = read_scalar<double>(input, "spin");
+    metadata.compactification_length =
+        read_scalar<double>(input, "compactification length");
+    metadata.radial_coordinates = read_coordinates(input, "radial coordinates");
+    metadata.theta_coordinates = read_coordinates(input, "theta coordinates");
+    metadata.time_step = read_scalar<double>(input, "time step");
+    metadata.reduction_mode = read_string(input, "reduction mode");
+    metadata.reduction_damping =
+        read_scalar<double>(input, "reduction damping");
+    metadata.dissipation = read_scalar<double>(input, "dissipation");
+    metadata.source_normalization_version =
+        read_scalar<std::uint32_t>(input, "source normalization version");
+    metadata.source_normalization_name =
+        read_string(input, "source normalization name");
+    metadata.primary_checkpoint_identity =
+        read_string(input, "primary checkpoint identity");
+  }
   metadata.progress.time = read_scalar<double>(input, "time");
   metadata.progress.step = read_scalar<std::uint64_t>(input, "step");
   const auto active = read_scalar<std::uint8_t>(input, "source active");
@@ -429,6 +591,7 @@ inline std::pair<Plus2CheckpointMetadata, std::vector<Complex>> read_payload(
     const double imag = read_scalar<double>(input, "state imaginary component");
     value = Complex(real, imag);
   }
+  require_finite_state(values);
   if (input.peek() != std::char_traits<char>::eof()) {
     throw std::runtime_error("trailing data in plus2 checkpoint");
   }
@@ -452,7 +615,22 @@ inline void require_metadata_match(
           expected.runtime_config_schema_version ||
       metadata.radial_count != expected.radial_count ||
       metadata.theta_count != expected.theta_count ||
-      metadata.radial_discretization != expected.radial_discretization) {
+      metadata.radial_discretization != expected.radial_discretization ||
+      metadata.version != plus2_checkpoint_format_version ||
+      metadata.mass != expected.mass || metadata.spin != expected.spin ||
+      metadata.compactification_length != expected.compactification_length ||
+      metadata.radial_coordinates != expected.radial_coordinates ||
+      metadata.theta_coordinates != expected.theta_coordinates ||
+      metadata.time_step != expected.time_step ||
+      metadata.reduction_mode != expected.reduction_mode ||
+      metadata.reduction_damping != expected.reduction_damping ||
+      metadata.dissipation != expected.dissipation ||
+      metadata.source_normalization_version !=
+          expected.source_normalization_version ||
+      metadata.source_normalization_name !=
+          expected.source_normalization_name ||
+      metadata.primary_checkpoint_identity !=
+          expected.primary_checkpoint_identity) {
     throw std::runtime_error(
         "plus2 checkpoint does not match scaling, registry, methods, provenance, or shape");
   }
@@ -484,6 +662,7 @@ inline Plus2CheckpointMetadata save_plus2_checkpoint(
   execution.fence("copy plus2 checkpoint state to host");
   std::vector<Complex> values(host.extent(0));
   for (std::size_t i = 0; i < values.size(); ++i) values[i] = host(i);
+  require_finite_state(values);
   metadata.state_checksum = checksum(values);
 
   if (path.empty() || std::filesystem::exists(path)) {

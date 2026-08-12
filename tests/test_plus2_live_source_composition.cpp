@@ -105,6 +105,9 @@ struct WriteLiveSourceSlotsFunctor {
               theta == 0 && field + 1 == jc)) {
           jk_value_stamps[index] = generation;
           jk_tangent_stamps[index] = generation;
+        } else {
+          jk_value_stamps[index] = generation - 1;
+          jk_tangent_stamps[index] = generation - 1;
         }
       }
     }
@@ -118,6 +121,8 @@ struct WriteLiveSourceSlotsFunctor {
       if (!(omit_last_q_stamp && mode == 0 && radial == 0 && theta == 0 &&
             field + 1 == qc)) {
         q_value_stamps[index] = generation;
+      } else {
+        q_value_stamps[index] = generation - 1;
       }
     }
   }
@@ -156,7 +161,8 @@ struct WriteLiveOuterSlotsFunctor {
       const std::size_t output_index = live_flat4(
           mode, field, radial, theta, outer_count, radial_count, theta_count);
       const std::size_t input_index = live_flat4(
-          mode, field, radial, theta, tangent_count, radial_count,
+          mode, field < tangent_count ? field : 0, radial, theta,
+          tangent_count, radial_count,
           theta_count);
       outer[output_index] = tangents[input_index];
       outer_stamps[output_index] = generation;
@@ -407,6 +413,34 @@ TEST_CASE("plus2 live composition fails closed on missing slots and activation")
   LiveFixture fixture;
   auto missing = evaluate_fixture(fixture, 1.0, true);
   CHECK_COMPLEX_NEAR(missing[0], C{}, 0.0);
+  // The workspace is a public diagnostic surface.  Invalid provenance must
+  // clear every pair/sum/raw/regular/forcing diagnostic at the rejected point,
+  // not merely gate the final gathered target.
+  const auto& source = fixture.composition.source_workspace();
+  const auto pairs = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, source.pair_family_value());
+  const auto sums = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, source.summed_value());
+  const auto tangents = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, source.summed_jk_tangent());
+  const auto raw = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, source.source_over_r6_value());
+  const auto regular = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, source.source_over_r7_value());
+  const auto evolved = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, source.forcing_value());
+  for (std::size_t pair = 0; pair < pairs.extent(0); ++pair)
+    for (std::size_t field = 0; field < pairs.extent(1); ++field)
+      CHECK_COMPLEX_NEAR(pairs(pair, field, 0, 0), C{}, 0.0);
+  for (std::size_t mode = 0; mode < sums.extent(0); ++mode) {
+    for (std::size_t field = 0; field < sums.extent(1); ++field)
+      CHECK_COMPLEX_NEAR(sums(mode, field, 0, 0), C{}, 0.0);
+    for (std::size_t field = 0; field < tangents.extent(1); ++field)
+      CHECK_COMPLEX_NEAR(tangents(mode, field, 0, 0), C{}, 0.0);
+    CHECK_COMPLEX_NEAR(raw(mode, 0, 0), C{}, 0.0);
+    CHECK_COMPLEX_NEAR(regular(mode, 0, 0), C{}, 0.0);
+    CHECK_COMPLEX_NEAR(evolved(mode, 0, 0), C{}, 0.0);
+  }
   bool retained_ready_point = false;
   for (std::size_t i = 1; i < missing.size(); ++i) {
     retained_ready_point = retained_ready_point || Kokkos::abs(missing[i]) > 0.0;

@@ -546,16 +546,23 @@ TEST_CASE("plus2 spatial outer kernel matches Jet oracle and activation") {
   teuk::Plus2SpatialRank4View sum_tangents(
       "plus2_outer_sum_tangents", registry.size(), 3, grid.size(), 3);
   teuk::Plus2SpatialRank4View derivatives(
-      "plus2_outer_derivatives", registry.size(), 2, grid.size(), 3);
+      "plus2_outer_derivatives", registry.size(),
+      static_cast<std::size_t>(teuk::Plus2SpatialOuterDerivative::Count),
+      grid.size(), 3);
   teuk::Plus2SpatialRank4View derivative_tangents(
-      "plus2_outer_derivative_tangents", registry.size(), 2, grid.size(), 3);
+      "plus2_outer_derivative_tangents", registry.size(),
+      static_cast<std::size_t>(teuk::Plus2SpatialOuterDerivative::Count),
+      grid.size(), 3);
   Host4 hs("plus2_outer_host_sums", registry.size(), 3, grid.size(), 3);
   Host4 hst("plus2_outer_host_sum_tangents", registry.size(), 3, grid.size(),
             3);
-  Host4 hd("plus2_outer_host_derivatives", registry.size(), 2, grid.size(),
-           3);
-  Host4 hdt("plus2_outer_host_derivative_tangents", registry.size(), 2,
-            grid.size(), 3);
+  Host4 hd("plus2_outer_host_derivatives", registry.size(),
+           static_cast<std::size_t>(teuk::Plus2SpatialOuterDerivative::Count),
+           grid.size(), 3);
+  Host4 hdt(
+      "plus2_outer_host_derivative_tangents", registry.size(),
+      static_cast<std::size_t>(teuk::Plus2SpatialOuterDerivative::Count),
+      grid.size(), 3);
   for (std::size_t mode = 0; mode < registry.size(); ++mode) {
     for (std::size_t radial = 0; radial < grid.size(); ++radial) {
       for (std::size_t theta = 0; theta < 3; ++theta) {
@@ -565,7 +572,10 @@ TEST_CASE("plus2 spatial outer kernel matches Jet oracle and activation") {
           hs(mode, component, radial, theta) = C(tag, -0.3 * tag);
           hst(mode, component, radial, theta) = C(0.17 * tag, 0.11 * tag);
         }
-        for (std::size_t component = 0; component < 2; ++component) {
+        for (std::size_t component = 0;
+             component < static_cast<std::size_t>(
+                             teuk::Plus2SpatialOuterDerivative::Count);
+             ++component) {
           const double tag = -0.2 + 0.1 * mode + 0.04 * radial +
                              0.01 * theta - 0.03 * component;
           hd(mode, component, radial, theta) = C(tag, 0.23 * tag);
@@ -586,9 +596,13 @@ TEST_CASE("plus2 spatial outer kernel matches Jet oracle and activation") {
       sum_tangents, derivatives, derivative_tangents, activation, workspace);
   execution.fence("plus2 outer oracle");
   const auto source = Kokkos::create_mirror_view_and_copy(
-      Kokkos::HostSpace{}, workspace.source_value());
+      Kokkos::HostSpace{}, workspace.source_over_r6_value());
   const auto source_tangent = Kokkos::create_mirror_view_and_copy(
-      Kokkos::HostSpace{}, workspace.source_tangent());
+      Kokkos::HostSpace{}, workspace.source_over_r6_tangent());
+  const auto source_over_r7 = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, workspace.source_over_r7_value());
+  const auto source_over_r7_tangent = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, workspace.source_over_r7_tangent());
   const auto forcing = Kokkos::create_mirror_view_and_copy(
       Kokkos::HostSpace{}, workspace.forcing_value());
   const auto forcing_tangent = Kokkos::create_mirror_view_and_copy(
@@ -618,14 +632,39 @@ TEST_CASE("plus2 spatial outer kernel matches Jet oracle and activation") {
                   hdt(mode, od(teuk::Plus2SpatialOuterDerivative::Eth6K),
                       radial, theta))});
         const J expected_source = activation * raw.total();
+        const auto regularized = teuk::plus2_compact_outer_source_over_r7(
+            radius, background,
+            J(hs(mode, a(teuk::Plus2SpatialAggregate::K), radial, theta),
+              hst(mode, a(teuk::Plus2SpatialAggregate::K), radial, theta)),
+            J(hs(mode, a(teuk::Plus2SpatialAggregate::Q), radial, theta),
+              hst(mode, a(teuk::Plus2SpatialAggregate::Q), radial, theta)),
+            teuk::Plus2RegularizedOuterDerivativesT<J>{
+                J(hd(mode,
+                     od(teuk::Plus2SpatialOuterDerivative::
+                            RegularizedThorn5JMinusOpticalJOverR),
+                     radial, theta),
+                  hdt(mode,
+                      od(teuk::Plus2SpatialOuterDerivative::
+                             RegularizedThorn5JMinusOpticalJOverR),
+                      radial, theta)),
+                J(hd(mode, od(teuk::Plus2SpatialOuterDerivative::Eth6K),
+                     radial, theta),
+                  hdt(mode, od(teuk::Plus2SpatialOuterDerivative::Eth6K),
+                      radial, theta))});
+        const J expected_source_over_r7 = activation * regularized.total();
         const J expected_forcing =
-            teuk::plus2_coordinate_forcing_from_source_over_r6(
+            teuk::plus2_coordinate_forcing_from_source_over_r7(
                 radius, angles.host_cosine(theta), parameters.spin,
-                parameters.compactification_length, expected_source);
+                parameters.compactification_length,
+                expected_source_over_r7);
         CHECK_COMPLEX_NEAR(source(mode, radial, theta),
                            expected_source.value, 3.0e-12);
         CHECK_COMPLEX_NEAR(source_tangent(mode, radial, theta),
                            expected_source.dt, 3.0e-12);
+        CHECK_COMPLEX_NEAR(source_over_r7(mode, radial, theta),
+                           expected_source_over_r7.value, 3.0e-12);
+        CHECK_COMPLEX_NEAR(source_over_r7_tangent(mode, radial, theta),
+                           expected_source_over_r7.dt, 3.0e-12);
         CHECK_COMPLEX_NEAR(forcing(mode, radial, theta),
                            expected_forcing.value, 4.0e-12);
         CHECK_COMPLEX_NEAR(forcing_tangent(mode, radial, theta),
@@ -642,15 +681,23 @@ TEST_CASE("plus2 spatial outer kernel matches Jet oracle and activation") {
   teuk::Plus2SpatialRank4View minus_sums(
       "plus2_outer_minus_sums", registry.size(), 3, grid.size(), 3);
   teuk::Plus2SpatialRank4View plus_derivatives(
-      "plus2_outer_plus_derivatives", registry.size(), 2, grid.size(), 3);
+      "plus2_outer_plus_derivatives", registry.size(),
+      static_cast<std::size_t>(teuk::Plus2SpatialOuterDerivative::Count),
+      grid.size(), 3);
   teuk::Plus2SpatialRank4View minus_derivatives(
-      "plus2_outer_minus_derivatives", registry.size(), 2, grid.size(), 3);
+      "plus2_outer_minus_derivatives", registry.size(),
+      static_cast<std::size_t>(teuk::Plus2SpatialOuterDerivative::Count),
+      grid.size(), 3);
   Host4 hsp("plus2_outer_host_plus_sums", registry.size(), 3, grid.size(), 3);
   Host4 hsm("plus2_outer_host_minus_sums", registry.size(), 3, grid.size(),
             3);
-  Host4 hdp("plus2_outer_host_plus_derivatives", registry.size(), 2,
+  Host4 hdp("plus2_outer_host_plus_derivatives", registry.size(),
+            static_cast<std::size_t>(
+                teuk::Plus2SpatialOuterDerivative::Count),
             grid.size(), 3);
-  Host4 hdm("plus2_outer_host_minus_derivatives", registry.size(), 2,
+  Host4 hdm("plus2_outer_host_minus_derivatives", registry.size(),
+            static_cast<std::size_t>(
+                teuk::Plus2SpatialOuterDerivative::Count),
             grid.size(), 3);
   for (std::size_t mode = 0; mode < registry.size(); ++mode) {
     for (std::size_t radial = 0; radial < grid.size(); ++radial) {
@@ -663,7 +710,10 @@ TEST_CASE("plus2 spatial outer kernel matches Jet oracle and activation") {
               hs(mode, component, radial, theta) -
               epsilon * hst(mode, component, radial, theta);
         }
-        for (std::size_t component = 0; component < 2; ++component) {
+        for (std::size_t component = 0;
+             component < static_cast<std::size_t>(
+                             teuk::Plus2SpatialOuterDerivative::Count);
+             ++component) {
           hdp(mode, component, radial, theta) =
               hd(mode, component, radial, theta) +
               epsilon * hdt(mode, component, radial, theta);
@@ -692,9 +742,9 @@ TEST_CASE("plus2 spatial outer kernel matches Jet oracle and activation") {
       minus_workspace);
   execution.fence("plus2 outer central difference");
   const auto plus_source = Kokkos::create_mirror_view_and_copy(
-      Kokkos::HostSpace{}, plus_workspace.source_value());
+      Kokkos::HostSpace{}, plus_workspace.source_over_r6_value());
   const auto minus_source = Kokkos::create_mirror_view_and_copy(
-      Kokkos::HostSpace{}, minus_workspace.source_value());
+      Kokkos::HostSpace{}, minus_workspace.source_over_r6_value());
   const auto plus_forcing = Kokkos::create_mirror_view_and_copy(
       Kokkos::HostSpace{}, plus_workspace.forcing_value());
   const auto minus_forcing = Kokkos::create_mirror_view_and_copy(
@@ -761,8 +811,9 @@ TEST_CASE("plus2 spatial evaluators validate shape and allocate nothing") {
   bool activation_rejected = false;
   try {
     teuk::Plus2SpatialRank4View outer_derivatives(
-        "plus2_noalloc_outer_derivatives", registry.size(), 2, grid.size(),
-        2);
+        "plus2_noalloc_outer_derivatives", registry.size(),
+        static_cast<std::size_t>(teuk::Plus2SpatialOuterDerivative::Count),
+        grid.size(), 2);
     teuk::evaluate_plus2_spatial_outer_source(
         execution, grid, parameters, angles.cosine, angles.sine,
         workspace.summed_value(), workspace.summed_tangent(),
@@ -787,7 +838,8 @@ TEST_CASE("plus2 spatial evaluators validate shape and allocate nothing") {
   CHECK(outer_shape_rejected);
 
   teuk::Plus2SpatialRank4View outer_derivatives(
-      "plus2_noalloc_valid_outer_derivatives", registry.size(), 2,
+      "plus2_noalloc_valid_outer_derivatives", registry.size(),
+      static_cast<std::size_t>(teuk::Plus2SpatialOuterDerivative::Count),
       grid.size(), 2);
   spatial_allocations = 0;
   spatial_deep_copies = 0;

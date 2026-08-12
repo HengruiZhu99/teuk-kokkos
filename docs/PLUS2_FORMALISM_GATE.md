@@ -303,20 +303,53 @@ Properties:
   regular at the future horizon, so this is also a horizon-regular code-tetrad
   field; no additional horizon boost is required for this numerical variable.
 
-After substituting `Psi0=W_plus Z_plus` **inside the NP operator**, the primary
-paper multiplies the full NP equation by
+### 2026-08-12 source-normalization erratum
+
+The earlier version of this document stopped one algebraic step too soon.  It
+correctly recorded that the primary paper multiplies the raw NP equation by
 
 ```
 N = 2 Sigma_BL/R.
 ```
 
-It performs no separate division by `W_plus`.  The physical source
-normalization is therefore identical for both signs:
+but incorrectly concluded that this alone gives the common equation for
+`Z_plus`.  That historical conclusion is retained here as an explicit
+erratum; it must not be used by code or checkpoints.
+
+The raw code-tetrad principal coefficient, derived directly from the explicit
+tetrad, is
 
 ```
-forcing_s = (2 Sigma_BL/R) S_s
-          = 2 (L^4+a^2 R^2 cos^2(theta)) S_s/R^3.
+A_TT(raw) = R^2 C_T/(2D),
+D = L^4+a^2R^2 cos^2(theta).
 ```
+
+Writing
+
+```
+Psi0 = W_plus Z_plus = R f Z_plus,
+f = R^4/(L^2-i a R cos(theta))^4,
+```
+
+shows
+
+```
+(2D/R^3) A_TT(raw) (R f) = C_T f,
+```
+
+not `C_T`.  The remaining `f` must also be divided out to obtain the common
+Eq. (22) coefficient.  The corrected raw-source normalization is therefore
+
+```
+forcing_plus
+ = 2 D (L^2-i a R cos(theta))^4 S0/R^7.
+```
+
+`tools/symbolic/verify_plus2_source_normalization.py` derives the tetrad
+coefficient, proves that the old formula leaves `f`, and rejects that formula
+as a negative regression.  This correction changes only the standalone,
+still-disabled spin `+2` source path; the production spin `-2` equation is
+unchanged.
 
 In the repository's first-order radial reduction the homogeneous equation is
 

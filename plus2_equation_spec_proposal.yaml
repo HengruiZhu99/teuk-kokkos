@@ -103,15 +103,19 @@ compact_raw_source:
     J12: "R*C12+3*Sig1*H2"
     K12: "R*B12-D12-3*Kap1*H2"
     Q12: "Er12-R*Et12"
-  outer: "S0/R^6=thorn_5(J)-(4*rho0+rhobar0)*J+R*eth_6(K)+R^2*(-4*tau0+pibar0)*K-3*R*psi20*Q"
-  scri_result: "S0=O(R^6); coordinate forcing is O(R^3)"
+  raw_outer_diagnostic: "S0/R^6=thorn_5(J)-(4*rho0+rhobar0)*J+R*eth_6(K)+R^2*(-4*tau0+pibar0)*K-3*R*psi20*Q"
+  evolved_outer: "S0/R^7=A*J_T+b*J_R+C_J*J+eth_6(K)+R*(-4*tau0+pibar0)*K-3*psi20*Q"
+  radial_cancellation: "C_J=(5*b-4*rho0-rhobar0)/R+i*a*m/D-3*epsilon0+epsilonbar0; (5*b-4*rho0-rhobar0)/R=i*a*y*E*(3*L^2+5*i*a*R*y)/(2*D^2)"
+  source_normalization_version: 2
+  source_normalization_name: plus2_s0_over_r7_complete_field_factor_v2
+  scri_result: "S0=O(R^7); evolved coordinate forcing is finite and generically nonzero"
   horizon_result: finite_for_RH_positive
   oracle: tools/symbolic/verify_plus2_compact_source.py
 
 stage_local_bianchi_closure:
   status: standalone_route_a_implemented_not_runtime_wired
   authority: "arXiv:2008.11770 bianchi-5, bianchi-6, delta-1; vacuum ORG with gamma=0"
-  delta5_Z0: "eth_4 Z1-R*mu0*Z0-4*R*tau0*Z1+3*Sig*H"
+  delta5_Z0: "eth_4 Z1-R*mu0*Z0-4*R*tau0*Z1+3*Sig*psi20"
   delta4_Z1: "eth_3 H+R*(-2*mu0*Z1-3*tau0*H-Csharp*Delta_3 psi20+(1/2)*Bsharp*ethprime_3 psi20-3*Ta*psi20)"
   inversion: "X_T=[F-(R/L^2)*(R*X_R+n*X)]/(2+4*M*R/L^2)"
   time_order: "h[0..2] with Bianchi closure; naive local metric forcing value would require h[0..4]"
@@ -129,9 +133,10 @@ homogeneous_operator:
   angular_eigenvalue: "-(ell-2)*(ell+3)"
   reuse_generic_kernel: mathematically_derived_but_not_numerically_qualified
   coordinate_source_normalization:
-    general: "forcing_s=(2*Sigma_BL/R)*S_s"
-    both_signs: "2*(L^4+a^2*R^2*cos(theta)^2)*S_s/R^3"
-    scri_gate: "passed conditionally: regular Z0/Z1 imply S0=O(R^6) and finite forcing"
+    raw_np_multiplier: "2*Sigma_BL/R"
+    residual_field_factor: "f=R^4/(L^2-i*a*R*cos(theta))^4"
+    evolved_plus2: "2*(L^4+a^2*R^2*cos(theta)^2)*(L^2-i*a*R*cos(theta))^4*(S0/R^7)"
+    scri_gate: "passed conditionally: regular Z0/Z1 and exact radial cancellation imply S0=O(R^7) and finite forcing"
 
 production_gate:
   enabled: false

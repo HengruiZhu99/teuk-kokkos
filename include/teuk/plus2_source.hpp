@@ -3,6 +3,7 @@
 #include <Kokkos_Core.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <stdexcept>
 
 #include "teuk/background.hpp"
@@ -11,6 +12,9 @@
 namespace teuk {
 
 inline constexpr std::size_t plus2_compact_source_ledger_term_count = 51;
+inline constexpr std::uint32_t plus2_source_normalization_version = 2;
+inline constexpr const char* plus2_source_normalization_name =
+    "plus2_s0_over_r7_complete_field_factor_v2";
 
 // Standalone compact raw fixed-tetrad spin +2 source.  The cancellation-safe
 // constructions of Z0=Psi0/R^5 and Z1=Psi1/R^4 are deliberately outside this
@@ -285,6 +289,24 @@ struct Plus2OuterDerivativesT {
   Scalar eth6_K;
 };
 
+// The evolved spin +2 equation is normalized after substituting
+//
+//   Psi0 = R^5 Z_plus / (L^2-i a R cos(theta))^4.
+//
+// Its source therefore needs S0/R^7, not S0/R^6.  The first entry below is
+// the cancellation-safe combination
+//
+//   [thorn_5 J-(4 rho0+rhobar0)J]/R,
+//
+// evaluated without either forming a small numerator or dividing by R.
+// Keep this type distinct from Plus2OuterDerivativesT: thorn5_J remains useful
+// as a raw S0/R^6 diagnostic, but it is not a regular evolved forcing input.
+template <class Scalar>
+struct Plus2RegularizedOuterDerivativesT {
+  Scalar thorn5_J_minus_optical_J_over_r;
+  Scalar eth6_K;
+};
+
 template <class Scalar>
 struct Plus2OuterSourceTermsT {
   Scalar s01, s02, s03, s04, s05, s06, s07;
@@ -311,17 +333,103 @@ plus2_compact_outer_source_over_r6(
 }
 
 template <class Scalar>
-KOKKOS_INLINE_FUNCTION Scalar plus2_coordinate_forcing_from_source_over_r6(
-    const double radius, const double cos_theta, const double kerr_spin,
-    const double compactification_length, const Scalar& source_over_r6) {
+struct Plus2OuterSourceOverR7TermsT {
+  Scalar radial_J, angular_K, tau_K, pibar_K, psi2_Q;
+  KOKKOS_INLINE_FUNCTION Scalar total() const {
+    return radial_J + angular_K + tau_K + pibar_K + psi2_Q;
+  }
+};
+
+// Exact cancellation-safe radial part of S0/R^7.  With
+//
+//   b = -(L^2-2MR+a^2R^2/L^2)/(2D),
+//   D = L^4+a^2R^2 cos(theta)^2,
+//
+// direct substitution of rho0 proves
+//
+//   (5b-4rho0-rhobar0)/R
+//    = i a cos(theta) E (3L^2+5 i a R cos(theta))/(2D^2),
+//   E = L^2-2MR+a^2R^2/L^2.
+//
+// This expression is finite at scri and is valid there without a special
+// endpoint branch or a guessed limit.
+template <class Scalar>
+KOKKOS_INLINE_FUNCTION Scalar
+plus2_regularized_thorn5_j_minus_optical_over_r(
+    const Scalar& summed_J, const Scalar& dt_summed_J,
+    const Scalar& dr_summed_J, const int azimuthal_mode,
+    const double radius, const double cos_theta,
+    const KerrParameters& parameters,
+    const KerrBackgroundPoint& background) {
+  const Complex imaginary_unit(0.0, 1.0);
+  const double length2 = parameters.compactification_length *
+                         parameters.compactification_length;
+  const double length4 = length2 * length2;
   const double radius2 = radius * radius;
-  const double radius3 = radius2 * radius;
+  const double denominator =
+      length4 + parameters.spin * parameters.spin * radius2 * cos_theta *
+                    cos_theta;
+  const double radial_polynomial =
+      length2 - 2.0 * parameters.mass * radius +
+      parameters.spin * parameters.spin * radius2 / length2;
+  const double time_coefficient =
+      2.0 * parameters.mass *
+      (2.0 * parameters.mass -
+       parameters.spin * parameters.spin * radius / length2) /
+      denominator;
+  const double radial_coefficient =
+      -0.5 * radial_polynomial / denominator;
+  const Complex optical_cancellation =
+      imaginary_unit * parameters.spin * cos_theta * radial_polynomial *
+      (3.0 * length2 + 5.0 * imaginary_unit * parameters.spin * radius *
+                               cos_theta) /
+      (2.0 * denominator * denominator);
+  const Complex algebraic_coefficient =
+      optical_cancellation +
+      imaginary_unit * parameters.spin *
+          static_cast<double>(azimuthal_mode) / denominator -
+      3.0 * background.epsilon0 + Kokkos::conj(background.epsilon0);
+  return time_coefficient * dt_summed_J +
+         radial_coefficient * dr_summed_J +
+         algebraic_coefficient * summed_J;
+}
+
+template <class Scalar>
+KOKKOS_INLINE_FUNCTION Plus2OuterSourceOverR7TermsT<Scalar>
+plus2_compact_outer_source_over_r7(
+    const double radius, const KerrBackgroundPoint& background,
+    const Scalar& summed_K, const Scalar& summed_Q,
+    const Plus2RegularizedOuterDerivativesT<Scalar>& derivatives) {
+  return {derivatives.thorn5_J_minus_optical_J_over_r,
+          derivatives.eth6_K,
+          -4.0 * radius * background.tau0 * summed_K,
+          radius * Kokkos::conj(background.pi0) * summed_K,
+          -3.0 * background.psi20 * summed_Q};
+}
+
+// Correct common-equation forcing after dividing the raw NP equation by the
+// complete spin +2 field factor f=R^4/(L^2-i a R cos(theta))^4.  This consumes
+// S0/R^7 and remains finite (generically nonzero) at scri.
+template <class Scalar>
+KOKKOS_INLINE_FUNCTION Scalar plus2_coordinate_forcing_from_source_over_r7(
+    const double radius, const double cos_theta, const double kerr_spin,
+    const double compactification_length, const Scalar& source_over_r7) {
+  const double radius2 = radius * radius;
   const double length2 =
       compactification_length * compactification_length;
   const double length4 = length2 * length2;
-  return 2.0 *
-         (length4 + kerr_spin * kerr_spin * radius2 * cos_theta * cos_theta) *
-         radius3 * source_over_r6;
+  const double denominator =
+      length4 + kerr_spin * kerr_spin * radius2 * cos_theta * cos_theta;
+  // Exact analytically derived endpoint: D=L^4 and d_minus^4=L^8, hence
+  // 2 D d_minus^4=2 L^12.  Evaluating that power directly avoids accumulating
+  // a different multiplication rounding history at the removable endpoint.
+  if (radius == 0.0) {
+    return (2.0 * Kokkos::pow(compactification_length, 12.0)) *
+           source_over_r7;
+  }
+  const Complex d_minus(length2, -kerr_spin * radius * cos_theta);
+  const Complex d_minus2 = d_minus * d_minus;
+  return 2.0 * denominator * d_minus2 * d_minus2 * source_over_r7;
 }
 
 // Setup-time provenance for explicit X_m^sharp=conj(X_-m) lookup.  The source

@@ -82,7 +82,8 @@ enum class Plus2SpatialAggregate : std::size_t {
 enum class Plus2SpatialOuterDerivative : std::size_t {
   Thorn5J = 0,
   Eth6K = 1,
-  Count = 2,
+  RegularizedThorn5JMinusOpticalJOverR = 2,
+  Count = 3,
 };
 
 using Plus2SpatialRank4View =
@@ -129,10 +130,14 @@ class Plus2SourceSpatialWorkspace {
             label + "_summed_tangent", registry.size(),
             static_cast<std::size_t>(Plus2SpatialAggregate::Count),
             radial_points, theta_points),
-        source_value_(label + "_source_value", registry.size(), radial_points,
-                      theta_points),
-        source_tangent_(label + "_source_tangent", registry.size(),
-                        radial_points, theta_points),
+        source_over_r6_value_(label + "_source_over_r6_value",
+                              registry.size(), radial_points, theta_points),
+        source_over_r6_tangent_(label + "_source_over_r6_tangent",
+                                registry.size(), radial_points, theta_points),
+        source_over_r7_value_(label + "_source_over_r7_value",
+                              registry.size(), radial_points, theta_points),
+        source_over_r7_tangent_(label + "_source_over_r7_tangent",
+                                registry.size(), radial_points, theta_points),
         forcing_value_(label + "_forcing_value", registry.size(),
                        radial_points, theta_points),
         forcing_tangent_(label + "_forcing_tangent", registry.size(),
@@ -166,8 +171,10 @@ class Plus2SourceSpatialWorkspace {
     Kokkos::deep_copy(pair_family_tangent_, Complex{});
     Kokkos::deep_copy(summed_value_, Complex{});
     Kokkos::deep_copy(summed_tangent_, Complex{});
-    Kokkos::deep_copy(source_value_, Complex{});
-    Kokkos::deep_copy(source_tangent_, Complex{});
+    Kokkos::deep_copy(source_over_r6_value_, Complex{});
+    Kokkos::deep_copy(source_over_r6_tangent_, Complex{});
+    Kokkos::deep_copy(source_over_r7_value_, Complex{});
+    Kokkos::deep_copy(source_over_r7_tangent_, Complex{});
     Kokkos::deep_copy(forcing_value_, Complex{});
     Kokkos::deep_copy(forcing_tangent_, Complex{});
   }
@@ -202,11 +209,17 @@ class Plus2SourceSpatialWorkspace {
   [[nodiscard]] Plus2SpatialRank4View summed_tangent() const {
     return summed_tangent_;
   }
-  [[nodiscard]] Plus2SpatialRank3View source_value() const {
-    return source_value_;
+  [[nodiscard]] Plus2SpatialRank3View source_over_r6_value() const {
+    return source_over_r6_value_;
   }
-  [[nodiscard]] Plus2SpatialRank3View source_tangent() const {
-    return source_tangent_;
+  [[nodiscard]] Plus2SpatialRank3View source_over_r6_tangent() const {
+    return source_over_r6_tangent_;
+  }
+  [[nodiscard]] Plus2SpatialRank3View source_over_r7_value() const {
+    return source_over_r7_value_;
+  }
+  [[nodiscard]] Plus2SpatialRank3View source_over_r7_tangent() const {
+    return source_over_r7_tangent_;
   }
   [[nodiscard]] Plus2SpatialRank3View forcing_value() const {
     return forcing_value_;
@@ -226,8 +239,10 @@ class Plus2SourceSpatialWorkspace {
   Plus2SpatialRank4View pair_family_tangent_;
   Plus2SpatialRank4View summed_value_;
   Plus2SpatialRank4View summed_tangent_;
-  Plus2SpatialRank3View source_value_;
-  Plus2SpatialRank3View source_tangent_;
+  Plus2SpatialRank3View source_over_r6_value_;
+  Plus2SpatialRank3View source_over_r6_tangent_;
+  Plus2SpatialRank3View source_over_r7_value_;
+  Plus2SpatialRank3View source_over_r7_tangent_;
   Plus2SpatialRank3View forcing_value_;
   Plus2SpatialRank3View forcing_tangent_;
 };
@@ -422,8 +437,10 @@ struct Plus2SpatialOuterFunctor {
   const Complex* outer_derivative_value;
   const Complex* outer_derivative_tangent;
   const std::size_t* target_indices;
-  Complex* source_value;
-  Complex* source_tangent;
+  Complex* source_over_r6_value;
+  Complex* source_over_r6_tangent;
+  Complex* source_over_r7_value;
+  Complex* source_over_r7_tangent;
   Complex* forcing_value;
   Complex* forcing_tangent;
   double activation;
@@ -459,22 +476,34 @@ struct Plus2SpatialOuterFunctor {
     };
     const KerrBackgroundPoint background = kerr_background_point(
         parameters, radius, cos_theta[theta], sin_theta[theta]);
-    const auto raw = plus2_compact_outer_source_over_r6(
+    const auto raw_over_r6 = plus2_compact_outer_source_over_r6(
         radius, background, aggregate(Plus2SpatialAggregate::J),
         aggregate(Plus2SpatialAggregate::K),
         aggregate(Plus2SpatialAggregate::Q),
         Plus2OuterDerivativesT<Jet1<Complex>>{
             derivative(Plus2SpatialOuterDerivative::Thorn5J),
             derivative(Plus2SpatialOuterDerivative::Eth6K)});
-    const Jet1<Complex> activated = activation * raw.total();
+    const auto raw_over_r7 = plus2_compact_outer_source_over_r7(
+        radius, background, aggregate(Plus2SpatialAggregate::K),
+        aggregate(Plus2SpatialAggregate::Q),
+        Plus2RegularizedOuterDerivativesT<Jet1<Complex>>{
+            derivative(Plus2SpatialOuterDerivative::
+                           RegularizedThorn5JMinusOpticalJOverR),
+            derivative(Plus2SpatialOuterDerivative::Eth6K)});
+    const Jet1<Complex> activated_over_r6 =
+        activation * raw_over_r6.total();
+    const Jet1<Complex> activated_over_r7 =
+        activation * raw_over_r7.total();
     const Jet1<Complex> forcing =
-        plus2_coordinate_forcing_from_source_over_r6(
+        plus2_coordinate_forcing_from_source_over_r7(
             radius, cos_theta[theta], parameters.spin,
-            parameters.compactification_length, activated);
+            parameters.compactification_length, activated_over_r7);
     const std::size_t index = plus2_flat_rank3(
         mode, radial, theta, radial_points, theta_points);
-    source_value[index] = activated.value;
-    source_tangent[index] = activated.dt;
+    source_over_r6_value[index] = activated_over_r6.value;
+    source_over_r6_tangent[index] = activated_over_r6.dt;
+    source_over_r7_value[index] = activated_over_r7.value;
+    source_over_r7_tangent[index] = activated_over_r7.dt;
     forcing_value[index] = forcing.value;
     forcing_tangent[index] = forcing.dt;
   }
@@ -592,8 +621,10 @@ void evaluate_plus2_spatial_outer_source(
   }
 
   const auto target_indices = workspace.target_indices();
-  const auto source_value = workspace.source_value();
-  const auto source_tangent = workspace.source_tangent();
+  const auto source_over_r6_value = workspace.source_over_r6_value();
+  const auto source_over_r6_tangent = workspace.source_over_r6_tangent();
+  const auto source_over_r7_value = workspace.source_over_r7_value();
+  const auto source_over_r7_tangent = workspace.source_over_r7_tangent();
   const auto forcing_value = workspace.forcing_value();
   const auto forcing_tangent = workspace.forcing_tangent();
   const std::size_t target_points =
@@ -608,8 +639,10 @@ void evaluate_plus2_spatial_outer_source(
       outer_derivative_value.data(),
       outer_derivative_tangent.data(),
       target_indices.data(),
-      source_value.data(),
-      source_tangent.data(),
+      source_over_r6_value.data(),
+      source_over_r6_tangent.data(),
+      source_over_r7_value.data(),
+      source_over_r7_tangent.data(),
       forcing_value.data(),
       forcing_tangent.data(),
       source_activation_multiplier,

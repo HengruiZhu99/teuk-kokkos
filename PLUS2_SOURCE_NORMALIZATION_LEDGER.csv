@@ -1,0 +1,6 @@
+term_id,family,raw_S0_over_R6,regular_S0_over_R7,notes
+rj01,radial_J,"[thorn_5 J-(4 rho0+rhobar0)J]/R","A J_T+b J_R+C_J J","evaluated directly; never divide a computed numerator by R"
+ak01,angular_K,"eth_6 K","eth_6 K","the raw term is R eth_6 K"
+ak02,angular_K,"R(-4 tau0+pibar0)K","R(-4 tau0+pibar0)K","the raw term is R^2(-4 tau0+pibar0)K"
+q01,curvature_Q,"-3 psi20 Q","-3 psi20 Q","the raw term is -3 R psi20 Q"
+forcing,evolved_Z_plus,"historical 2 D R^3(S0/R6)","2 D (L^2-i a R cos(theta))^4(S0/R7)","normalization version 2; complete W_plus field factor removed"

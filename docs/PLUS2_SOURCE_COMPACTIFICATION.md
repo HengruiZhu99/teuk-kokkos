@@ -231,6 +231,16 @@ Their physical weights and powers are
 
 ## 4. Regular outer source and endpoint proof
 
+### 2026-08-12 normalization erratum
+
+The 51-row ledger below is still the exact raw fixed-tetrad source and its
+`S0/R^6` representation remains a useful diagnostic.  An earlier version of
+this document incorrectly used that representation directly in the evolved
+`Z_plus` equation and consequently claimed an `O(R^3)` forcing.  The complete
+field-factor derivation in `PLUS2_FORMALISM_GATE.md` proves that the evolved
+forcing instead consumes a distinct, cancellation-safe `S0/R^7` quantity.
+No historical ledger row has been silently reinterpreted.
+
 Using `Psi2_background=R^3 psi20`, the exact compact source is
 
 ```
@@ -239,23 +249,51 @@ S0/R^6 = thorn_5 J - (4 rho0+rhobar0) J
         - 3 R psi20 Q.
 ```
 
-Every coefficient on the right is finite at `R=0` and at the future horizon.
-Therefore
+The displayed terms are individually finite, but their radial `J` combination
+has one additional exact cancellation.  If
 
 ```
-S0 = O(R^6),
+b = -(L^2-2MR+a^2R^2/L^2)/(2D),
 ```
 
-which is stronger than the required `S0=O(R^3)` condition.  The coordinate
-forcing uses the same normalization for both spins,
+direct substitution of `rho0` proves
 
 ```
-forcing_plus = (2 Sigma_BL/R) S0
-             = 2 (L^4+a^2 R^2 cos(theta)^2) R^3 (S0/R^6).
+(5b-4rho0-rhobar0)/R
+ = i a cos(theta) (L^2-2MR+a^2R^2/L^2)
+   (3L^2+5 i a R cos(theta))/(2D^2).
 ```
 
-It is finite and in fact vanishes as `O(R^3)` at scri.  At `R=R_H>0`, the
-normalization is finite.  The denominators of every background coefficient
+Thus the evolved representation is evaluated directly as
+
+```
+S0/R^7
+ = A J_T + b J_R + C_J J
+   + eth_6 K + R(-4tau0+pibar0)K - 3psi20 Q,
+
+A = 2M(2M-a^2R/L^2)/D,
+C_J = (5b-4rho0-rhobar0)/R
+      + i a m/D - 3epsilon0+epsilonbar0.
+```
+
+The code never obtains this expression by dividing a computed `S0/R^6` by
+`R`.  The raw and evolved ledgers are separately named in
+`PLUS2_SOURCE_TERM_LEDGER.csv` and
+`PLUS2_SOURCE_NORMALIZATION_LEDGER.csv`.  Therefore
+
+```
+S0 = O(R^7),
+```
+
+and the corrected coordinate forcing is
+
+```
+forcing_plus
+ = 2 D (L^2-i a R cos(theta))^4 (S0/R^7).
+```
+
+It is finite and generically nonzero at scri.  At `R=R_H>0`, the normalization
+is finite.  The denominators of every background coefficient
 and weighted derivative are products of
 
 ```
@@ -305,11 +343,12 @@ copy a production expression.
 | raw ungauge-fixed source | Campanelli--Lousto, arXiv:gr-qc/9811019 Eq. (9); Spiers et al. arXiv:2305.19332 supplemental `TeukolskySource0` | exact prime/sign check in `verify_plus2_formalism_gate.py` |
 | GHP derivatives and rotated tetrad | Ripley et al. arXiv:2010.00162, Eqs. `edth_def`, `tetrad_IEF_HC`, `NP_IEF_HC` | coordinate ordinary-NP route in the compact oracle |
 | ORG derivative and connection perturbations | Ripley et al. arXiv:2010.00162, Eqs. `lin_ops`, `pert_Rici_rot` | exact connection reductions and four Kerr evaluations |
-| common coordinate normalization | Ripley et al. arXiv:2010.00162 source lines 1397--1404 (`2 Sigma_BL/R` for the NP equation and its spin `+2` analogue) | symbolic identity `(2 Sigma_BL/R)S=2(L^4+a^2R^2y^2)S/R^3` |
+| complete coordinate normalization | Ripley et al. arXiv:2010.00162 explicit tetrad and common Eq. (22), with the full `W_plus` substitution re-derived rather than inferred from prose | `verify_plus2_source_normalization.py`: raw `A_TT=R^2C_T/(2D)`, old multiplier leaves `C_T f`, corrected multiplier gives `C_T` |
 | `Psi0` Ricci construction | Campanelli--Lousto exact Weyl formula plus Appendix-A Ricci identity of arXiv:2008.11770 | explicit inconsistency audit of the latter paper's displayed `Psi_0-1` line |
 | source endpoint order | the preceding primary formulas plus repository rescalings | term-ledger power audit and exact endpoint limits |
 
-The compact quadratic-source subgate is passed.  The proposal as a whole may
+The raw compact quadratic-source and corrected normalization subgates are
+passed standalone.  The proposal as a whole may
 be promoted to production authority only after the linear `Z0/Z1` gate
 independently demonstrates its peeling cancellations; common-stage runtime
 integration, GPU execution, and convergence qualification are subsequent
@@ -329,8 +368,9 @@ negative-mode indices required by sharp.
 every named term with an independent `std::complex` host transcription at 16
 deterministic Kerr/random-field points, checks family closure, signed ordered
 pairs, sharp lookup, common-amplitude quadratic scaling, every Jet directional
-derivative, allocation freedom, regular coordinate normalization, and Kokkos
-device parity.  This module deliberately remains absent from
+derivative, allocation freedom, separate raw `S0/R^6` and evolved `S0/R^7`
+diagnostics, complete coordinate normalization, and Kokkos device parity.
+This module deliberately remains absent from
 `SpatialPipeline`; its existence does not enable a sourced companion run.
 
 The narrower forcing-value path in

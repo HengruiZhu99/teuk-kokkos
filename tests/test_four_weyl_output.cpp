@@ -135,6 +135,8 @@ TEST_CASE("four-Weyl metadata has exact roundtrip and physical warnings") {
   CHECK(serialized.find("metric_curvature") == std::string::npos);
   CHECK(serialized.find("both") != std::string::npos);
   CHECK(serialized.find("d10-5") != std::string::npos);
+  CHECK(serialized.find(teuk::plus2_source_normalization_name) !=
+        std::string::npos);
 
   std::istringstream input(serialized);
   const auto actual = teuk::read_four_weyl_metadata(input);

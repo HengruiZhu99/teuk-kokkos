@@ -20,12 +20,13 @@
 #include <vector>
 
 #include "teuk/plus2_field.hpp"
+#include "teuk/plus2_source.hpp"
 #include "teuk/radial_discretization.hpp"
 #include "teuk/types.hpp"
 
 namespace teuk {
 
-inline constexpr std::uint32_t four_weyl_output_schema_version = 2;
+inline constexpr std::uint32_t four_weyl_output_schema_version = 3;
 inline constexpr const char* four_weyl_output_schema =
     "teuk.four-weyl-field-output";
 inline constexpr const char* four_weyl_gauge_id =
@@ -202,6 +203,9 @@ struct FourWeylOutputMetadata {
   FourWeylLinearMethod linear_method = FourWeylLinearMethod::MetricCurvature;
   FourWeylSourceMethod source_method =
       FourWeylSourceMethod::RawOrgSourcedCompanion;
+  std::uint32_t source_normalization_version =
+      plus2_source_normalization_version;
+  std::string source_normalization_name = plus2_source_normalization_name;
   FourWeylInitialPolicy initial_policy = FourWeylInitialPolicy::Zero;
   int ell_max_first = 0;
   int ell_max_second = 0;
@@ -264,6 +268,12 @@ inline void validate_metadata(const FourWeylOutputMetadata& metadata) {
   require_string(metadata.tetrad_id, "tetrad identifier");
   require_string(metadata.perturbative_convention,
                  "perturbative convention");
+  if (metadata.source_normalization_version !=
+          plus2_source_normalization_version ||
+      metadata.source_normalization_name != plus2_source_normalization_name) {
+    throw std::invalid_argument(
+        "invalid four-Weyl spin plus2 source normalization metadata");
+  }
   require_registry(metadata.parent_modes, metadata.ell_max_first, "parent");
   require_registry(metadata.target_modes, metadata.ell_max_second, "target");
   (void)radial_discretization_name(metadata.radial_discretization);
@@ -735,6 +745,9 @@ inline void write_four_weyl_metadata(
        std::string(four_weyl_linear_method_name(metadata.linear_method)));
   line("source_method",
        std::string(four_weyl_source_method_name(metadata.source_method)));
+  output << "source_normalization_version="
+         << metadata.source_normalization_version << '\n';
+  line("source_normalization_name", metadata.source_normalization_name);
   line("initial_policy",
        std::string(four_weyl_initial_policy_name(metadata.initial_policy)));
   output << "ell_max_first=" << metadata.ell_max_first << '\n';
@@ -795,6 +808,12 @@ inline FourWeylOutputMetadata read_four_weyl_metadata(std::istream& input) {
       read_value("linear_method", true));
   result.source_method = parse_four_weyl_source_method(
       read_value("source_method", true));
+  result.source_normalization_version = static_cast<std::uint32_t>(
+      four_weyl_detail::parse_uint64(
+          read_value("source_normalization_version", false),
+          "source normalization version"));
+  result.source_normalization_name =
+      read_value("source_normalization_name", true);
   result.initial_policy = parse_four_weyl_initial_policy(
       read_value("initial_policy", true));
   result.ell_max_first = four_weyl_detail::parse_int(

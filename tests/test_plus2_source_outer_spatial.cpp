@@ -237,6 +237,51 @@ double endpoint_thorn_error(const std::size_t radial_count) {
   return error;
 }
 
+double endpoint_regularized_thorn_error(const std::size_t radial_count) {
+  OuterFixture fixture(radial_count);
+  fixture.evaluate();
+  fixture.execution.fence("finish regularized outer endpoint fixture");
+  const auto output = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, fixture.derivatives);
+  const auto hcos = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{},
+                                                        fixture.cos_theta);
+  const auto hsin = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{},
+                                                        fixture.sin_theta);
+  double error = 0.0;
+  for (const int m : fixture.registry.targets()) {
+    const std::size_t mode = fixture.registry.index(m);
+    const int ell = std::max(2, std::abs(m));
+    for (std::size_t radial = 0; radial < radial_count; ++radial) {
+      const double radius = fixture.grid.coordinate(radial);
+      for (int node = 0; node < outer_theta_count; ++node) {
+        const auto i = static_cast<std::size_t>(node);
+        const double harmonic = teuk::angular::spin_weighted_harmonic_theta(
+            ell, m, 2, std::acos(hcos(i)));
+        const C amplitude = modal_amplitude(m);
+        const C value = amplitude * radial_profile(radius) * harmonic;
+        const C tangent = 0.21 * value;
+        const C radial_derivative =
+            amplitude * radial_profile_derivative(radius) * harmonic;
+        const auto background = teuk::kerr_background_point(
+            fixture.parameters, radius, hcos(i), hsin(i));
+        const C exact =
+            teuk::plus2_regularized_thorn5_j_minus_optical_over_r(
+                value, tangent, radial_derivative, m, radius, hcos(i),
+                fixture.parameters, background);
+        error = std::max(
+            error,
+            Kokkos::abs(
+                output(mode,
+                       o(teuk::Plus2SpatialOuterDerivative::
+                             RegularizedThorn5JMinusOpticalJOverR),
+                       radial, i) -
+                exact));
+      }
+    }
+  }
+  return error;
+}
+
 }  // namespace
 
 TEST_CASE("plus2 outer producer projects signed target bands and applies Kerr GHP operators") {
@@ -265,14 +310,20 @@ TEST_CASE("plus2 outer producer projects signed target bands and applies Kerr GH
         for (std::size_t field = 0; field < 3; ++field) {
           CHECK(projected_stamps(mode, field, radial, i) == outer_generation);
         }
-        for (std::size_t field = 0; field < 2; ++field) {
+        for (std::size_t field = 0;
+             field < static_cast<std::size_t>(
+                         teuk::Plus2SpatialOuterDerivative::Count);
+             ++field) {
           CHECK(derivative_stamps(mode, field, radial, i) == outer_generation);
         }
         if (!fixture.registry.is_target(m)) {
           for (std::size_t field = 0; field < 3; ++field) {
             CHECK_COMPLEX_NEAR(projected(mode, field, radial, i), C{}, 2e-14);
           }
-          for (std::size_t field = 0; field < 2; ++field) {
+          for (std::size_t field = 0;
+               field < static_cast<std::size_t>(
+                           teuk::Plus2SpatialOuterDerivative::Count);
+               ++field) {
             CHECK_COMPLEX_NEAR(derivatives(mode, field, radial, i), C{},
                                2e-13);
           }
@@ -318,6 +369,26 @@ TEST_CASE("plus2 outer producer projects signed target bands and applies Kerr GH
             derivatives(mode, o(teuk::Plus2SpatialOuterDerivative::Eth6K),
                         radial, i),
             expected_eth, 2e-12);
+        const C regularized = derivatives(
+            mode,
+            o(teuk::Plus2SpatialOuterDerivative::
+                  RegularizedThorn5JMinusOpticalJOverR),
+            radial, i);
+        CHECK(std::isfinite(regularized.real()));
+        CHECK(std::isfinite(regularized.imag()));
+        if (radius > 0.0) {
+          const C raw = derivatives(
+              mode, o(teuk::Plus2SpatialOuterDerivative::Thorn5J), radial,
+              i);
+          const auto background = teuk::kerr_background_point(
+              fixture.parameters, radius, hcos(i), hsin(i));
+          CHECK_COMPLEX_NEAR(
+              radius * regularized,
+              raw - (4.0 * background.rho0 +
+                     Kokkos::conj(background.rho0)) *
+                        j_value,
+              4e-12);
+        }
       }
     }
   }
@@ -333,6 +404,16 @@ TEST_CASE("plus2 outer D10-5 thorn converges at both radial endpoints") {
   CHECK(coarse / medium > 20.0);
   CHECK(medium / fine > 20.0);
   CHECK(fine < 2.0e-9);
+  const double regular_coarse = endpoint_regularized_thorn_error(25);
+  const double regular_medium = endpoint_regularized_thorn_error(49);
+  const double regular_fine = endpoint_regularized_thorn_error(97);
+  std::cout << "plus2 outer regularized D105 endpoint errors "
+            << regular_coarse << " " << regular_medium << " "
+            << regular_fine << " ratios " << regular_coarse / regular_medium
+            << " " << regular_medium / regular_fine << '\n';
+  CHECK(regular_coarse / regular_medium > 20.0);
+  CHECK(regular_medium / regular_fine > 20.0);
+  CHECK(regular_fine < 2.0e-9);
 }
 
 TEST_CASE("plus2 outer producer is allocation free and fails closed") {

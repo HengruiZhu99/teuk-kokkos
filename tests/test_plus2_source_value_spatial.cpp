@@ -391,7 +391,9 @@ TEST_CASE("plus2 production outer source is value-only and applies activation on
   teuk::Plus2SpatialAggregateView sums("plus2_value_outer_sums",
                                         registry.size(), 3, grid.size(), 2);
   teuk::Plus2SpatialOuterDerivativeView derivatives(
-      "plus2_value_outer_derivatives", registry.size(), 2, grid.size(), 2);
+      "plus2_value_outer_derivatives", registry.size(),
+      static_cast<std::size_t>(teuk::Plus2SpatialOuterDerivative::Count),
+      grid.size(), 2);
   Host4 hs(Kokkos::create_mirror_view(sums));
   Host4 hd(Kokkos::create_mirror_view(derivatives));
   for (std::size_t mode = 0; mode < registry.size(); ++mode) {
@@ -402,7 +404,10 @@ TEST_CASE("plus2 production outer source is value-only and applies activation on
                              0.02 * theta + 0.04 * component;
           hs(mode, component, radial, theta) = C(tag, -0.2 * tag);
         }
-        for (std::size_t component = 0; component < 2; ++component) {
+        for (std::size_t component = 0;
+             component < static_cast<std::size_t>(
+                             teuk::Plus2SpatialOuterDerivative::Count);
+             ++component) {
           const double tag = -0.1 + 0.07 * mode - 0.02 * radial +
                              0.03 * theta + 0.05 * component;
           hd(mode, component, radial, theta) = C(tag, 0.3 * tag);
@@ -420,7 +425,9 @@ TEST_CASE("plus2 production outer source is value-only and applies activation on
       derivatives, activation, workspace);
   execution.fence("plus2 production outer value oracle");
   const auto source = Kokkos::create_mirror_view_and_copy(
-      Kokkos::HostSpace{}, workspace.source_value());
+      Kokkos::HostSpace{}, workspace.source_over_r6_value());
+  const auto source_over_r7 = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, workspace.source_over_r7_value());
   const auto forcing = Kokkos::create_mirror_view_and_copy(
       Kokkos::HostSpace{}, workspace.forcing_value());
   const std::size_t mode = registry.index(0), radial = 4, theta = 1;
@@ -441,11 +448,27 @@ TEST_CASE("plus2 production outer source is value-only and applies activation on
                  radial, theta)})
           .total();
   CHECK_COMPLEX_NEAR(source(mode, radial, theta), expected_source, 3.0e-12);
+  const C expected_source_over_r7 =
+      activation *
+      teuk::plus2_compact_outer_source_over_r7(
+          radius, background,
+          hs(mode, agg(teuk::Plus2SpatialAggregate::K), radial, theta),
+          hs(mode, agg(teuk::Plus2SpatialAggregate::Q), radial, theta),
+          teuk::Plus2RegularizedOuterDerivativesT<C>{
+              hd(mode,
+                 outer(teuk::Plus2SpatialOuterDerivative::
+                           RegularizedThorn5JMinusOpticalJOverR),
+                 radial, theta),
+              hd(mode, outer(teuk::Plus2SpatialOuterDerivative::Eth6K),
+                 radial, theta)})
+          .total();
+  CHECK_COMPLEX_NEAR(source_over_r7(mode, radial, theta),
+                     expected_source_over_r7, 3.0e-12);
   CHECK_COMPLEX_NEAR(
       forcing(mode, radial, theta),
-      teuk::plus2_coordinate_forcing_from_source_over_r6(
+      teuk::plus2_coordinate_forcing_from_source_over_r7(
           radius, angles.hc(theta), parameters.spin,
-          parameters.compactification_length, expected_source),
+          parameters.compactification_length, expected_source_over_r7),
       4.0e-12);
 }
 
@@ -503,7 +526,9 @@ TEST_CASE("plus2 production value source validates shape alias and allocates not
       input.q, workspace);
   execution.fence("plus2 production value warmup");
   teuk::Plus2SpatialOuterDerivativeView outer_derivatives(
-      "plus2_value_validation_outer", registry.size(), 2, grid.size(), 2);
+      "plus2_value_validation_outer", registry.size(),
+      static_cast<std::size_t>(teuk::Plus2SpatialOuterDerivative::Count),
+      grid.size(), 2);
   Kokkos::deep_copy(outer_derivatives, C(0.1, -0.2));
   allocations = 0;
   deep_copies = 0;

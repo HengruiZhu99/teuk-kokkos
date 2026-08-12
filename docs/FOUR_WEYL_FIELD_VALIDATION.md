@@ -54,6 +54,7 @@ The versioned metadata records:
 - the no-factorial perturbative convention;
 - both exact radial scaling formulas;
 - typed linear-`Psi0`, quadratic-source, and companion-initial-data methods;
+- the exact spin+2 complete-field source-normalization version and name;
 - independent first/second `ell` bandlimits and sharp-closed parent/target
   signed-mode registries;
 - output cadence and the exact sharp rule

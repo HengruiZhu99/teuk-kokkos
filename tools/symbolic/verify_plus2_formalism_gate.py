@@ -140,15 +140,20 @@ def main() -> None:
     denom_abs_sq = sp.expand((L**2 - I * a * RH * y) * (L**2 + I * a * RH * y))
     check("W_plus denominator nonzero", denom_abs_sq == L**4 + a**2 * RH**2 * y**2)
 
-    # Ripley substitutes W_s inside O_s[W_s Z_s] and then multiplies the NP
-    # equation by N=2 Sigma/R.  The physical RHS normalization is identical
-    # for both signs; there is no extra division by W_s.
+    # After substituting W_plus=R*f, the common Eq. (22) is obtained only after
+    # dividing out the remaining f=R^4/d_minus^4 field factor.  Multiplication
+    # by 2 Sigma/R alone leaves C_T*f in the TT coefficient and is therefore
+    # not the evolved Z_plus equation.
     S = sp.symbols("S")
+    dminus = L**2 - I * a * R * y
+    f = R**4 / dminus**4
     Sigma_bl = (L**4 + a**2 * R**2 * y**2) / R**2
-    forcing_np = sp.factor((2 * Sigma_bl / R) * S)
-    forcing_expected = 2 * (L**4 + a**2 * R**2 * y**2) * S / R**3
-    check("common coordinate source normalization", sp.simplify(forcing_np - forcing_expected) == 0)
-    check("source normalization independent of W_plus", not forcing_np.has(W))
+    forcing_np = sp.factor((2 * Sigma_bl / (R * f)) * S)
+    forcing_expected = 2 * (L**4 + a**2 * R**2 * y**2) * dminus**4 * S / R**7
+    check("complete plus2 coordinate source normalization", sp.simplify(forcing_np - forcing_expected) == 0)
+    historical = sp.factor((2 * Sigma_bl / R) * S)
+    check("historical source normalization misses inverse f",
+          sp.simplify(historical - forcing_np) != 0)
 
     # Generic Teukolsky angular eigenvalue for s=+2.
     ell = sp.symbols("ell", integer=True, nonnegative=True)

@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "teuk/modes.hpp"
+#include "teuk/plus2_source.hpp"
 #include "teuk/run_parameters.hpp"
 
 namespace teuk {
@@ -402,6 +403,20 @@ inline RunParameters resolve_run_parameters(
            parameters.plus2.output.source_families);
   set_bool("plus2.output.ordered_pairs",
            parameters.plus2.output.ordered_pairs);
+  if (const auto* text = value("plus2.source_normalization.version")) {
+    const int version = config_detail::parse_number<int>(
+        *text, "plus2.source_normalization.version");
+    if (version != static_cast<int>(plus2_source_normalization_version)) {
+      throw std::invalid_argument(
+          "resolved plus2 source-normalization version is incompatible");
+    }
+  }
+  if (const auto* text = value("plus2.source_normalization.name")) {
+    if (*text != plus2_source_normalization_name) {
+      throw std::invalid_argument(
+          "resolved plus2 source-normalization name is incompatible");
+    }
+  }
 
   set_string("output.directory", parameters.output.directory);
   set_int("output.diagnostic_every",
@@ -803,6 +818,10 @@ inline std::string resolved_configuration_text(
          << parameters.plus2.output.source_families << '\n'
          << "plus2.output.ordered_pairs = "
          << parameters.plus2.output.ordered_pairs << '\n'
+         << "plus2.source_normalization.version = "
+         << plus2_source_normalization_version << '\n'
+         << "plus2.source_normalization.name = "
+         << plus2_source_normalization_name << '\n'
          << "output.directory = " << parameters.output.directory << '\n'
          << "output.diagnostic_every = "
          << parameters.output.diagnostic_interval << '\n'

@@ -42,7 +42,10 @@ are also explicit host/device synchronization points outside timesteps.
 ## Checkpoint contract
 
 The independent companion checkpoint schema is
-`teuk.plus2-companion-checkpoint`, version 1. Every payload records:
+`teuk.plus2-companion-checkpoint`, version 3. Versions 1 and 2 can be parsed
+only to produce an explicit incompatibility result; they cannot be restored
+because they do not uniquely identify the physical problem. Every current
+payload records:
 
 - the exact raw fixed-tetrad scaling
   `Psi0_raw_fixed_tetrad=(R^5/(L^2-i*a*R*cos(theta))^4)*Z_plus`, composed
@@ -59,6 +62,10 @@ The independent companion checkpoint schema is
   `LayoutRight(mode,field,radial,theta)` storage order with field order
   `(P,Q,Z)`;
 - accepted time and step;
+- exact `M`, `a`, `L`, every radial and angular coordinate, resolved `dt`,
+  reduction mode, reduction damping, and dissipation;
+- the explicitly versioned complete-field source normalization and the
+  identity of the primary checkpoint from which this passive state was made;
 - the shared accepted-state source-activation latch;
 - an FNV-1a checksum over binary64 real and imaginary components.
 
@@ -73,12 +80,12 @@ therefore rejected. Exact Git matching is intentionally conservative; a
 future migration across commits requires an explicit reviewed conversion, not
 an implicit load.
 
-The companion checkpoint does not currently store the resolved timestep.
-Consequently, the loader can require a finite nonnegative progress time and
-check activation times against it, but it cannot prove a relation such as
-`time == step * dt`. The primary resolved configuration/checkpoint remains the
-authority for that consistency check; the orchestration layer must not infer a
-timestep from the two progress fields.
+The loader now rejects nonfinite provenance before device mutation and checks
+`time == step*dt` within a small binary64 evaluation bound. Replay initialized
+from a checkpoint is latched to the restored accepted time: its first and every
+subsequent continuation call must use that time, then advances the latch by the
+accepted step. This closes the former ambiguity in which a same-shaped
+companion could be resumed at an unrelated caller time.
 
 ## Determinism evidence and present limitation
 
@@ -97,5 +104,7 @@ future production source can limit bitwise replay across different backends;
 same-backend runs should use the exact resolved configuration, build
 provenance, initial primary state, and companion checkpoint metadata.
 
-The serialization additions remain checkpoint format version 1 because this
-standalone format is still unreleased and has no supported external consumer.
+The serialization is version 3. Version 2 introduced radial-scheme identity;
+version 3 intentionally breaks compatibility by adding complete
+physical-problem and source-normalization provenance. No old payload is
+silently reinterpreted.

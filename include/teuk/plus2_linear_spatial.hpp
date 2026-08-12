@@ -22,6 +22,16 @@
 
 namespace teuk {
 
+// VALIDATION-ONLY spatial transcription.  It differentiates the three ORG
+// metric components, evaluates the ordinary-NP Psi0 identity term by term,
+// and regularizes scri only from an independently supplied leading
+// coefficient.  It is not a cancellation-safe regular GHP production
+// provider and must not be used as authority to enable plus2 runtime mode.
+// D42/D84 remain available solely for historical convergence comparisons;
+// nested live-source paths independently require D105.
+inline constexpr const char* plus2_linear_spatial_scientific_status =
+    "validation-only-ordinary-np-v1";
+
 namespace plus2_linear_spatial_detail {
 
 KOKKOS_INLINE_FUNCTION

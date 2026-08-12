@@ -195,7 +195,8 @@ struct WriteBindingOuterFunctor {
       const std::size_t output_index = binding_flat4(
           0, field, radial, theta, outer_count, radial_count, theta_count);
       const std::size_t input_index = binding_flat4(
-          0, field, radial, theta, tangent_count, radial_count, theta_count);
+          0, field < tangent_count ? field : 0, radial, theta, tangent_count,
+          radial_count, theta_count);
       outer[output_index] = tangents[input_index];
       outer_stamps[output_index] = generation;
     }

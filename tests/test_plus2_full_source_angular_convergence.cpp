@@ -562,6 +562,22 @@ DifferenceNorm difference_norm(const AngularRun& trial,
   return result;
 }
 
+template <class Member>
+DifferenceNorm sample_norm(const AngularRun& sample, Member member) {
+  double norm2 = 0.0;
+  DifferenceNorm result;
+  for (const auto& value : sample.modal) {
+    const double magnitude = Kokkos::abs(member(value));
+    norm2 += magnitude * magnitude;
+    result.maximum = std::max(result.maximum, magnitude);
+    if (value.radial == 0 || value.radial + 1 == radial_count) {
+      result.endpoint = std::max(result.endpoint, magnitude);
+    }
+  }
+  result.rms = std::sqrt(norm2 / static_cast<double>(sample.modal.size()));
+  return result;
+}
+
 double relative_difference(const C left, const C right) {
   return Kokkos::abs(left - right) /
          std::max({1.0, Kokkos::abs(left), Kokkos::abs(right)});
@@ -603,6 +619,7 @@ TEST_CASE("complete concrete plus2 source graph separates Galerkin and quadratur
   const DifferenceNorm b6 = difference_norm(band6, reference, forcing);
   const DifferenceNorm b8 = difference_norm(band8, reference, forcing);
   const DifferenceNorm b10 = difference_norm(band10, reference, forcing);
+  const DifferenceNorm reference_forcing = sample_norm(reference, forcing);
   const DifferenceNorm e4 = difference_norm(band4, reference, eth6);
   const DifferenceNorm e6 = difference_norm(band6, reference, eth6);
   const DifferenceNorm e8 = difference_norm(band8, reference, eth6);
@@ -620,7 +637,9 @@ TEST_CASE("complete concrete plus2 source graph separates Galerkin and quadratur
             << " max " << b4.maximum << " " << b6.maximum << " "
             << b8.maximum << " " << b10.maximum << " endpoint "
             << b4.endpoint << " " << b6.endpoint << " " << b8.endpoint
-            << " " << b10.endpoint << '\n';
+            << " " << b10.endpoint << " reference "
+            << reference_forcing.rms << " " << reference_forcing.maximum
+            << " " << reference_forcing.endpoint << '\n';
   std::cout << "plus2 complete angular band eth6 rms " << e4.rms << " "
             << e6.rms << " " << e8.rms << " " << e10.rms << '\n';
   std::cout << "plus2 complete angular band projected K rms " << p4.rms << " "
@@ -640,9 +659,13 @@ TEST_CASE("complete concrete plus2 source graph separates Galerkin and quadratur
   CHECK(e4.rms / e10.rms > 20.0);
   CHECK(p4.rms / p10.rms > 20.0);
   CHECK(k4.rms / k10.rms > 20.0);
-  CHECK(b10.rms < 1.0e-5);
-  CHECK(b10.maximum < 6.0e-5);
-  CHECK(b10.endpoint < 6.0e-5);
+  // The corrected complete-field source normalization carries a nontrivial
+  // Kerr denominator and changes the dimensional amplitude of this fixture.
+  // Gate dimensionless errors rather than weakening an amplitude-dependent
+  // absolute threshold.
+  CHECK(b10.rms / reference_forcing.rms < 1.0e-4);
+  CHECK(b10.maximum / reference_forcing.maximum < 1.0e-4);
+  CHECK(b10.endpoint / reference_forcing.endpoint < 1.0e-4);
   CHECK(e10.rms < 1.0e-5);
   CHECK(p10.rms < 1.0e-5);
   CHECK(k10.rms < 4.0e-9);
@@ -653,6 +676,7 @@ TEST_CASE("complete concrete plus2 source graph separates Galerkin and quadratur
   const DifferenceNorm n12 = difference_norm(nodes12, band10, forcing);
   const DifferenceNorm n18 = difference_norm(nodes18, band10, forcing);
   const DifferenceNorm n24 = difference_norm(nodes24, band10, forcing);
+  const DifferenceNorm band10_forcing = sample_norm(band10, forcing);
   std::cout << "plus2 complete angular quadrature forcing rms " << n12.rms
             << " " << n18.rms << " " << n24.rms << " max "
             << n12.maximum << " " << n18.maximum << " " << n24.maximum
@@ -665,7 +689,9 @@ TEST_CASE("complete concrete plus2 source graph separates Galerkin and quadratur
   CHECK(n12.endpoint > n18.endpoint);
   CHECK(n18.endpoint > n24.endpoint);
   CHECK(n12.rms / n24.rms > 20.0);
-  CHECK(n24.rms < 2.0e-14);
-  CHECK(n24.maximum < 2.0e-14);
-  CHECK(n24.endpoint < 2.0e-14);
+  // Preserve the original dimensionless quadrature gate after the corrected
+  // complete-field normalization changes only the dimensional amplitude.
+  CHECK(n24.rms / band10_forcing.rms < 2.0e-14);
+  CHECK(n24.maximum / band10_forcing.maximum < 2.0e-14);
+  CHECK(n24.endpoint / band10_forcing.endpoint < 2.0e-14);
 }

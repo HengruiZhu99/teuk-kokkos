@@ -136,6 +136,15 @@ struct Thorn5Functor {
                       modes[mode], radius, cos_theta[theta], parameters.mass,
                       parameters.spin, parameters.compactification_length,
                       background.epsilon0);
+    outer[flat4(
+        mode,
+        static_cast<std::size_t>(
+            Plus2SpatialOuterDerivative::
+                RegularizedThorn5JMinusOpticalJOverR),
+        radial, theta, outer_count, radial_count, theta_count)] =
+        plus2_regularized_thorn5_j_minus_optical_over_r(
+            value, tangent, radial_derivative, modes[mode], radius,
+            cos_theta[theta], parameters, background);
   }
 };
 
