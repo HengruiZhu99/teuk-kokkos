@@ -103,6 +103,16 @@ if(BUILD_TESTING)
       COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/symbolic/verify_plus2_background_derivatives.py)
     add_test(
+      NAME teuk.routeb_fornberg_generation
+      COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/numerical/generate_routeb_fornberg_weights.py
+        --check
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/teuk/routeb_fornberg_weights.hpp)
+    add_test(
+      NAME teuk.routeb_fornberg_arbitrary_precision
+      COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/numerical/verify_routeb_fornberg.py)
+    add_test(
       NAME teuk.plus2_tsi_schwarzschild_radial
       COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/numerical/verify_plus2_tsi_schwarzschild_radial_fixture.py)
