@@ -371,9 +371,14 @@ independently checked raw source.
    data fixes a homogeneous convention but does not prove common
    second-order-metric compatibility with independently initialized
    `Psi4^(2)`.
-3. **Implementation and qualification.**  No Kokkos source exists for this
-   proposal.  CPU/GPU oracle agreement, endpoint convergence, and waveform
-   extraction tests remain mandatory after the linear gate closes.
+3. **Production integration and qualification.**  Standalone Kokkos point,
+   pair, primitive-spatial, and concrete outer-spatial source layers now exist
+   with independent oracles and endpoint/angular convergence.  The remaining
+   blocker is the rotating local Route-B curvature provider: the validation
+   Bianchi transport is weakly hyperbolic, while a naïve recursive D10-5
+   `h[0]..h[4]` tower fails its endpoint-order gate.  Concrete runtime/replay,
+   accelerator, sourced-residual, and physical waveform qualification remain
+   mandatory after that provider is repaired.
 
 Until these blockers are closed with generated evidence, production code must
 keep the `+2` companion disabled and fail closed rather than treating the

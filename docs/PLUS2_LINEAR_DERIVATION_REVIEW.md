@@ -416,10 +416,11 @@ automatic differentiation, evaluate the linearized Weyl tensor including
 the background-curvature metric terms, and contract with the *background
 code tetrad*.  Do not reuse the NP `sigma/kappa` path in the oracle.
 
-For L7, pin the angular/radial normalization in the fixture metadata.  The
-unnormalized product constants `D` and `C` cannot determine the hatted factors
-needed for a phase-sensitive first-form comparison.  A missing hatted
-normalization is a hard blocker, not a tolerance to loosen.
+For L7, the later Schwarzschild and moderate-Kerr fixtures pin the
+angular/radial normalization in generated metadata.  The unnormalized product
+constants `D` and `C` alone still cannot determine the hatted factors needed
+for a phase-sensitive first-form comparison; every new mode must carry the
+same explicit authority.
 
 ## 8. Hard blockers and non-blocking conclusions
 
@@ -436,13 +437,16 @@ arXiv:2008.11770 Eq. (12) must remain an explicit regression test.  The main
 numerical risk is the `R^-3/R^-4` cancellation at scri; convergence against
 the coordinate oracle is mandatory.
 
-The following remain hard gates for claiming a TSI-normalized companion:
+The Schwarzschild field-level fixture and moderate-Kerr separated fixture now
+pin hatted angular/radial normalizations, include the sharp partner, and verify
+the complex phase.  The remaining hard gates for a general TSI-normalized
+companion are:
 
-- implement a mode oracle with explicitly pinned hatted angular and radial
-  normalizations;
-- include the sharp partner required by a real metric;
-- perform the Kinnersley-to-code tetrad conversion;
-- verify complex amplitude and phase, not only the QNM frequency.
+- continue the moderate-Kerr separated fixture through the full ORG metric
+  and Kinnersley-to-code/hyperboloidal `T0[h]` comparison;
+- add a normalized QNM fixture rather than checking only its frequency;
+- compare the resulting metric-curvature field with an evolved homogeneous
+  companion under radial, angular, and temporal refinement.
 
 No production normalization should be inferred from an eighth-order TSI,
 from a single sign of `m`, or from the unhatted Starobinsky product alone.

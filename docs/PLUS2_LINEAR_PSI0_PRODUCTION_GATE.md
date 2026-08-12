@@ -140,18 +140,22 @@ for the focused unit binary only.  No external VRAM sampling was recorded, so
 the observed `284108 KiB` maximum host RSS is not presented as device-memory
 evidence.
 
-## Deliberate boundaries and residual TSI blocker
+## Deliberate boundaries and current TSI scope
 
 This commit adds no state, scratch, launch, include, or member to
 `SpatialPipeline`.  It does not derive the stage-local asymptotic
 `Psi0/R^5` coefficient, wire radial/angular derivative production, or add
 linear diagnostic output.
 
-The normalized radial Teukolsky--Starobinsky fixture remains blocked.  The
-Berens--Gravely--Lupsasca supplemental expressions use hatted separated radial
-and angular functions in the Boyer--Lindquist Kinnersley tetrad.  A production
-residual still requires an authoritative fixture pinning the hatted radial
-normalization, Starobinsky factor/phase, Fourier convention, and the complete
-Kinnersley-to-code boost/spin plus hyperboloidal radial chain rule.  The
-existing `9/9` angular fixture does not determine these radial factors.  No
-normalization has been inferred here.
+The earlier normalized-radial blocker has since been closed for two explicit
+real-frequency separated fixtures.  `PLUS2_VALIDATION_AND_TSI_AUDIT.md`
+records a Schwarzschild horizon-in mode which continues through ORG metric
+reconstruction and `T0[h]`, and an independently reviewed moderate-Kerr
+`a/M=0.6` fixture which pins the hatted angular/radial factors, signed partner,
+and complex phase in the separated TSI.  No normalization was inferred from
+an unhatted product.
+
+Those fixtures do not yet provide a moderate-Kerr field-level `T0[h]`
+comparison, a normalized QNM, a horizon endpoint value, or an evolved-field
+residual.  They therefore qualify the named separated cases, not a general
+production TSI constructor.
