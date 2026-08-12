@@ -96,11 +96,44 @@ independence under varied companion initial data, stable storage, no Kokkos
 allocation during steps, checkpoint round trip, and fail-before-mutate corrupt
 checkpoint handling.
 
+`tests/test_plus2_routeb_physical_replay.cpp` closes the next, narrower
+scientific seam using the actual disabled Route-B graph rather than an
+arbitrary forcing callback.  Its flat caller-owned primary state contains the
+three spin-minus-two first-order fields and seven ORG reconstruction fields.
+At each common RK stage it:
+
+1. builds the coefficient-wise angular/radial `h0..h4` Route-B tower from the
+   identical primary stage view;
+2. packs `h1` as that primary state's source-independent time derivative;
+3. evaluates the constrained six-field curvature provider exactly once;
+4. applies the concrete primitive, ordered-pair, retained-band outer-source,
+   and corrected `S0/R^7` forcing graph;
+5. advances the actual spin-plus-two `P,Q,Z_plus` companion PDE.
+
+The frozen rotating-Kerr test uses D10-5, `FreeDamped`, zero dissipation, two
+accepted RK steps, active source history, exact future-horizon endpoints, and
+nonzero signed parent/target modes.  Concurrent and replay primary states,
+final forcing, and companion states are bitwise identical on the same Serial
+backend.  Every primary/source stage has the exact time sequence
+`(t,t+h/2,t+h/2,t+h)` and the identical primary pointer; generations are
+strictly increasing.  The forcing and response are nonzero, the complete
+trajectory is linear/quadratic under a common amplitude rescaling, changing
+the companion initial state leaves the primary bitwise unchanged, and the
+hot two-step trajectory records zero Kokkos allocations and fences.
+
+This is physics-bearing **standalone validation**, but not production replay.
+The initial first-order/reconstruction profile is smooth manufactured data,
+not a restored campaign checkpoint.  The Route-B graph remains qualified only
+for `FreeDamped` with zero dissipation.  The trajectory does not include the
+production spin-minus-two second-order state or invoke the four-Weyl output
+packer.  It is not wired through `solver_driver`, and it does not establish a
+sourced residual convergence campaign or cross-backend reproducibility.
+
 This is an integration foundation, not a four-field production claim. It does
-not connect unqualified `T0[h]` or spin +2 source formulas to
-`SpatialPipeline`, does not parse the main runtime configuration, and does not
-write four-field waveform products. Backend-dependent reduction order in a
-future production source can limit bitwise replay across different backends;
+not connect the qualified standalone graph to `SpatialPipeline`, does not
+parse the main runtime configuration, and does not write four-field waveform
+products. Backend-dependent reduction order in a future production source can
+limit bitwise replay across different backends;
 same-backend runs should use the exact resolved configuration, build
 provenance, initial primary state, and companion checkpoint metadata.
 

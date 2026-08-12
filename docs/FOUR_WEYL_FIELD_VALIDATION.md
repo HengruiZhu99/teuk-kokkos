@@ -91,10 +91,12 @@ binary only.  No GPU qualification is claimed by this document.
 
 ## Integration boundary
 
-Promotion into the solver still requires the coordinator to provide all four
-regular fields from one accepted stage/step, verify that the replay checkpoint
-and resolved configuration carry compatible band/method provenance, and
-exercise concurrent/replay equality with the actual curvature and source
-operators.  The packer accepts one time for all four fields, but by design it
-cannot prove that independently supplied views came from the same RK stage.
-That proof belongs at the future production call site.
+The standalone Route-B sourced-companion trajectory now exercises bitwise
+concurrent/replay equality with the actual curvature and source operators, but
+it does not invoke this packer and does not carry the production spin-minus-two
+second-order state. Promotion into the solver therefore still requires one
+accepted production stage/step to supply all four regular fields, bind the
+replay checkpoint and resolved band/method provenance, and call this packer at
+their common accepted time. The packer itself cannot prove that independently
+supplied views came from the same RK stage; that final proof belongs at the
+future production call site.

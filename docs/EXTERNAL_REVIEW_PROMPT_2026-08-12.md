@@ -47,6 +47,7 @@ Read these files first and completely:
 - `include/teuk/plus2_source_primitive_spatial.hpp`
 - `tests/test_plus2_routeb_curvature_spatial.cpp`
 - `tests/test_plus2_routeb_live_source.cpp`
+- `tests/test_plus2_routeb_physical_replay.cpp`
 - `tools/numerical/generate_plus2_routeb_curvature_coordinate_fixture.py`
 
 The YAML is explicitly a fail-closed proposal, not a production specification.
@@ -192,10 +193,16 @@ Route-B tower, evaluates curvature once, packs levels zero through two into the
 concrete primitive producer, and reaches the live pair/outer source forcing.
 Audit `evaluate_routeb_stage` and its test for duplicate authority, ordering,
 stale-level resurrection, hidden host copies, and configuration mismatches.
-This closes a structural same-stage composition seam only. A physical
-shared-RK primary-curvature-source-companion replay and current GPU runtime
-qualification remain open. Keep `N=65` non-promoting. The candidate is not
-runtime-wired and must not be called production-qualified.
+The follow-up standalone replay test now composes that seam with the actual
+source-independent Route-B primary/reconstruction tower and spin-plus-two PDE
+through a common two-step RK4 trajectory. Audit bitwise concurrent/replay
+equality, exact stage pointers/times/generations, nonzero forcing/response,
+linear/quadratic amplitude scaling, no feedback, and hot-path instrumentation.
+It remains manufactured, zero-dissipation, same-backend validation: it does
+not include production `Psi4^(2)`, four-Weyl packing, a campaign checkpoint,
+sourced residual convergence, solver/runtime wiring, or current GPU runtime
+qualification. Keep `N=65` non-promoting and do not call the candidate
+production-qualified.
 
 ### 3. Linear path
 
@@ -216,11 +223,14 @@ metadata and state and exact `time=step*dt`. Confirm legacy v1/v2 restoration is
 rejected, not silently reinterpreted, and that checkpoint replay continues from
 the restored accepted time.
 
-Do not call generic callback replay, or the new single-stage Route-B live-source
-test, a physical replay. A physics-level replay requires a complete concurrent
-and replayed shared-RK primary-curvature-source-companion trajectory, bitwise
-same-backend agreement, nonzero physical forcing/response, and no primary
-feedback. That trajectory is still absent.
+Do not call generic callback replay or the single-stage Route-B live-source
+test scientific replay evidence. The new Route-B sourced trajectory does meet
+that narrower bar for the standalone source-independent first-order/
+reconstruction graph and passive companion: it is common-stage, bitwise
+same-backend, nonzero, quadratic, and one-way. Do not broaden this result to a
+production or four-field replay. It omits the production spin-minus-two
+second-order trajectory, checkpoint-restored campaign data, output packing,
+sourced residual convergence, runtime integration, and accelerator parity.
 
 ### 5. Live invalidation and diagnostic zeroing
 

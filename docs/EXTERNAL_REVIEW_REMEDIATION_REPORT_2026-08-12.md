@@ -258,14 +258,26 @@ evaluated once, levels zero through two are packed into the concrete primitive
 producer on device, and the reviewed pair/outer graph emits nonzero forcing.
 The focused regression checks exact stamps, global stale-`h4` rejection, and
 zero post-warmup Kokkos allocation/deep-copy/fence callbacks. This removes the
-earlier duplicate-callback composition gap, but is not a physical replay or
-runtime integration.
+earlier duplicate-callback composition gap.
+
+A second standalone regression now drives the actual source-independent
+Route-B primary/reconstruction tower, constrained curvature provider, complete
+source graph, and spin-plus-two companion through the same two RK4 steps in
+both concurrent and replay modes. On the same Serial backend it requires
+bitwise primary/forcing/companion equality; exact stage pointers, times, and
+generations; nonzero response; linear/quadratic amplitude scaling; no primary
+feedback; and zero hot-stage Kokkos allocations/fences. This is a genuine
+physics-bearing validation trajectory, but it uses manufactured initial data,
+`FreeDamped`, and zero dissipation. It does not include the production
+spin-minus-two second-order state, four-Weyl packing, a restored campaign
+checkpoint, solver integration, or accelerator evidence.
 
 Important gaps remain. The eight derivative slots still lack an independent
 coordinate derivative fixture. There is no scri coordinate-Weyl fixture,
-primary-curvature-source-companion concurrent/replay trajectory, exact-commit
-GPU runtime evidence, or solver/runtime wiring. The candidate is not included
-by `SpatialPipeline` or `solver_driver`, and `plus2.enabled` remains rejected.
+production four-field concurrent/replay trajectory, exact-commit GPU runtime
+evidence, sourced residual campaign, or solver/runtime wiring. The candidate
+is not included by `SpatialPipeline` or `solver_driver`, and `plus2.enabled`
+remains rejected.
 An external reviewer must treat it as a substantially hardened standalone
 hypothesis and try to falsify it.
 
@@ -291,11 +303,13 @@ rather than silently reinterpreting them. Checkpoint replay is latched to the
 restored accepted time. Finding: **confirmed and remediated for the standalone
 companion checkpoint**.
 
-Generic replay equality is still structural. The new Route-B composition test
-proves a concrete single-stage curvature-to-source seam, not an RK trajectory.
-There is still no honest concurrent and replayed primary-curvature-source-
-companion physical evolution. Finding: **confirmed; promotion gate remains
-open**.
+Generic callback replay remains structural, but the new standalone Route-B
+test now proves a physics-bearing concurrent/replay trajectory through the
+actual source-independent primary/reconstruction, curvature, source, and
+companion equations. It is not the final production/four-field replay because
+it excludes production `Psi4^(2)`, campaign checkpoint restoration, output
+packing, runtime integration, and accelerator/residual qualification. Finding:
+**partially remediated; production promotion gate remains open**.
 
 ### Live source invalidation
 
@@ -366,6 +380,8 @@ convergence.
   hostile contract tests;
 - same-stage source seam: concrete Route-B curvature-to-primitive-to-pair/outer
   composition and stale-generation/no-allocation regression;
+- sourced replay validation: actual Route-B primary/reconstruction, curvature,
+  source, and companion in bitwise concurrent/replay RK4 trajectories;
 - provenance: companion checkpoint/replay, four-Weyl metadata, resolved config;
 - scope/docs: formalism, compactification, linear spatial gate, replay,
   Route-B blocker, validation status, proposal YAML, and dated handoff erratum;
@@ -388,7 +404,8 @@ pipeline, or solver enable gate was changed.
 | Companion checkpoint physical identity | Met standalone v3 | exhaustive mismatch/nonfinite/pre-mutation tests |
 | Live invalid diagnostics clear globally | Met | provenance/stamp and full workspace-zero regressions |
 | Concrete same-stage source composition | Met standalone | one immutable Route-B generation reaches curvature, primitive, pair/outer, and nonzero forcing with stale-stage fail closure |
-| Concrete physics replay | Not met | structural replay and one-stage scientific composition exist, but no shared-RK concurrent/replay trajectory |
+| Standalone sourced replay | Met for the diagnostic graph | actual Route-B primary/reconstruction, curvature, source, and companion share RK stages and agree bitwise concurrent/replay on Serial |
+| Production four-field replay | Not met | no production `Psi4^(2)`, campaign checkpoint, common four-field packing, runtime wiring, residual campaign, or backend parity |
 | Schwarzschild QNM | Met fixture | checked-in normalized interior fixture |
 | Moderate-Kerr real-frequency TSI | Met fixture | checked-in radial/angular/field fixture |
 | Moderate-Kerr complex QNM and endpoints | Open | no claim |
@@ -406,9 +423,9 @@ pipeline, or solver enable gate was changed.
    seeing results.
 2. Replace or retain as validation-only the singular-term ordinary-NP linear
    spatial path with a genuinely regular GHP provider.
-3. Starting from the now-concrete single-stage source seam, run primary,
-   curvature, source, and companion through one concurrent and replay
-   trajectory; then prove bitwise same-backend and physical residual agreement.
+3. Extend the now-qualified standalone sourced replay to the production
+   spin-minus-two second-order state, restored campaign checkpoints, common
+   four-Weyl output, sourced residual convergence, and backend qualification.
 4. Complete sourced four-field time/radial/angular residual convergence and
    current exact-head accelerator qualification.
 5. Add moderate-spin complex-frequency QNM and horizon/scri endpoint fixtures.
