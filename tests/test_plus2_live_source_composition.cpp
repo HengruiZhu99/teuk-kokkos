@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
+#include <type_traits>
 #include <vector>
 
 #include "teuk/plus2_live_source_composition.hpp"
@@ -24,6 +25,124 @@ void count_live_allocation(Kokkos::Tools::SpaceHandle, const char*,
 void count_live_fence(const char*, std::uint32_t, std::uint64_t*) {
   ++live_fences;
 }
+
+KOKKOS_INLINE_FUNCTION std::size_t live_flat4(
+    const std::size_t mode, const std::size_t field,
+    const std::size_t radial, const std::size_t theta,
+    const std::size_t field_count, const std::size_t radial_count,
+    const std::size_t theta_count) {
+  return ((mode * field_count + field) * radial_count + radial) *
+             theta_count +
+         theta;
+}
+
+struct WriteLiveSourceSlotsFunctor {
+  C* primitive_value;
+  C* primitive_tangent;
+  C* jk_value;
+  C* jk_tangent;
+  C* q_value;
+  std::uint64_t* primitive_value_stamps;
+  std::uint64_t* primitive_tangent_stamps;
+  std::uint64_t* jk_value_stamps;
+  std::uint64_t* jk_tangent_stamps;
+  std::uint64_t* q_value_stamps;
+  double amplitude;
+  std::uint64_t generation;
+  std::size_t radial_count;
+  std::size_t theta_count;
+  bool omit_last_q_stamp;
+
+  KOKKOS_INLINE_FUNCTION void operator()(const std::size_t flat) const {
+    const std::size_t mode = flat / (radial_count * theta_count);
+    const std::size_t within = flat % (radial_count * theta_count);
+    const std::size_t radial = within / theta_count;
+    const std::size_t theta = within % theta_count;
+    const double x = 0.04 * mode + 0.01 * radial + 0.02 * theta;
+    constexpr std::size_t pc =
+        static_cast<std::size_t>(teuk::Plus2SpatialPrimitive::Count);
+    for (std::size_t field = 2; field < pc; ++field) {
+      const std::size_t index = live_flat4(
+          mode, field, radial, theta, pc, radial_count, theta_count);
+      primitive_value[index] =
+          amplitude * C(0.21 + x + 0.01 * field, -0.08 + 0.005 * field);
+      primitive_tangent[index] =
+          amplitude * C(-0.04 + 0.003 * field, 0.06 + x);
+      primitive_value_stamps[index] = generation;
+      primitive_tangent_stamps[index] = generation;
+    }
+    constexpr std::size_t jc = static_cast<std::size_t>(
+        teuk::Plus2ProductionJkDerivative::Count);
+    for (std::size_t field = 0; field < jc; ++field) {
+      const std::size_t index = live_flat4(
+          mode, field, radial, theta, jc, radial_count, theta_count);
+      jk_value[index] =
+          amplitude * C(0.13 + x + 0.007 * field, 0.02 - 0.004 * field);
+      jk_tangent[index] =
+          amplitude * C(-0.02 + 0.006 * field, 0.03 + x);
+      jk_value_stamps[index] = generation;
+      jk_tangent_stamps[index] = generation;
+    }
+    constexpr std::size_t qc = static_cast<std::size_t>(
+        teuk::Plus2ProductionQDerivative::Count);
+    for (std::size_t field = 0; field < qc; ++field) {
+      const std::size_t index = live_flat4(
+          mode, field, radial, theta, qc, radial_count, theta_count);
+      q_value[index] =
+          amplitude * C(0.17 + x + 0.009 * field, -0.05 + 0.003 * field);
+      if (!(omit_last_q_stamp && mode == 0 && radial == 0 && theta == 0 &&
+            field + 1 == qc)) {
+        q_value_stamps[index] = generation;
+      }
+    }
+  }
+};
+
+struct WriteLiveOuterSlotsFunctor {
+  const C* sums;
+  const C* tangents;
+  C* projected;
+  C* outer;
+  std::uint64_t* projected_stamps;
+  std::uint64_t* outer_stamps;
+  std::uint64_t generation;
+  std::size_t radial_count;
+  std::size_t theta_count;
+
+  KOKKOS_INLINE_FUNCTION void operator()(const std::size_t flat) const {
+    const std::size_t mode = flat / (radial_count * theta_count);
+    const std::size_t within = flat % (radial_count * theta_count);
+    const std::size_t radial = within / theta_count;
+    const std::size_t theta = within % theta_count;
+    constexpr std::size_t aggregate_count =
+        static_cast<std::size_t>(teuk::Plus2SpatialAggregate::Count);
+    for (std::size_t field = 0; field < aggregate_count; ++field) {
+      const std::size_t index = live_flat4(mode, field, radial, theta,
+                                           aggregate_count, radial_count,
+                                           theta_count);
+      projected[index] = sums[index];
+      projected_stamps[index] = generation;
+    }
+    constexpr std::size_t tangent_count = static_cast<std::size_t>(
+        teuk::Plus2ProductionJkAggregate::Count);
+    constexpr std::size_t outer_count = static_cast<std::size_t>(
+        teuk::Plus2SpatialOuterDerivative::Count);
+    for (std::size_t field = 0; field < outer_count; ++field) {
+      const std::size_t output_index = live_flat4(
+          mode, field, radial, theta, outer_count, radial_count, theta_count);
+      const std::size_t input_index = live_flat4(
+          mode, field, radial, theta, tangent_count, radial_count,
+          theta_count);
+      outer[output_index] = tangents[input_index];
+      outer_stamps[output_index] = generation;
+    }
+  }
+};
+
+static_assert(std::is_trivially_copyable_v<WriteLiveSourceSlotsFunctor>);
+static_assert(std::is_trivially_copyable_v<WriteLiveOuterSlotsFunctor>);
+static_assert(sizeof(WriteLiveSourceSlotsFunctor) < 1800);
+static_assert(sizeof(WriteLiveOuterSlotsFunctor) < 1800);
 
 struct Geometry {
   teuk::Plus2SpatialThetaView cosine;
@@ -145,51 +264,22 @@ auto complete_source_producer(const double amplitude,
         "write_live_source_slots",
         Kokkos::RangePolicy<teuk::ExecutionSpace>(
             execution, 0, mode_count * radial_count * theta_count),
-        KOKKOS_LAMBDA(const std::size_t flat) {
-          const std::size_t mode = flat / (radial_count * theta_count);
-          const std::size_t within = flat % (radial_count * theta_count);
-          const std::size_t radial = within / theta_count;
-          const std::size_t theta = within % theta_count;
-          const double x = 0.04 * mode + 0.01 * radial + 0.02 * theta;
-          constexpr std::size_t pc = static_cast<std::size_t>(
-              teuk::Plus2SpatialPrimitive::Count);
-          for (std::size_t field = 2; field < pc; ++field) {
-            target.primitive_value(mode, field, radial, theta) =
-                amplitude * C(0.21 + x + 0.01 * field,
-                              -0.08 + 0.005 * field);
-            target.primitive_tangent(mode, field, radial, theta) =
-                amplitude * C(-0.04 + 0.003 * field, 0.06 + x);
-            target.primitive_value_stamps(mode, field, radial, theta) =
-                generation;
-            target.primitive_tangent_stamps(mode, field, radial, theta) =
-                generation;
-          }
-          constexpr std::size_t jc = static_cast<std::size_t>(
-              teuk::Plus2ProductionJkDerivative::Count);
-          for (std::size_t field = 0; field < jc; ++field) {
-            target.jk_derivative_value(mode, field, radial, theta) =
-                amplitude * C(0.13 + x + 0.007 * field,
-                              0.02 - 0.004 * field);
-            target.jk_derivative_tangent(mode, field, radial, theta) =
-                amplitude * C(-0.02 + 0.006 * field, 0.03 + x);
-            target.jk_derivative_value_stamps(mode, field, radial, theta) =
-                generation;
-            target.jk_derivative_tangent_stamps(mode, field, radial, theta) =
-                generation;
-          }
-          constexpr std::size_t qc = static_cast<std::size_t>(
-              teuk::Plus2ProductionQDerivative::Count);
-          for (std::size_t field = 0; field < qc; ++field) {
-            target.q_derivative_value(mode, field, radial, theta) =
-                amplitude * C(0.17 + x + 0.009 * field,
-                              -0.05 + 0.003 * field);
-            if (!(omit_last_q_stamp && mode == 0 && radial == 0 &&
-                  theta == 0 && field + 1 == qc)) {
-              target.q_derivative_value_stamps(mode, field, radial, theta) =
-                  generation;
-            }
-          }
-        });
+        WriteLiveSourceSlotsFunctor{
+            target.primitive_value.data(),
+            target.primitive_tangent.data(),
+            target.jk_derivative_value.data(),
+            target.jk_derivative_tangent.data(),
+            target.q_derivative_value.data(),
+            target.primitive_value_stamps.data(),
+            target.primitive_tangent_stamps.data(),
+            target.jk_derivative_value_stamps.data(),
+            target.jk_derivative_tangent_stamps.data(),
+            target.q_derivative_value_stamps.data(),
+            amplitude,
+            generation,
+            radial_count,
+            theta_count,
+            omit_last_q_stamp});
   };
 }
 
@@ -207,26 +297,12 @@ auto complete_outer_producer(std::vector<int>* order = nullptr) {
         "write_live_outer_slots",
         Kokkos::RangePolicy<teuk::ExecutionSpace>(
             execution, 0, modes * radial_count * theta_count),
-        KOKKOS_LAMBDA(const std::size_t flat) {
-          const std::size_t mode = flat / (radial_count * theta_count);
-          const std::size_t within = flat % (radial_count * theta_count);
-          const std::size_t radial = within / theta_count;
-          const std::size_t theta = within % theta_count;
-          for (std::size_t field = 0; field < 3; ++field) {
-            target.projected_sum_value(mode, field, radial, theta) =
-                sums(mode, field, radial, theta);
-            target.projected_sum_value_stamps(mode, field, radial, theta) =
-                generation;
-          }
-          target.outer_derivative_value(mode, 0, radial, theta) =
-              tangents(mode, 0, radial, theta);
-          target.outer_derivative_value(mode, 1, radial, theta) =
-              tangents(mode, 1, radial, theta);
-          target.outer_derivative_value_stamps(mode, 0, radial, theta) =
-              generation;
-          target.outer_derivative_value_stamps(mode, 1, radial, theta) =
-              generation;
-        });
+        WriteLiveOuterSlotsFunctor{
+            sums.data(), tangents.data(), target.projected_sum_value.data(),
+            target.outer_derivative_value.data(),
+            target.projected_sum_value_stamps.data(),
+            target.outer_derivative_value_stamps.data(), generation,
+            radial_count, theta_count});
   };
 }
 
