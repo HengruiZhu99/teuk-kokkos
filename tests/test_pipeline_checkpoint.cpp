@@ -4,10 +4,14 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
+#include <limits>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -164,6 +168,16 @@ void remove_metadata_line(const std::filesystem::path& path,
   if (!output) throw std::runtime_error("cannot write test metadata");
 }
 
+std::string serialize_double_list(const std::vector<double>& values) {
+  std::ostringstream output;
+  output << std::setprecision(std::numeric_limits<double>::max_digits10);
+  for (std::size_t i = 0; i < values.size(); ++i) {
+    if (i != 0) output << ',';
+    output << values[i];
+  }
+  return output.str();
+}
+
 }  // namespace
 
 TEST_CASE("full spatial pipeline checkpoint resumes the real RK4 trajectory") {
@@ -318,6 +332,34 @@ TEST_CASE("pipeline checkpoint rejects malformed truncated and mismatched data")
   const auto valid = temporary.path() / "valid";
   teuk::write_pipeline_checkpoint(execution, valid, pipeline, registry,
                                   configuration, {0.0, 0});
+
+  // IntelLLVM may reassociate lower+h*i while the validator recovers h from
+  // the two serialized endpoints. One-ULP coordinate differences are valid
+  // binary64 uniform grids; a material perturbation must still fail closed.
+  const auto valid_metadata =
+      teuk::read_pipeline_checkpoint_metadata(valid);
+  const auto one_ulp = temporary.path() / "one-ulp-uniform";
+  copy_checkpoint(valid, one_ulp);
+  auto one_ulp_coordinates = valid_metadata.radial_coordinates;
+  one_ulp_coordinates[4] = std::nextafter(
+      one_ulp_coordinates[4], std::numeric_limits<double>::infinity());
+  replace_metadata_line(one_ulp / teuk::pipeline_checkpoint_metadata_file,
+                        "radial_coordinates",
+                        serialize_double_list(one_ulp_coordinates));
+  const auto accepted_one_ulp =
+      teuk::read_pipeline_checkpoint_metadata(one_ulp);
+  CHECK(accepted_one_ulp.radial_coordinates == one_ulp_coordinates);
+
+  const auto nonuniform = temporary.path() / "nonuniform-grid";
+  copy_checkpoint(valid, nonuniform);
+  auto nonuniform_coordinates = valid_metadata.radial_coordinates;
+  nonuniform_coordinates[4] += 1.0e-8;
+  replace_metadata_line(nonuniform / teuk::pipeline_checkpoint_metadata_file,
+                        "radial_coordinates",
+                        serialize_double_list(nonuniform_coordinates));
+  CHECK(rejects([&] {
+    (void)teuk::read_pipeline_checkpoint_metadata(nonuniform);
+  }));
 
   const auto legacy = temporary.path() / "legacy-v4";
   copy_checkpoint(valid, legacy);

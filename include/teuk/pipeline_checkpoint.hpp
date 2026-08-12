@@ -390,11 +390,25 @@ inline void validate_metadata(const PipelineCheckpointMetadata& metadata) {
       (metadata.radial_coordinates.back() -
        metadata.radial_coordinates.front()) /
       static_cast<double>(metadata.radial_coordinates.size() - 1);
+  // An optimizing host compiler may reassociate lower+h*i even though the
+  // stored endpoint and spacing recover through separate operations here.
+  // Permit only two binary64 ulps; the full coordinate vector is still
+  // serialized at max_digits10 and compared bit-for-bit with pipeline storage
+  // below.
   for (std::size_t radial = 0; radial < metadata.radial_coordinates.size();
        ++radial) {
-    if (metadata.radial_coordinates[radial] !=
-        metadata.radial_coordinates.front() +
-            spacing * static_cast<double>(radial)) {
+    const double expected = metadata.radial_coordinates.front() +
+                            spacing * static_cast<double>(radial);
+    double lower = expected;
+    double upper = expected;
+    for (int ulp = 0; ulp < 2; ++ulp) {
+      lower = std::nextafter(lower,
+                             -std::numeric_limits<double>::infinity());
+      upper = std::nextafter(upper,
+                             std::numeric_limits<double>::infinity());
+    }
+    if (metadata.radial_coordinates[radial] < lower ||
+        metadata.radial_coordinates[radial] > upper) {
       throw std::runtime_error("checkpoint radial grid is not uniform");
     }
   }
