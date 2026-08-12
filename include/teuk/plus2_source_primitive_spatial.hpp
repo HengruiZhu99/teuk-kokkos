@@ -125,9 +125,16 @@ enum class Scratch : std::size_t {
   SigT,
   Kap,
   KapT,
+  Be,
+  BeT,
+  Ep,
+  EpT,
   DrSig,
   DrKap,
+  DrBe,
   EthPrime3Kap,
+  Eth3Kap,
+  Eth2Ep,
   Delta2Sig,
   Delta3Kap,
   Count,
@@ -537,6 +544,10 @@ struct MetricPointFunctor {
     put_s(Scratch::SigT, p.Sig.dt);
     put_s(Scratch::Kap, p.Kap.value);
     put_s(Scratch::KapT, p.Kap.dt);
+    put_s(Scratch::Be, p.Be.value);
+    put_s(Scratch::BeT, p.Be.dt);
+    put_s(Scratch::Ep, p.Ep.value);
+    put_s(Scratch::EpT, p.Ep.dt);
     const Jet1<Complex> metric_derivatives[7]{
         delta_csharp,
         jet(Scratch::EthPrime1BSharp, Scratch::EthPrime1BSharpT),
@@ -581,12 +592,13 @@ struct RadialConnectionFunctor {
 
   KOKKOS_INLINE_FUNCTION void operator()(const std::size_t flat) const {
     constexpr std::size_t count = static_cast<std::size_t>(Scratch::Count);
-    constexpr Scratch inputs[2]{Scratch::Sig, Scratch::Kap};
-    constexpr Scratch outputs[2]{Scratch::DrSig, Scratch::DrKap};
+    constexpr Scratch inputs[3]{Scratch::Sig, Scratch::Kap, Scratch::Be};
+    constexpr Scratch outputs[3]{Scratch::DrSig, Scratch::DrKap,
+                                 Scratch::DrBe};
     const std::size_t plane = radial_count * theta_count;
     const std::size_t mode_field = flat / plane;
-    const std::size_t field = mode_field % 2;
-    const std::size_t mode = mode_field / 2;
+    const std::size_t field = mode_field % 3;
+    const std::size_t mode = mode_field / 3;
     const std::size_t within = flat - mode_field * plane;
     const std::size_t radial = within / theta_count;
     const std::size_t theta = within - radial * theta_count;
@@ -879,7 +891,7 @@ class Plus2SourcePrimitiveSpatialProducer {
     Kokkos::parallel_for(
         "plus2_primitive_connection_radial",
         Kokkos::RangePolicy<execution_space>(execution, 0,
-                                             modes * 2 * radial * theta),
+                                             modes * 3 * radial * theta),
         RadialConnectionFunctor{scratch_.data(), scratch_.data(),
                                 discretization_, radial, theta,
                                 1.0 / grid_.spacing()});
