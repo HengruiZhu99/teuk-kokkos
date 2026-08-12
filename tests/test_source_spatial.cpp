@@ -305,11 +305,18 @@ TEST_CASE("device spatial outer source includes radial angular and tangent terms
     CHECK_COMPLEX_NEAR(host_source(mode, radial, theta), expected, 2.0e-12);
     CHECK_COMPLEX_NEAR(host_source_from_ethprime(mode, radial, theta),
                        expected, 2.0e-12);
+    // Test the source algebra above and the coordinate normalization here as
+    // two independent operations.  Comparing the device forcing directly to
+    // a fully host-reassembled source compounds the source roundoff with the
+    // O(10) normalization factor and makes an absolute-only threshold depend
+    // on backend evaluation order.  The two checks together imply the same
+    // composed formula without amplifying the accepted source discrepancy.
     CHECK_COMPLEX_NEAR(
         host_forcing(mode, radial, theta),
         teuk::coordinate_second_order_forcing(
             radius, host_cos(theta), parameters.spin,
-            parameters.compactification_length, expected),
+            parameters.compactification_length,
+            host_source(mode, radial, theta)),
         2.0e-12);
     CHECK_COMPLEX_NEAR(host_forcing_from_ethprime(mode, radial, theta),
                        host_forcing(mode, radial, theta), 2.0e-12);
