@@ -17,8 +17,9 @@ production by the rotating Route-A weak-hyperbolicity finding.
 4. the concrete D10-5 producer for the twelve non-curvature primitives, seven
    remaining `J/K` pairs, and three value-only `Q` derivatives;
 5. value-only ordered-pair source evaluation;
-6. projected `J,K,Q`, outer derivatives, coordinate forcing, and target-mode
-   gather.
+6. the concrete signed-mode retained-band projection of `J,K,Q,J_T,K_T`,
+   D10-5 `thorn_5 J`, and GHP `eth_6 K` outer graph;
+7. coordinate forcing and target-mode gather.
 
 The accepted-step source-activation snapshot is compared with the companion
 target. An inactive snapshot writes zero forcing without evaluating a stale
@@ -47,13 +48,21 @@ producer-owned and require current-generation producer stamps.
 ## Concrete binding and remaining blockers
 
 The scientific `evaluate_stage` overload accepts a generation-stamped
-`Plus2PrimitiveReconstructionStage` and invokes
-`Plus2SourcePrimitiveSpatialProducer` directly. The caller cannot substitute
-a generic primitive callback on this path. The older callback overload is
+`Plus2PrimitiveReconstructionStage` and invokes both
+`Plus2SourcePrimitiveSpatialProducer` and
+`Plus2SourceOuterSpatialProducer` directly. The caller cannot substitute a
+generic callback for either half of this path. The older callback overload is
 retained only as a low-level component-test seam. `Plus2BianchiTransport`
 supplies the triangular Route-A `Z0,Z1` transport plus the six-field curvature
 and eight-field derivative adapters, completing the fourteen primitive rows
 and all production inner-derivative slots at a common generation.
+
+Before any reconstruction validation or device launch, the typed overload
+matches both producers to its exact radial scheme, signed registry and target
+set, bandlimit, radial grid, Kerr parameters, and angular view allocations. It
+also verifies that the primitive producer has not already consumed the stage
+generation. Mismatched or reused producers therefore fail before partially
+updating composition or producer scratch.
 
 The standalone binding is still not `solver_driver` wiring. More decisively,
 the rotating two-field Route-A transport has a Jordan radial principal symbol
@@ -63,7 +72,6 @@ adding boundary evidence. The expected production direction is a local
 Route-B curvature provider from `h[0..4]`; it is not implemented or qualified
 here. The composition and companion common-stage RHS keep the provider seam
 external so that an algebraic provider need not own an evolved middle state.
-The outer projection/derivative producer remains an explicit reviewed seam.
 The typed D10-5 l'Hopital gate can certify already supplied peeling numerators,
 but the live Route-B numerator graph and physical full-plane certificate remain
 absent. `Z0,Z1` and their four derivative pairs cannot be hidden mutable state
@@ -88,12 +96,12 @@ ordinary-NP algebra, signed sharp lookup, analytic `J/K` tangents, and compact
 outer source remain independently tested by their existing point and spatial
 test suites. A one-step manufactured three-state seam additionally exercises
 all four common RK stages from primary through passive Route-A validation,
-concrete primitive production, live composition, and the passive Teukolsky
+both concrete spatial producers, live composition, and the passive Teukolsky
 companion RHS and advance. It verifies exact stage times and generations
 `1..4`, immutable activation, no primary feedback, nonzero forcing and
 companion advance, quadratic scaling, global stale-stage fail closure, D10-5,
 stable pointers, and no per-stage allocation or fence. A fixed-space
 manufactured refinement separately verifies fourth-order RK time convergence.
-It deliberately supplies only a test outer adapter and test-only boundary
-evidence; it is neither runtime/boundary qualification nor evidence that the
-Route-A system is well posed for rotating production.
+It deliberately supplies test-only boundary evidence; it is neither
+runtime/boundary qualification nor evidence that the Route-A system is well
+posed for rotating production.

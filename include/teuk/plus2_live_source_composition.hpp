@@ -13,6 +13,7 @@
 #include "teuk/plus2_companion_pipeline.hpp"
 #include "teuk/plus2_linear_spatial.hpp"
 #include "teuk/plus2_source_primitive_spatial.hpp"
+#include "teuk/plus2_source_outer_spatial.hpp"
 #include "teuk/plus2_source_value_spatial.hpp"
 #include "teuk/plus2_transported_curvature.hpp"
 
@@ -348,6 +349,7 @@ class Plus2LiveSourceComposition {
         cos_theta_(cos_theta),
         sin_theta_(sin_theta),
         radial_discretization_(radial_discretization),
+        ell_max_(ell_max),
         linear_(execution, registry, radial_grid.size(), ell_max, theta_count,
                 label + "_linear", radial_discretization),
         source_(registry, radial_grid.size(), theta_count, label + "_source"),
@@ -421,9 +423,8 @@ class Plus2LiveSourceComposition {
   // Scientific path: bind the complete stamped reconstruction stage directly
   // to the concrete primitive producer.  No generic source callback is
   // accepted by this overload.
-  template <class OuterProducer>
   void evaluate_stage(
-      const execution_space& execution, const double stage_time,
+      const execution_space& execution, const double /*stage_time*/,
       const Plus2PrimitiveReconstructionStage& reconstruction,
       const Plus2TransportedCurvatureStage& curvature,
       const Plus2BianchiDerivativeStage& bianchi_derivatives,
@@ -431,15 +432,23 @@ class Plus2LiveSourceComposition {
       const SourceActivationState& activation_snapshot,
       const Plus2StageSourceTarget& target,
       Plus2SourcePrimitiveSpatialProducer<execution_space>& primitive_producer,
-      OuterProducer&& outer_producer,
+      Plus2SourceOuterSpatialProducer<execution_space>& outer_producer,
       const Plus2PrimitiveReconstructionOffsets offsets = {}) {
-    validate_reconstruction_stage_shape(reconstruction, offsets);
     if (reconstruction.generation != capability.generation ||
         primitive_producer.radial_discretization() !=
-            radial_discretization_) {
+            radial_discretization_ ||
+        !primitive_producer.accepts_generation(capability.generation) ||
+        !primitive_producer.matches_configuration(
+            registry_, radial_grid_, parameters_, ell_max_, cos_theta_,
+            sin_theta_) ||
+        outer_producer.radial_discretization() != radial_discretization_ ||
+        !outer_producer.matches_configuration(
+            registry_, radial_grid_, parameters_, ell_max_, cos_theta_,
+            sin_theta_)) {
       throw std::invalid_argument(
-          "spin +2 concrete source stage generation/scheme mismatch");
+          "spin +2 concrete source stage generation/scheme/band mismatch");
     }
+    validate_reconstruction_stage_shape(reconstruction, offsets);
     const Plus2ReconstructionMetricOffsets metric_offsets{
         offsets.B, offsets.C, offsets.U};
     if (!prepare_stage(execution, reconstruction.value,
@@ -453,9 +462,8 @@ class Plus2LiveSourceComposition {
                                 bianchi_derivatives,
                                 source_write_target(capability.generation),
                                 offsets);
-    finish_stage(execution, stage_time, curvature, bianchi_derivatives,
-                 capability, target,
-                 std::forward<OuterProducer>(outer_producer));
+    finish_scientific_stage(execution, curvature, bianchi_derivatives,
+                            capability, target, outer_producer);
   }
 
   // Low-level callback seam retained for isolated composition tests.
@@ -570,6 +578,41 @@ class Plus2LiveSourceComposition {
       const Plus2LiveSourceCapability& capability,
       const Plus2StageSourceTarget& target,
       OuterProducer&& outer_producer) {
+    prepare_outer_stage(execution, curvature, bianchi_derivatives,
+                        capability);
+    const Plus2LiveOuterWriteTarget outer_target{
+        capability.generation, projected_, outer_, projected_stamps_,
+        outer_stamps_};
+    outer_producer(execution, stage_time, source_.summed_value(),
+                   source_.summed_jk_tangent(), outer_target);
+    finish_outer_stage(execution, capability, target);
+  }
+
+  void finish_scientific_stage(
+      const execution_space& execution,
+      const Plus2TransportedCurvatureStage& curvature,
+      const Plus2BianchiDerivativeStage& bianchi_derivatives,
+      const Plus2LiveSourceCapability& capability,
+      const Plus2StageSourceTarget& target,
+      Plus2SourceOuterSpatialProducer<execution_space>& outer_producer) {
+    prepare_outer_stage(execution, curvature, bianchi_derivatives,
+                        capability);
+    const Plus2LiveOuterWriteTarget outer_target{
+        capability.generation, projected_, outer_, projected_stamps_,
+        outer_stamps_};
+    outer_producer.evaluate(
+        execution,
+        Plus2OuterSpatialStage{capability.generation, source_.summed_value(),
+                               source_.summed_jk_tangent()},
+        outer_target);
+    finish_outer_stage(execution, capability, target);
+  }
+
+  void prepare_outer_stage(
+      const execution_space& execution,
+      const Plus2TransportedCurvatureStage& curvature,
+      const Plus2BianchiDerivativeStage& bianchi_derivatives,
+      const Plus2LiveSourceCapability& capability) {
     Kokkos::parallel_for(
         "initialize_plus2_live_readiness",
         Kokkos::RangePolicy<execution_space>(execution, 0, readiness_.size()),
@@ -593,11 +636,13 @@ class Plus2LiveSourceComposition {
         execution, radial_grid_, parameters_, cos_theta_, sin_theta_,
         primitive_value_, primitive_tangent_, jk_value_, jk_tangent_, q_value_,
         source_);
-    const Plus2LiveOuterWriteTarget outer_target{
-        capability.generation, projected_, outer_, projected_stamps_,
-        outer_stamps_};
-    outer_producer(execution, stage_time, source_.summed_value(),
-                   source_.summed_jk_tangent(), outer_target);
+  }
+
+  void finish_outer_stage(const execution_space& execution,
+                          const Plus2LiveSourceCapability& capability,
+                          const Plus2StageSourceTarget& target) {
+    const std::size_t total =
+        registry_.size() * radial_grid_.size() * sin_theta_.extent(0);
     Kokkos::parallel_for(
         "normalize_plus2_live_outer_inputs",
         Kokkos::RangePolicy<execution_space>(execution, 0, total),
@@ -682,6 +727,7 @@ class Plus2LiveSourceComposition {
   Plus2SpatialThetaView cos_theta_;
   Plus2SpatialThetaView sin_theta_;
   RadialDiscretization radial_discretization_;
+  int ell_max_;
   Plus2LinearPsi0SpatialWorkspace<execution_space> linear_;
   Plus2SourceValueSpatialWorkspace source_;
   Plus2SpatialPrimitiveView primitive_value_;

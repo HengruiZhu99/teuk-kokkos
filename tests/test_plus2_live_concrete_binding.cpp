@@ -243,6 +243,8 @@ struct BindingFixture {
   std::unique_ptr<teuk::Plus2BianchiTransport<execution_space>> transport;
   std::unique_ptr<teuk::Plus2SourcePrimitiveSpatialProducer<execution_space>>
       primitive_producer;
+  std::unique_ptr<teuk::Plus2SourceOuterSpatialProducer<execution_space>>
+      outer_producer;
   std::unique_ptr<teuk::Plus2LiveSourceComposition<execution_space>>
       composition;
   std::unique_ptr<teuk::Plus2CompanionPipeline> pipeline;
@@ -270,6 +272,10 @@ struct BindingFixture {
         teuk::Plus2SourcePrimitiveSpatialProducer<execution_space>>(
         execution, registry, grid, parameters, binding_ell_max, cos_theta,
         sin_theta, "binding_primitive", teuk::RadialDiscretization::D105);
+    outer_producer = std::make_unique<
+        teuk::Plus2SourceOuterSpatialProducer<execution_space>>(
+        execution, registry, grid, parameters, binding_ell_max, cos_theta,
+        sin_theta, "binding_outer", teuk::RadialDiscretization::D105);
     composition =
         std::make_unique<teuk::Plus2LiveSourceComposition<execution_space>>(
             execution, registry, grid, parameters, binding_ell_max,
@@ -394,22 +400,6 @@ BindingResult run_binding_evolution(const double amplitude, const int steps,
         Kokkos::RangePolicy<execution_space>(execution, 0, output.extent(0)),
         ZeroBindingPrimaryRhsFunctor{output.data()});
   };
-  auto outer = [](const execution_space& execution, const double,
-                  const teuk::Plus2SpatialAggregateView& sums,
-                  const teuk::Plus2ProductionJkAggregateView& tangents,
-                  const teuk::Plus2LiveOuterWriteTarget target) {
-    Kokkos::parallel_for(
-        "write_binding_outer_stage",
-        Kokkos::RangePolicy<execution_space>(
-            execution,
-            0, binding_radial_count * binding_theta_count),
-        WriteBindingOuterFunctor{
-            sums.data(), tangents.data(), target.projected_sum_value.data(),
-            target.outer_derivative_value.data(),
-            target.projected_sum_value_stamps.data(),
-            target.outer_derivative_value_stamps.data(), target.generation,
-            binding_radial_count, binding_theta_count});
-  };
   auto companion_rhs = [&]
       (const execution_space& execution, const double stage_time,
        const std::uint64_t generation, const auto& primary_stage,
@@ -439,7 +429,7 @@ BindingResult run_binding_evolution(const double amplitude, const int steps,
       fixture.composition->evaluate_stage(
           source_execution, source_time, reconstruction, curvature,
           derivatives, capability, activation, target,
-          *fixture.primitive_producer, outer);
+          *fixture.primitive_producer, *fixture.outer_producer);
     };
     auto angular = [](const execution_space& angular_execution, const double,
                       const auto&, const auto& angular_laplacian) {
