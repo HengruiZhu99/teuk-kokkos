@@ -94,5 +94,9 @@ if(BUILD_TESTING)
       NAME teuk.plus2_compact_source_gate
       COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/symbolic/verify_plus2_compact_source.py)
+    add_test(
+      NAME teuk.plus2_bianchi_closure_gate
+      COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/symbolic/verify_plus2_bianchi_closure.py)
   endif()
 endif()

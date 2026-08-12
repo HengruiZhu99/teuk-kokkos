@@ -60,6 +60,32 @@ struct Plus2OrderedPairDerivativesT {
   Scalar ethprime3_Kap2;
 };
 
+// Production forcing values need analytic tangents only through J and K.
+// Keep their derivative contract separate from the value-only Q contract so
+// callers are never forced to manufacture Delta(Sigma)_T or Delta(Kappa)_T.
+template <class Scalar>
+struct Plus2OrderedPairJkDerivativesT {
+  Scalar capital_delta4_Z1_2;
+  Scalar ethprime4_Z1_2;
+  Scalar capital_delta2_Csharp1;
+  Scalar ethprime1_Bsharp1;
+  Scalar capital_delta5_Z0_2;
+  Scalar eth5_Z0_2;
+  Scalar capital_delta2_C1;
+  Scalar eth1_B1;
+  Scalar capital_delta2_V1;
+  Scalar eth2_C1;
+  Scalar ethprime2_Csharp1;
+};
+
+template <class Scalar>
+struct Plus2OrderedPairQDerivativesT {
+  Scalar ethprime1_Bsharp1;
+  Scalar capital_delta2_Sig2;
+  Scalar capital_delta3_Kap2;
+  Scalar ethprime3_Kap2;
+};
+
 template <class Scalar>
 struct Plus2C12TermsT {
   Scalar c01, c02, c03, c04, c05, c06, c07, c08;
@@ -131,22 +157,38 @@ struct Plus2OrderedPairSourceT {
   Plus2Q12TermsT<Scalar> Q12;
 };
 
+template <class Scalar>
+struct Plus2OrderedPairJkSourceT {
+  Plus2C12TermsT<Scalar> C12;
+  Plus2B12TermsT<Scalar> B12;
+  Plus2D12TermsT<Scalar> D12;
+  Plus2J12TermsT<Scalar> J12;
+  Plus2K12TermsT<Scalar> K12;
+};
+
+template <class Scalar>
+struct Plus2OrderedPairQSourceT {
+  Plus2Er12TermsT<Scalar> Er12;
+  Plus2Et12TermsT<Scalar> Et12;
+  Plus2Q12TermsT<Scalar> Q12;
+};
+
 using Plus2OrderedPairFields = Plus2OrderedPairFieldsT<Complex>;
 using Plus2OrderedPairDerivatives = Plus2OrderedPairDerivativesT<Complex>;
 using Plus2OrderedPairSource = Plus2OrderedPairSourceT<Complex>;
 
 template <class Scalar>
-KOKKOS_INLINE_FUNCTION Plus2OrderedPairSourceT<Scalar>
-plus2_compact_ordered_pair_source(
+KOKKOS_INLINE_FUNCTION Plus2OrderedPairJkSourceT<Scalar>
+plus2_compact_ordered_pair_jk_source(
     const double radius, const KerrBackgroundPoint& background,
     const Plus2OrderedPairFieldsT<Scalar>& f,
-    const Plus2OrderedPairDerivativesT<Scalar>& d) {
+    const Plus2OrderedPairJkDerivativesT<Scalar>& d) {
   const Complex mubar0 = Kokkos::conj(background.mu0);
   const Complex pibar0 = Kokkos::conj(background.pi0);
   const Complex taubar0 = Kokkos::conj(background.tau0);
   const double radius2 = radius * radius;
 
-  Plus2OrderedPairSourceT<Scalar> result;
+  Plus2OrderedPairJkSourceT<Scalar> result;
   result.C12 = {
       -f.Csharp1 * d.capital_delta4_Z1_2,
       0.5 * f.Bsharp1 * d.ethprime4_Z1_2,
@@ -179,6 +221,22 @@ plus2_compact_ordered_pair_source(
       3.5 * radius2 * background.pi0 * f.Csharp1 * f.Z1_2,
       radius2 * taubar0 * f.Csharp1 * f.Z1_2};
 
+  result.J12 = {radius * result.C12.total(), 3.0 * f.Sig1 * f.H2};
+  result.K12 = {radius * result.B12.total(), -result.D12.total(),
+                -3.0 * f.Kap1 * f.H2};
+  return result;
+}
+
+template <class Scalar>
+KOKKOS_INLINE_FUNCTION Plus2OrderedPairQSourceT<Scalar>
+plus2_compact_ordered_pair_q_source(
+    const double radius, const KerrBackgroundPoint& background,
+    const Plus2OrderedPairFieldsT<Scalar>& f,
+    const Plus2OrderedPairQDerivativesT<Scalar>& d) {
+  const Complex mubar0 = Kokkos::conj(background.mu0);
+  const Complex taubar0 = Kokkos::conj(background.tau0);
+
+  Plus2OrderedPairQSourceT<Scalar> result;
   result.Er12 = {
       -0.5 * f.V1 * d.capital_delta2_Sig2,
       -3.0 * f.Ep1 * f.Sig2,
@@ -194,11 +252,31 @@ plus2_compact_ordered_pair_source(
       1.5 * radius * background.pi0 * f.Bsharp1 * f.Kap2,
       0.5 * radius * taubar0 * f.Bsharp1 * f.Kap2};
 
-  result.J12 = {radius * result.C12.total(), 3.0 * f.Sig1 * f.H2};
-  result.K12 = {radius * result.B12.total(), -result.D12.total(),
-                -3.0 * f.Kap1 * f.H2};
   result.Q12 = {result.Er12.total(), -radius * result.Et12.total()};
   return result;
+}
+
+template <class Scalar>
+KOKKOS_INLINE_FUNCTION Plus2OrderedPairSourceT<Scalar>
+plus2_compact_ordered_pair_source(
+    const double radius, const KerrBackgroundPoint& background,
+    const Plus2OrderedPairFieldsT<Scalar>& f,
+    const Plus2OrderedPairDerivativesT<Scalar>& d) {
+  const auto jk = plus2_compact_ordered_pair_jk_source(
+      radius, background, f,
+      Plus2OrderedPairJkDerivativesT<Scalar>{
+          d.capital_delta4_Z1_2, d.ethprime4_Z1_2,
+          d.capital_delta2_Csharp1, d.ethprime1_Bsharp1,
+          d.capital_delta5_Z0_2, d.eth5_Z0_2, d.capital_delta2_C1,
+          d.eth1_B1, d.capital_delta2_V1, d.eth2_C1,
+          d.ethprime2_Csharp1});
+  const auto q = plus2_compact_ordered_pair_q_source(
+      radius, background, f,
+      Plus2OrderedPairQDerivativesT<Scalar>{
+          d.ethprime1_Bsharp1, d.capital_delta2_Sig2,
+          d.capital_delta3_Kap2, d.ethprime3_Kap2});
+  return {jk.C12, jk.B12, jk.D12, q.Er12, q.Et12,
+          jk.J12, jk.K12, q.Q12};
 }
 
 template <class Scalar>

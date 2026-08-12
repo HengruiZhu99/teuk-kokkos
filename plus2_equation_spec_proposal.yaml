@@ -108,6 +108,20 @@ compact_raw_source:
   horizon_result: finite_for_RH_positive
   oracle: tools/symbolic/verify_plus2_compact_source.py
 
+stage_local_bianchi_closure:
+  status: standalone_route_a_implemented_not_runtime_wired
+  authority: "arXiv:2008.11770 bianchi-5, bianchi-6, delta-1; vacuum ORG with gamma=0"
+  delta5_Z0: "eth_4 Z1-R*mu0*Z0-4*R*tau0*Z1+3*Sig*H"
+  delta4_Z1: "eth_3 H+R*(-2*mu0*Z1-3*tau0*H-Csharp*Delta_3 psi20+(1/2)*Bsharp*ethprime_3 psi20-3*Ta*psi20)"
+  inversion: "X_T=[F-(R/L^2)*(R*X_R+n*X)]/(2+4*M*R/L^2)"
+  time_order: "h[0..2] with Bianchi closure; naive local metric forcing value would require h[0..4]"
+  production_value_contract: "J and K value+tangent; Q value only; final forcing value only"
+  endpoint: "Z0/Z1 values require explicit qualified scri quotient coefficients; missing coefficients fail closed"
+  implementation:
+    - include/teuk/plus2_bianchi.hpp
+    - include/teuk/plus2_source_value_spatial.hpp
+  symbolic_test: tools/symbolic/verify_plus2_bianchi_closure.py
+
 homogeneous_operator:
   authority: "arXiv:2010.00162 compact common s=+/-2 master equation"
   spin: 2

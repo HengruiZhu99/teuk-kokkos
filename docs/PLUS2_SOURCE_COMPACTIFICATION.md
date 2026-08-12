@@ -332,3 +332,13 @@ pairs, sharp lookup, common-amplitude quadratic scaling, every Jet directional
 derivative, allocation freedom, regular coordinate normalization, and Kokkos
 device parity.  This module deliberately remains absent from
 `SpatialPipeline`; its existence does not enable a sourced companion run.
+
+The narrower forcing-value path in
+`include/teuk/plus2_source_value_spatial.hpp` splits the pair evaluation into
+J/K values plus analytic tangents and Q value only.  This is the exact minimal
+contract because the outer `thorn_5(J)` and `eth_6(K)` consume `J_T,K_T`,
+whereas Q enters algebraically.  It never asks callers to manufacture
+`Delta_2(Sig)_T`, `Delta_3(Kap)_T`, or `ethprime_3(Kap)_T` for unused
+diagnostics.  The Route A Bianchi construction of the curvature slots,
+including its `h[0..2]` order bound and fail-closed scri dependency, is audited
+in `docs/PLUS2_STAGE_LOCAL_BIANCHI_GATE.md`.
