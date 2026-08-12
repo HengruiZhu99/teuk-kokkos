@@ -85,6 +85,12 @@ inline void write_resolved_run_configuration(
 
 inline int run_solver(const RunParameters& input) {
   validate_run_parameters(input);
+  if (input.plus2.enabled) {
+    throw std::runtime_error(
+        std::string("plus2 mode '") + plus2_run_mode_name(input.plus2.mode) +
+        "' is not production integrated; use plus2.enabled=false and "
+        "plus2.mode=disabled");
+  }
   write_resolved_run_configuration(input);
   if (input.second_order.enabled) {
     const auto completeness = validate_quadratic_daughter_modes(

@@ -188,6 +188,22 @@ inline std::string initial_data_name(const InitialDataType type) {
   throw std::invalid_argument("unsupported initial-data type");
 }
 
+inline std::string plus2_linear_method_name(const Plus2LinearMethod method) {
+  switch (method) {
+    case Plus2LinearMethod::MetricCurvature: return "metric_curvature";
+    case Plus2LinearMethod::Tsi: return "tsi";
+    case Plus2LinearMethod::Both: return "both";
+  }
+  throw std::invalid_argument("unsupported plus2 linear method");
+}
+
+inline std::string plus2_second_method_name(const Plus2SecondMethod method) {
+  switch (method) {
+    case Plus2SecondMethod::SourcedCompanion: return "sourced_companion";
+  }
+  throw std::invalid_argument("unsupported plus2 second method");
+}
+
 }  // namespace config_detail
 
 inline RunParameters resolve_run_parameters(
@@ -358,6 +374,61 @@ inline RunParameters resolve_run_parameters(
           parameters.second_order.required_consecutive_passes);
   set_bool("second_order.allow_truncated_daughter_modes",
            parameters.second_order.allow_truncated_daughter_modes);
+
+  set_bool("plus2.enabled", parameters.plus2.enabled);
+  if (const auto* text = value("plus2.mode")) {
+    parameters.plus2.mode = parse_plus2_run_mode(*text);
+  }
+  if (const auto* text = value("plus2.linear.method")) {
+    if (*text == "metric_curvature") {
+      parameters.plus2.linear_method = Plus2LinearMethod::MetricCurvature;
+    } else if (*text == "tsi") {
+      parameters.plus2.linear_method = Plus2LinearMethod::Tsi;
+    } else if (*text == "both") {
+      parameters.plus2.linear_method = Plus2LinearMethod::Both;
+    } else {
+      throw std::invalid_argument(
+          "key 'plus2.linear.method' requires metric_curvature, tsi, or both");
+    }
+  }
+  set_bool("plus2.linear.evolve_validation",
+           parameters.plus2.linear_evolve_validation);
+  if (const auto* text = value("plus2.second.method")) {
+    if (*text == "sourced_companion") {
+      parameters.plus2.second_method = Plus2SecondMethod::SourcedCompanion;
+    } else {
+      throw std::invalid_argument(
+          "key 'plus2.second.method' requires sourced_companion");
+    }
+  }
+  if (const auto* text = value("plus2.second.initial_policy")) {
+    parameters.plus2.second_initial_policy =
+        parse_plus2_initial_policy(*text);
+  }
+  set_string("plus2.second.checkpoint", parameters.plus2.second_checkpoint);
+  if (parameters.plus2.second_checkpoint == "none") {
+    parameters.plus2.second_checkpoint.clear();
+  }
+  const bool plus2_first_ell_explicit =
+      entries.contains("plus2.ell_max_first");
+  const bool plus2_second_ell_explicit =
+      entries.contains("plus2.ell_max_second");
+  set_int("plus2.ell_max_first", parameters.plus2.ell_max_first);
+  set_int("plus2.ell_max_second", parameters.plus2.ell_max_second);
+  if (!plus2_first_ell_explicit) {
+    parameters.plus2.ell_max_first = parameters.grid.ell_max_first;
+  }
+  if (!plus2_second_ell_explicit) {
+    parameters.plus2.ell_max_second = parameters.grid.ell_max_second;
+  }
+  set_bool("plus2.output.regularized", parameters.plus2.output.regularized);
+  set_bool("plus2.output.physical_tetrad_field",
+           parameters.plus2.output.physical_tetrad_field);
+  set_bool("plus2.output.source_families",
+           parameters.plus2.output.source_families);
+  set_bool("plus2.output.ordered_pairs",
+           parameters.plus2.output.ordered_pairs);
+
   set_string("output.directory", parameters.output.directory);
   set_int("output.diagnostic_every",
           parameters.output.diagnostic_interval);
@@ -509,6 +580,89 @@ inline void validate_run_parameters(const RunParameters& parameters) {
       parameters.second_order.required_consecutive_passes < 1) {
     throw std::invalid_argument("invalid second-order source activation policy");
   }
+
+  const bool plus2_mode_enabled =
+      parameters.plus2.mode != Plus2RunMode::Disabled;
+  (void)plus2_run_mode_name(parameters.plus2.mode);
+  (void)config_detail::plus2_linear_method_name(
+      parameters.plus2.linear_method);
+  (void)config_detail::plus2_second_method_name(
+      parameters.plus2.second_method);
+  (void)plus2_initial_policy_name(
+      parameters.plus2.second_initial_policy);
+  if (parameters.plus2.enabled != plus2_mode_enabled) {
+    throw std::invalid_argument(
+        "plus2.enabled must be true exactly when plus2.mode is not disabled");
+  }
+  if (parameters.plus2.ell_max_first < 2 ||
+      parameters.plus2.ell_max_second < 2) {
+    throw std::invalid_argument(
+        "plus2 ell_max_first and ell_max_second must be at least 2");
+  }
+  const auto validate_plus2_registry_band = [](const std::vector<int>& modes,
+                                                const int ell_max,
+                                                const char* label) {
+    for (const int mode : modes) {
+      if (std::abs(mode) > ell_max) {
+        throw std::invalid_argument(std::string(label) +
+                                    " contains |m| above the plus2 band");
+      }
+    }
+  };
+  validate_plus2_registry_band(parameters.grid.first_order_modes,
+                               parameters.plus2.ell_max_first,
+                               "first_order_modes");
+  validate_plus2_registry_band(parameters.grid.second_order_modes,
+                               parameters.plus2.ell_max_second,
+                               "second_order_modes");
+  const int plus2_product_nodes =
+      (2 * parameters.plus2.ell_max_first +
+       parameters.plus2.ell_max_second + 2) /
+      2;
+  if (parameters.plus2.enabled &&
+      parameters.grid.theta_points <
+          std::max({parameters.plus2.ell_max_first + 1,
+                    parameters.plus2.ell_max_second + 1,
+                    plus2_product_nodes})) {
+    throw std::invalid_argument(
+        "ntheta is too small for the selected plus2 angular bands");
+  }
+  const bool checkpoint_policy =
+      parameters.plus2.second_initial_policy ==
+      Plus2InitialPolicy::Checkpoint;
+  if (checkpoint_policy != !parameters.plus2.second_checkpoint.empty()) {
+    throw std::invalid_argument(
+        "plus2.second.checkpoint is required exactly for checkpoint initial policy");
+  }
+  if (!parameters.plus2.second_checkpoint.empty() &&
+      parameters.plus2.second_checkpoint.find_first_of("\r\n#=") !=
+          std::string::npos) {
+    throw std::invalid_argument(
+        "plus2.second.checkpoint must be a config-safe single-line path");
+  }
+  if ((parameters.plus2.mode == Plus2RunMode::Disabled ||
+       parameters.plus2.mode == Plus2RunMode::DiagnosticOnly) &&
+      checkpoint_policy) {
+    throw std::invalid_argument(
+        "plus2 disabled/diagnostic_only mode cannot load a second-order companion checkpoint");
+  }
+  if ((parameters.plus2.mode == Plus2RunMode::Concurrent ||
+       parameters.plus2.mode == Plus2RunMode::Replay) &&
+      !parameters.second_order.enabled) {
+    throw std::invalid_argument(
+        "plus2 concurrent/replay requires second_order.enabled=true for four-field evolution");
+  }
+  if (parameters.plus2.output.ordered_pairs &&
+      !parameters.plus2.output.source_families) {
+    throw std::invalid_argument(
+        "plus2 ordered-pair output requires source-family output");
+  }
+  if (parameters.plus2.enabled &&
+      !parameters.plus2.output.regularized &&
+      !parameters.plus2.output.physical_tetrad_field) {
+    throw std::invalid_argument(
+        "enabled plus2 mode must output a regularized or physical tetrad field");
+  }
   if (parameters.output.directory.empty() ||
       parameters.output.directory.find_first_of("\r\n") != std::string::npos) {
     throw std::invalid_argument("output.directory must be a nonempty single line");
@@ -619,6 +773,40 @@ inline std::string resolved_configuration_text(
          << parameters.second_order.required_consecutive_passes << '\n'
          << "second_order.allow_truncated_daughter_modes = "
          << parameters.second_order.allow_truncated_daughter_modes << '\n'
+         << "plus2.enabled = " << parameters.plus2.enabled << '\n'
+         << "plus2.mode = " << plus2_run_mode_name(parameters.plus2.mode)
+         << '\n'
+         << "plus2.linear.method = "
+         << config_detail::plus2_linear_method_name(
+                parameters.plus2.linear_method)
+         << '\n'
+         << "plus2.linear.evolve_validation = "
+         << parameters.plus2.linear_evolve_validation << '\n'
+         << "plus2.second.method = "
+         << config_detail::plus2_second_method_name(
+                parameters.plus2.second_method)
+         << '\n'
+         << "plus2.second.initial_policy = "
+         << plus2_initial_policy_name(
+                parameters.plus2.second_initial_policy)
+         << '\n'
+         << "plus2.second.checkpoint = "
+         << (parameters.plus2.second_checkpoint.empty()
+                 ? "none"
+                 : parameters.plus2.second_checkpoint)
+         << '\n'
+         << "plus2.ell_max_first = " << parameters.plus2.ell_max_first
+         << '\n'
+         << "plus2.ell_max_second = " << parameters.plus2.ell_max_second
+         << '\n'
+         << "plus2.output.regularized = "
+         << parameters.plus2.output.regularized << '\n'
+         << "plus2.output.physical_tetrad_field = "
+         << parameters.plus2.output.physical_tetrad_field << '\n'
+         << "plus2.output.source_families = "
+         << parameters.plus2.output.source_families << '\n'
+         << "plus2.output.ordered_pairs = "
+         << parameters.plus2.output.ordered_pairs << '\n'
          << "output.directory = " << parameters.output.directory << '\n'
          << "output.diagnostic_every = "
          << parameters.output.diagnostic_interval << '\n'

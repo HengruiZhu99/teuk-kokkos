@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include "teuk/plus2_replay.hpp"
 #include "teuk/spatial_pipeline.hpp"
 #include "teuk/types.hpp"
 
@@ -67,6 +68,29 @@ struct SecondOrderRunParameters {
   bool allow_truncated_daughter_modes = false;
 };
 
+enum class Plus2LinearMethod { MetricCurvature, Tsi, Both };
+enum class Plus2SecondMethod { SourcedCompanion };
+
+struct Plus2OutputRunParameters {
+  bool regularized = true;
+  bool physical_tetrad_field = true;
+  bool source_families = true;
+  bool ordered_pairs = false;
+};
+
+struct Plus2RunParameters {
+  bool enabled = false;
+  Plus2RunMode mode = Plus2RunMode::Disabled;
+  Plus2LinearMethod linear_method = Plus2LinearMethod::MetricCurvature;
+  bool linear_evolve_validation = false;
+  Plus2SecondMethod second_method = Plus2SecondMethod::SourcedCompanion;
+  Plus2InitialPolicy second_initial_policy = Plus2InitialPolicy::Zero;
+  std::string second_checkpoint;
+  int ell_max_first = 4;
+  int ell_max_second = 4;
+  Plus2OutputRunParameters output;
+};
+
 struct OutputRunParameters {
   std::string directory = "teuk-output";
   int diagnostic_interval = 5;
@@ -81,6 +105,7 @@ struct RunParameters {
   MethodRunParameters method;
   InitialDataParameters initial_data;
   SecondOrderRunParameters second_order;
+  Plus2RunParameters plus2;
   OutputRunParameters output;
 };
 

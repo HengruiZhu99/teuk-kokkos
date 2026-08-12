@@ -52,6 +52,10 @@ output.checkpoint_every = 0
   if(spin_position EQUAL -1)
     message(FATAL_ERROR "${name} resolved spin is incorrect")
   endif()
+  string(FIND "${resolved_text}" "plus2.enabled = false" plus2_position)
+  if(plus2_position EQUAL -1)
+    message(FATAL_ERROR "${name} did not resolve the disabled plus2 default")
+  endif()
 endfunction()
 
 run_one(spin_zero 0)
@@ -61,4 +65,31 @@ file(READ "${TEUK_INTEGRATION_DIR}/spin_zero-output/resolved_config.cfg" zero)
 file(READ "${TEUK_INTEGRATION_DIR}/spin_half-output/resolved_config.cfg" half)
 if(zero STREQUAL half)
   message(FATAL_ERROR "two runs from one executable produced identical configs")
+endif()
+
+set(plus2_output "${TEUK_INTEGRATION_DIR}/plus2-rejected-output")
+set(plus2_config "${TEUK_INTEGRATION_DIR}/plus2-rejected.cfg")
+file(WRITE "${plus2_config}"
+"config_version = 1
+plus2.enabled = true
+plus2.mode = diagnostic_only
+output.directory = ${plus2_output}
+")
+execute_process(
+  COMMAND "${TEUK_SOLVER}" --config "${plus2_config}"
+  RESULT_VARIABLE plus2_status
+  OUTPUT_VARIABLE plus2_stdout
+  ERROR_VARIABLE plus2_stderr)
+if(plus2_status EQUAL 0)
+  message(FATAL_ERROR "enabled plus2 mode unexpectedly entered production")
+endif()
+string(FIND "${plus2_stderr}"
+  "plus2 mode 'diagnostic_only' is not production integrated"
+  plus2_error_position)
+if(plus2_error_position EQUAL -1)
+  message(FATAL_ERROR
+    "enabled plus2 mode did not fail with the production gate: ${plus2_stderr}")
+endif()
+if(EXISTS "${plus2_output}")
+  message(FATAL_ERROR "rejected plus2 mode allocated an output directory")
 endif()

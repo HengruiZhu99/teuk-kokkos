@@ -60,6 +60,10 @@ TEST_CASE("runtime configuration defaults fallback and resolved round trip") {
   CHECK(defaults.grid.ell_max_first == 4);
   CHECK(defaults.grid.ell_max_second == defaults.grid.ell_max_first);
   CHECK(!defaults.second_order.enabled);
+  CHECK(!defaults.plus2.enabled);
+  CHECK(defaults.plus2.mode == teuk::Plus2RunMode::Disabled);
+  CHECK(defaults.plus2.ell_max_first == defaults.grid.ell_max_first);
+  CHECK(defaults.plus2.ell_max_second == defaults.grid.ell_max_second);
   CHECK(defaults.initial_data.modes.size() == 1);
 
   const auto configured = teuk::parse_run_configuration_text(R"cfg(
@@ -79,6 +83,19 @@ TEST_CASE("runtime configuration defaults fallback and resolved round trip") {
     second_order.source_start_time = 0.125
     second_order.constraint_tolerance = 3e-9
     second_order.required_consecutive_passes = 3
+    plus2.enabled = true
+    plus2.mode = concurrent
+    plus2.linear.method = both
+    plus2.linear.evolve_validation = true
+    plus2.second.method = sourced_companion
+    plus2.second.initial_policy = checkpoint
+    plus2.second.checkpoint = companion-start.bin
+    plus2.ell_max_first = 5
+    plus2.ell_max_second = 5
+    plus2.output.regularized = false
+    plus2.output.physical_tetrad_field = true
+    plus2.output.source_families = true
+    plus2.output.ordered_pairs = true
     output.directory = roundtrip-output
   )cfg");
   CHECK(configured.grid.ell_max_second == 5);
@@ -99,6 +116,120 @@ TEST_CASE("runtime configuration defaults fallback and resolved round trip") {
         teuk::SecondOrderSourceMode::Unrestricted);
   CHECK(roundtrip.second_order.required_consecutive_passes == 3);
   CHECK(roundtrip.second_order.normalized_constraint_tolerance == 3e-9);
+  CHECK(roundtrip.plus2.enabled);
+  CHECK(roundtrip.plus2.mode == teuk::Plus2RunMode::Concurrent);
+  CHECK(roundtrip.plus2.linear_method == teuk::Plus2LinearMethod::Both);
+  CHECK(roundtrip.plus2.linear_evolve_validation);
+  CHECK(roundtrip.plus2.second_method ==
+        teuk::Plus2SecondMethod::SourcedCompanion);
+  CHECK(roundtrip.plus2.second_initial_policy ==
+        teuk::Plus2InitialPolicy::Checkpoint);
+  CHECK(roundtrip.plus2.second_checkpoint == "companion-start.bin");
+  CHECK(roundtrip.plus2.ell_max_first == 5);
+  CHECK(roundtrip.plus2.ell_max_second == 5);
+  CHECK(!roundtrip.plus2.output.regularized);
+  CHECK(roundtrip.plus2.output.physical_tetrad_field);
+  CHECK(roundtrip.plus2.output.source_families);
+  CHECK(roundtrip.plus2.output.ordered_pairs);
+}
+
+TEST_CASE("plus2 runtime settings reject unknown and incompatible combinations") {
+  CHECK(config_rejects([] {
+    (void)teuk::parse_run_configuration_text(
+        "config_version = 1\nplus2.mode = concurrent\n");
+  }));
+  CHECK(config_rejects([] {
+    (void)teuk::parse_run_configuration_text(
+        "config_version = 1\nplus2.enabled = true\n");
+  }));
+  CHECK(config_rejects([] {
+    (void)teuk::parse_run_configuration_text(
+        "config_version = 1\nplus2.linear.method = curvatureish\n");
+  }));
+  CHECK(config_rejects([] {
+    (void)teuk::parse_run_configuration_text(
+        "config_version = 1\nplus2.second.method = transformed_psi4\n");
+  }));
+  CHECK(config_rejects([] {
+    (void)teuk::parse_run_configuration_text(
+        "config_version = 1\nplus2.second.initial_policy = checkpoint\n");
+  }));
+  CHECK(config_rejects([] {
+    (void)teuk::parse_run_configuration_text(
+        "config_version = 1\nplus2.second.checkpoint = state.bin\n");
+  }));
+  CHECK(config_rejects([] {
+    (void)teuk::parse_run_configuration_text(R"cfg(
+      config_version = 1
+      plus2.second.initial_policy = checkpoint
+      plus2.second.checkpoint = state.bin
+    )cfg");
+  }));
+  CHECK(config_rejects([] {
+    (void)teuk::parse_run_configuration_text(R"cfg(
+      config_version = 1
+      plus2.enabled = true
+      plus2.mode = diagnostic_only
+      plus2.second.initial_policy = checkpoint
+      plus2.second.checkpoint = state.bin
+    )cfg");
+  }));
+  CHECK(config_rejects([] {
+    (void)teuk::parse_run_configuration_text(R"cfg(
+      config_version = 1
+      plus2.enabled = true
+      plus2.mode = concurrent
+    )cfg");
+  }));
+  CHECK(config_rejects([] {
+    (void)teuk::parse_run_configuration_text(R"cfg(
+      config_version = 1
+      plus2.enabled = true
+      plus2.mode = diagnostic_only
+      plus2.output.source_families = false
+      plus2.output.ordered_pairs = true
+    )cfg");
+  }));
+  CHECK(config_rejects([] {
+    (void)teuk::parse_run_configuration_text(R"cfg(
+      config_version = 1
+      plus2.enabled = true
+      plus2.mode = diagnostic_only
+      plus2.output.regularized = false
+      plus2.output.physical_tetrad_field = false
+    )cfg");
+  }));
+}
+
+TEST_CASE("plus2 runtime settings validate inherited registries and bands") {
+  const auto valid = teuk::parse_run_configuration_text(R"cfg(
+    config_version = 1
+    plus2.ell_max_first = 2
+    plus2.ell_max_second = 2
+  )cfg");
+  CHECK(valid.plus2.ell_max_first == 2);
+  CHECK(valid.plus2.ell_max_second == 2);
+
+  CHECK(config_rejects([] {
+    (void)teuk::parse_run_configuration_text(
+        "config_version = 1\nplus2.ell_max_first = 1\n");
+  }));
+  CHECK(config_rejects([] {
+    (void)teuk::parse_run_configuration_text(R"cfg(
+      config_version = 1
+      second_order_modes = -3,3
+      plus2.ell_max_second = 2
+    )cfg");
+  }));
+  CHECK(config_rejects([] {
+    (void)teuk::parse_run_configuration_text(R"cfg(
+      config_version = 1
+      plus2.enabled = true
+      plus2.mode = diagnostic_only
+      plus2.ell_max_first = 6
+      plus2.ell_max_second = 6
+    )cfg");
+  }));
 }
 
 TEST_CASE("initial-data factory adds sharp partners only when requested") {

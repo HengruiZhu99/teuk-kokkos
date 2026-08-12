@@ -30,12 +30,47 @@ The current required schema marker is `config_version = 1`.
 | Base Gaussian mode | `initial_data.seed_ell`, `initial_data.seed_m`, `initial_data.amplitude_real`, `initial_data.amplitude_imag` |
 | Additional modes | `initial_data.mode.N.ell`, `.m`, `.amplitude_real`, `.amplitude_imag` |
 | Second order | `second_order.enabled`, `.source_mode`, `.source_start_time`, `.constraint_tolerance`, `.required_consecutive_passes`, `.allow_truncated_daughter_modes` |
+| Spin +2 companion | `plus2.enabled`, `.mode`, `.linear.method`, `.linear.evolve_validation`, `.second.method`, `.second.initial_policy`, `.second.checkpoint`, `.ell_max_first`, `.ell_max_second` |
+| Spin +2 output policy | `plus2.output.regularized`, `.physical_tetrad_field`, `.source_families`, `.ordered_pairs` |
 | Output | `output.directory`, `output.diagnostic_every`, `output.checkpoint_every` |
 
 `reduction_mode` is `free_damped` or `stage_constrained`.
 `second_order.source_mode` is `constraint_aware` or `unrestricted` when
 second-order evolution is enabled. `initial_data.type` is currently
 `gaussian` or `checkpoint`; no unverified profile is advertised.
+
+The parsed spin +2 enum values are:
+
+- `plus2.mode`: `disabled`, `diagnostic_only`, `concurrent`, or `replay`;
+- `plus2.linear.method`: `metric_curvature`, `tsi`, or `both`;
+- `plus2.second.method`: only `sourced_companion`;
+- `plus2.second.initial_policy`: `zero` or `checkpoint`.
+
+The checkpoint path is required exactly when the companion initial policy is
+`checkpoint`, and is forbidden for `zero`. Disabled and `diagnostic_only`
+modes cannot load a second-order checkpoint. Concurrent and replay modes
+require the existing spin -2 `second_order.enabled=true` path so a requested
+run retains all four Weyl fields. The current first-order parent and
+second-order target signed-m registries must fit within the independent plus2
+angular bands, and `ntheta` must resolve those bands and their padded products.
+Ordered-pair output requires source-family output. Every plus2 value, including
+disabled defaults, is emitted into `resolved_config.cfg`.
+
+### Production integration gate
+
+The runtime surface is intentionally present before production activation so
+configurations and replay provenance can stabilize. The standalone curvature,
+source, companion, and replay components are not yet connected to
+`SpatialPipeline`. Therefore every `plus2.enabled=true` mode currently fails
+at solver startup with `not production integrated`, after strict parsing and
+resolution but before output-directory creation or large Kokkos allocation.
+The only executable setting is the default pair
+`plus2.enabled=false`, `plus2.mode=disabled`; it leaves the qualified primary
+path unchanged. This gate must be removed only with the production wiring and
+its four-field validation evidence.
+
+These keys are backward-compatible optional additions with fully resolved
+defaults, so the runtime configuration schema remains version 1.
 
 `initial_data.center` and `initial_data.width` are fractions of the compactified
 outer-horizon coordinate `R_H`. With `initial_data.compact_support=false`, the
