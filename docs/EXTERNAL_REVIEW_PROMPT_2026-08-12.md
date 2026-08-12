@@ -1,5 +1,12 @@
 # Prompt for a repository-only external reviewer
 
+> **Main-thread termination pointer (2026-08-12).** Read
+> `docs/MAIN_THREAD_TERMINATION_REPORT_2026-08-12.md` first for the final
+> provenance boundary, complete roadblock history, exact scientific-commit
+> `390/390` and CTest `24/24` evidence, Kerr-QNM interior status, and remaining
+> promotion gates. This prompt remains the detailed skeptical audit procedure;
+> where dated status differs, the termination report is later authority.
+
 You have access only to this Git repository. You do **not** have access to the
 author's ignored `run/` directory, historical checkpoints, waveform CSVs,
 plots, build trees, `/tmp` virtual environments, GPU driver logs, or any other

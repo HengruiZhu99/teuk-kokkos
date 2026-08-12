@@ -1,5 +1,14 @@
 # External-review remediation report: spin `+2` source and infrastructure
 
+> **Main-thread termination pointer (2026-08-12).** The comprehensive final
+> handoff is `docs/MAIN_THREAD_TERMINATION_REPORT_2026-08-12.md`. It preserves
+> this report's commit-scoped history and adds the exact scientific pre-report
+> commit `4bd66b068c74c4439873c20f0e591b9138530eca`, its fresh audit-enabled
+> Serial `390/390` unit and `24/24` CTest result, the normalized moderate-Kerr
+> complex-frequency QNM interior fixture, the complete failed-approach ledger,
+> and the final standalone-only verdict. This document remains the detailed
+> remediation derivation; use the termination report for final status.
+
 Date: 2026-08-12 (America/New_York)
 
 Review anchor: `43e9300080140e3df4d05affd67ffa41b5ddbe57`
