@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Independent rotating-Kerr coordinate oracle for linear Psi0.
+"""Independent rotating-Kerr coordinate oracle for linear Psi0 and Psi1.
 
 The coordinate branch uses a local second-order multivariate jet type to
 differentiate the tetrad-derived coordinate metric and a manufactured ORG
-metric perturbation.  It varies Christoffels and the Riemann tensor directly;
-no sigma/kappa expression occurs in that branch.  A separate NP branch is the
-quantity under test and evaluates the corrected Campanelli--Lousto A5 form and
-the inconsistent connection signs displayed in Loutrel et al. Eq. (12).
+metric perturbation.  It varies Christoffels, Riemann, Ricci, and the full
+Weyl tensor directly; no perturbed-spin-coefficient expression occurs in that
+branch. Separate NP branches are quantities under test. They evaluate the
+corrected Campanelli--Lousto A5 Psi0 form, the solved riem-5 Psi1 identity,
+and the inconsistent signs in the separately printed Loutrel expressions.
 
 All geometry is the a != 0 code tetrad of Ripley et al. arXiv:2010.00162
 Eqs. (5), (6), and (8), with signature +--- and Psi0=-C(l,m,l,m).
@@ -393,6 +394,7 @@ class KerrGeometry:
     beta: Jet2
     tau: Jet2
     pi: Jet2
+    mu: Jet2
 
 
 def kerr_geometry(
@@ -461,8 +463,9 @@ def kerr_geometry(
     pi = -I * spin * radius**2 * sin_theta / (
         SQRT_TWO * real_denominator
     )
+    mu = radius / (-length2 + I * spin * radius * cos_theta)
     return KerrGeometry(l, n, m, mbar, inverse_metric, metric, rho, epsilon,
-                        alpha, beta, tau, pi)
+                        alpha, beta, tau, pi, mu)
 
 
 def matrix_value(matrix: JetMatrix) -> ComplexMatrix:
@@ -650,9 +653,9 @@ def validate_org_metric(
                   max(reality_residuals + symmetry_residuals), 3.0e-11)
 
 
-def coordinate_linearized_psi0(
-    geometry: KerrGeometry, perturbation: JetMatrix
-) -> tuple[complex, float, complex]:
+def coordinate_linearized_curvature(
+    geometry: KerrGeometry, perturbation: JetMatrix, h_lm: Jet2
+) -> tuple[complex, complex, float, complex, complex, complex]:
     g = matrix_value(geometry.metric)
     h = matrix_value(perturbation)
     inverse_g = matrix_value(geometry.inverse_metric)
@@ -776,30 +779,98 @@ def coordinate_linearized_psi0(
             )
         )
 
+    background_ricci = [[0.0j] * DIMENSION for _ in range(DIMENSION)]
+    delta_ricci = [[0.0j] * DIMENSION for _ in range(DIMENSION)]
     maximum_ricci = 0.0
     for b in range(DIMENSION):
         for d in range(DIMENSION):
             ricci = sum(riemann_up(a, b, a, d) for a in range(DIMENSION))
+            delta = sum(delta_riemann_up(a, b, a, d)
+                        for a in range(DIMENSION))
+            background_ricci[b][d] = ricci
+            delta_ricci[b][d] = delta
             maximum_ricci = max(maximum_ricci, abs(ricci))
 
-    l = [entry.value for entry in geometry.l]
-    m = [entry.value for entry in geometry.m]
-    background_contraction = 0.0j
-    perturbation_contraction = 0.0j
-    for a, b, c, d in itertools.product(range(DIMENSION), repeat=4):
-        riemann_down = sum(
-            g[a][e] * riemann_up(e, b, c, d) for e in range(DIMENSION)
+    background_scalar = sum(
+        inverse_g[b][d] * background_ricci[b][d]
+        for b in range(DIMENSION) for d in range(DIMENSION)
+    )
+    delta_scalar = sum(
+        delta_inverse_g[b][d] * background_ricci[b][d]
+        + inverse_g[b][d] * delta_ricci[b][d]
+        for b in range(DIMENSION) for d in range(DIMENSION)
+    )
+
+    def weyl_down(a: int, b: int, c: int, d: int) -> complex:
+        riemann = sum(g[a][e] * riemann_up(e, b, c, d)
+                      for e in range(DIMENSION))
+        trace = 0.5 * (
+            g[a][c] * background_ricci[d][b]
+            - g[a][d] * background_ricci[c][b]
+            - g[b][c] * background_ricci[d][a]
+            + g[b][d] * background_ricci[c][a]
         )
-        delta_riemann_down = sum(
+        scalar = background_scalar / 6.0 * (
+            g[a][c] * g[d][b] - g[a][d] * g[c][b]
+        )
+        return riemann - trace + scalar
+
+    def delta_weyl_down(a: int, b: int, c: int, d: int) -> complex:
+        delta_riemann = sum(
             h[a][e] * riemann_up(e, b, c, d)
             + g[a][e] * delta_riemann_up(e, b, c, d)
             for e in range(DIMENSION)
         )
-        tetrad_product = l[a] * m[b] * l[c] * m[d]
-        background_contraction += tetrad_product * riemann_down
-        perturbation_contraction += tetrad_product * delta_riemann_down
+        trace = 0.5 * (
+            h[a][c] * background_ricci[d][b]
+            + g[a][c] * delta_ricci[d][b]
+            - h[a][d] * background_ricci[c][b]
+            - g[a][d] * delta_ricci[c][b]
+            - h[b][c] * background_ricci[d][a]
+            - g[b][c] * delta_ricci[d][a]
+            + h[b][d] * background_ricci[c][a]
+            + g[b][d] * delta_ricci[c][a]
+        )
+        scalar = delta_scalar / 6.0 * (
+            g[a][c] * g[d][b] - g[a][d] * g[c][b]
+        ) + background_scalar / 6.0 * (
+            h[a][c] * g[d][b] + g[a][c] * h[d][b]
+            - h[a][d] * g[c][b] - g[a][d] * h[c][b]
+        )
+        return delta_riemann - trace + scalar
 
-    return -perturbation_contraction, maximum_ricci, -background_contraction
+    l = [entry.value for entry in geometry.l]
+    n = [entry.value for entry in geometry.n]
+    m = [entry.value for entry in geometry.m]
+    mbar = [entry.value for entry in geometry.mbar]
+    background_psi0_contraction = 0.0j
+    delta_psi0_contraction = 0.0j
+    background_psi1_contraction = 0.0j
+    delta_psi1_contraction = 0.0j
+    background_l_n_l_n = 0.0j
+    for a, b, c, d in itertools.product(range(DIMENSION), repeat=4):
+        background = weyl_down(a, b, c, d)
+        delta = delta_weyl_down(a, b, c, d)
+        psi0_product = l[a] * m[b] * l[c] * m[d]
+        psi1_product = l[a] * n[b] * l[c] * m[d]
+        background_psi0_contraction += psi0_product * background
+        delta_psi0_contraction += psi0_product * delta
+        background_psi1_contraction += psi1_product * background
+        delta_psi1_contraction += psi1_product * delta
+        background_l_n_l_n += l[a] * n[b] * l[c] * n[d] * background
+
+    # Repository ORG tetrad perturbations are
+    # l1=-h_ll*n/2, n1=0, m1=-h_lm*n+h_mm*mbar/2.  Type-D eliminates every
+    # background contribution except the n part of m1.
+    psi1_tetrad = -h_lm.value * background_l_n_l_n
+    return (
+        -delta_psi0_contraction,
+        -(delta_psi1_contraction + psi1_tetrad),
+        maximum_ricci,
+        -background_psi0_contraction,
+        -background_psi1_contraction,
+        background_l_n_l_n,
+    )
 
 
 def np_linear_psi0(
@@ -849,6 +920,121 @@ def np_linear_psi0(
         + (alpha_bar + 3.0 * beta - pi_bar + tau).value * kappa.value
     )
     return radial - corrected_angular, radial - old_displayed_angular
+
+
+def np_linear_psi1(
+    geometry: KerrGeometry, h_ll: Jet2, h_lm: Jet2, h_mm: Jet2
+) -> tuple[complex, complex]:
+    """Solved ordinary-NP riem-5 identity and the inconsistent printed form."""
+    rho = first_jet(geometry.rho)
+    epsilon = first_jet(geometry.epsilon)
+    alpha = first_jet(geometry.alpha)
+    beta = first_jet(geometry.beta)
+    tau = first_jet(geometry.tau)
+    pi = first_jet(geometry.pi)
+    mu = first_jet(geometry.mu)
+    rho_bar = first_jet(geometry.rho.conjugate())
+    epsilon_bar = first_jet(geometry.epsilon.conjugate())
+    alpha_bar = first_jet(geometry.alpha.conjugate())
+    beta_bar = first_jet(geometry.beta.conjugate())
+    tau_bar = first_jet(geometry.tau.conjugate())
+    pi_bar = first_jet(geometry.pi.conjugate())
+    mu_bar = first_jet(geometry.mu.conjugate())
+    h_lm_bar = h_lm.conjugate()
+    h_mm_bar = h_mm.conjugate()
+
+    D_hmm = directional_first(geometry.l, h_mm)
+    D_hlm = directional_first(geometry.l, h_lm)
+    Delta_hlm = directional_first(geometry.n, h_lm)
+    Delta_hlm_bar = directional_first(geometry.n, h_lm_bar)
+    Delta_hll = directional_first(geometry.n, h_ll)
+    delta_hll = directional_first(geometry.m, h_ll)
+    delta_hlm_bar = directional_first(geometry.m, h_lm_bar)
+    delta_hmm_bar = directional_first(geometry.m, h_mm_bar)
+    bardelta_hlm = directional_first(geometry.mbar, h_lm)
+    bardelta_hmm = directional_first(geometry.mbar, h_mm)
+
+    sigma = (
+        0.5 * (D_hmm + (2.0 * (epsilon_bar - epsilon) + rho - rho_bar)
+                        * first_jet(h_mm))
+        - (tau + pi_bar) * first_jet(h_lm)
+    )
+    kappa = (
+        D_hlm - (2.0 * epsilon + rho_bar) * first_jet(h_lm)
+        - 0.5 * (delta_hll
+                 + (-2.0 * alpha_bar - 2.0 * beta + pi_bar + tau)
+                 * first_jet(h_ll))
+    )
+    rho_bar1 = (
+        0.5 * mu_bar * first_jet(h_ll)
+        + 0.5 * (delta_hlm_bar - (2.0 * alpha_bar + pi_bar)
+                 * first_jet(h_lm_bar))
+        - 0.5 * (bardelta_hlm
+                 + (-2.0 * alpha + pi + 2.0 * tau_bar)
+                 * first_jet(h_lm))
+    )
+    pi_bar1 = (
+        -0.5 * (Delta_hlm + mu * first_jet(h_lm))
+        - 0.5 * tau_bar * first_jet(h_mm)
+    )
+    alpha_bar1 = (
+        -0.25 * (Delta_hlm + (-2.0 * mu_bar + mu) * first_jet(h_lm))
+        - 0.25 * (bardelta_hmm
+                  + (-2.0 * alpha + pi + tau_bar) * first_jet(h_mm))
+    )
+    beta1 = (
+        -0.25 * (Delta_hlm + (mu + 2.0 * mu_bar) * first_jet(h_lm))
+        + 0.25 * (bardelta_hmm
+                  + (2.0 * beta_bar - pi - tau_bar) * first_jet(h_mm))
+    )
+    epsilon1 = (
+        -0.25 * (Delta_hll + (-mu + mu_bar) * first_jet(h_ll))
+        - 0.25 * (delta_hlm_bar
+                  + (-2.0 * alpha_bar + pi_bar + 2.0 * tau)
+                  * first_jet(h_lm_bar))
+        + 0.25 * (bardelta_hlm
+                  + (-2.0 * alpha - 3.0 * pi - 2.0 * tau_bar)
+                  * first_jet(h_lm))
+    )
+    epsilon_bar1 = (
+        -0.25 * (Delta_hll + (-mu_bar + mu) * first_jet(h_ll))
+        - 0.25 * (bardelta_hlm
+                  + (-2.0 * alpha + pi + 2.0 * tau_bar)
+                  * first_jet(h_lm))
+        + 0.25 * (delta_hlm_bar
+                  + (-2.0 * alpha_bar - 3.0 * pi_bar - 2.0 * tau)
+                  * first_jet(h_lm_bar))
+    )
+
+    D_beta1 = directional_value(geometry.l, beta1)
+    delta_epsilon1 = directional_value(geometry.m, epsilon1)
+    D1_beta = -0.5 * h_ll.value * directional_value(
+        geometry.n, first_jet(geometry.beta)
+    )
+    delta1_epsilon = (
+        -h_lm.value * directional_value(geometry.n, first_jet(geometry.epsilon))
+        + 0.5 * h_mm.value
+        * directional_value(geometry.mbar, first_jet(geometry.epsilon))
+    )
+    common = (
+        D_beta1 + D1_beta - rho_bar.value * beta1.value
+        - rho_bar1.value * beta.value + epsilon_bar.value * beta1.value
+        + epsilon_bar1.value * beta.value - delta_epsilon1 - delta1_epsilon
+        - (alpha.value + pi.value) * sigma.value + mu.value * kappa.value
+    )
+    corrected = common + (
+        alpha_bar1.value * epsilon.value
+        + alpha_bar.value * epsilon1.value
+        - pi_bar1.value * epsilon.value
+        - pi_bar.value * epsilon1.value
+    )
+    printed = common - (
+        alpha_bar1.value * epsilon.value
+        + alpha_bar.value * epsilon1.value
+        - pi_bar1.value * epsilon.value
+        - pi_bar.value * epsilon1.value
+    )
+    return corrected, printed
 
 
 def random_coefficient(rng: random.Random) -> float:
@@ -1017,14 +1203,33 @@ def main() -> None:
         validate_derivative_coverage(fixture.name, fields)
         perturbation = reconstruct_org_metric(geometry, *fields)
         validate_org_metric(fixture.name, geometry, perturbation, *fields)
-        coordinate_value, maximum_ricci, background_psi0 = (
-            coordinate_linearized_psi0(geometry, perturbation)
+        (coordinate_value, coordinate_psi1, maximum_ricci,
+         background_psi0, background_psi1, background_l_n_l_n) = (
+            coordinate_linearized_curvature(geometry, perturbation, fields[1])
         )
         corrected_value, old_value = np_linear_psi0(geometry, *fields)
+        corrected_psi1, printed_psi1 = np_linear_psi1(geometry, *fields)
         require_small(f"{fixture.name} background Ricci tensor",
                       maximum_ricci, 3.0e-11)
         require_small(f"{fixture.name} background Psi0", background_psi0,
                       2.0e-11)
+        require_small(f"{fixture.name} background Psi1", background_psi1,
+                      2.0e-11)
+        # In the repository convention Psi2=-C(l,m,mbar,n). Reality of the
+        # Weyl tensor and the type-D trace-free algebra give
+        # C(l,n,l,n)=-2 Re(Psi2).
+        radius = fixture.point[R_INDEX]
+        length2 = fixture.length**2
+        expected_psi2 = -fixture.mass * radius**3 / (
+            length2 - I * fixture.spin * radius
+            * math.cos(fixture.point[THETA_INDEX])
+        )**3
+        require_close(
+            f"{fixture.name} background type-D tetrad correction",
+            background_l_n_l_n,
+            -2.0 * expected_psi2.real,
+            3.0e-11,
+        )
         require_close(
             f"{fixture.name} coordinate Weyl equals corrected NP T0",
             coordinate_value,
@@ -1036,8 +1241,19 @@ def main() -> None:
             coordinate_value,
             old_value,
         )
+        require_close(
+            f"{fixture.name} coordinate Weyl equals solved NP Psi1",
+            coordinate_psi1,
+            corrected_psi1,
+            5.0e-11,
+        )
+        require_separated(
+            f"{fixture.name} coordinate Weyl rejects printed Psi1 signs",
+            coordinate_psi1,
+            printed_psi1,
+        )
 
-    print("Completed rotating-Kerr numerical AD linear Psi0 checks")
+    print("Completed rotating-Kerr numerical AD linear Psi0/Psi1 checks")
 
 
 if __name__ == "__main__":
