@@ -178,9 +178,14 @@ componentwise endpoint and peeling-residual gates, hostile contracts,
 linearity/sharp checks, and hot-stage instrumentation. Do not trust those
 claims from prose or pass counts: regenerate the coordinate fixture, inspect
 its independence, disaggregate every cell, and confirm the old aggregate test
-could not hide a remaining failure. The fixture now includes the exact
-spin-dependent future compact horizon, but does **not** cover scri and does not
-independently oracle all eight derivative slots. At the horizon, audit the
+could not hide a remaining failure. The fixture now includes scri, all eight
+derivative slots, and the exact spin-dependent future compact horizon. Verify
+that the derivative route applies physical GHP operators to coordinate-Weyl
+scalars rather than calling production point operators. Its stored negative
+controls omit `Delta_n` rescaling or GHP angular connections. At scri, confirm
+that the six-node normalized-scalar extrapolator is distinct from the
+production numerator extractor and that both fixed-window remainder budgets
+are respected. At the horizon, audit the
 two-axis qualification rather than accepting a single absolute tolerance:
 radial `N=9,17,33` self-convergence at fixed `ell_max=24`, angular
 `ell_max=12,18,24` convergence, and a continuum coordinate-Weyl discrepancy

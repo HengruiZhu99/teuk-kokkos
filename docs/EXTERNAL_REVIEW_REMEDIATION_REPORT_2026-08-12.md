@@ -32,11 +32,14 @@ sole failure was the scientifically invalid demand that a one-sided discrete
 horizon value equal the continuum coordinate oracle to an interior absolute
 tolerance. The corrected two-axis horizon test subsequently passed its focused
 `5/5` executable, and the concrete live-source seam passed its focused `1/1`
-executable. At the owner's explicit request, no full suite or new test was run
-while wrapping up this report. These are development results, not
-exact-final-document-HEAD qualification. A repository-only reviewer must run
-the commands requested in `docs/EXTERNAL_REVIEW_PROMPT_2026-08-12.md` before
-making any promotion claim.
+executable. The subsequent sourced-replay and coordinate-authority development
+tree passed the direct Serial unit suite `387/387` and audit-enabled CTest
+`23/23`; the coordinate fixture freshness check also passed. These runs were
+completed before the final documentation-only wrap-up. At the owner's explicit
+request, no test was rerun after that wrap-up or after the final commit. These
+are development-tree results, not exact-final-commit qualification. A
+repository-only reviewer must run the commands requested in
+`docs/EXTERNAL_REVIEW_PROMPT_2026-08-12.md` before making any promotion claim.
 
 The root `SHA256SUMS`, `MANIFEST.md`, and `AUDIT_MANIFEST.md` belong to an older
 spin-minus2 audit bundle and do not describe this current plus2 checkout. They
@@ -238,8 +241,8 @@ truncated rotating-Kerr coefficient-induced angular content and produced a
 false milliscale mismatch. At the fixed qualified band the development maximum
 absolute errors were `9.36e-12` for `Z0` and `9.31e-12` for `Z1`.
 
-The coordinate-Weyl fixture now spans interior points and each spin's exact
-future compact horizon; scri remains absent. Interior values retain the
+The coordinate-Weyl fixture now spans interior points, each spin's exact
+future compact horizon, and scri. Interior values retain the
 `5e-11` absolute gate. The horizon uses two independent refinement axes:
 radial `N=9,17,33` at fixed `ell_max=24`, angular
 `ell_max=12,18,24` at fixed `N=33`, and an absolute continuum discrepancy
@@ -251,6 +254,33 @@ increment floor. Interior maxima were `3.17635e-11` for `Z0` and
 binary64 basis-evaluation ceiling and were not presented as promotion
 evidence. The reviewer should independently reproduce and challenge that
 classification.
+
+The same generator now applies the physical GHP definitions directly to the
+full coordinate-Weyl `Psi0/Psi1` contractions. It uses the code tetrad and
+independently checked stationary `alpha,beta`, differentiates the coordinate
+contractions at two fourth-order spacings, Richardson-extrapolates, and only
+then removes the explicit powers of `R`. It independently supplies all eight
+`Delta4/ethprime4/Delta5/eth5` value/tangent slots. On `N=9,17,33` and angular
+bands `12,18,24`, the focused Serial run found minimum resolved radial and
+angular ratios `38.5335` and `19.6569`; the maximum coordinate discrepancy was
+`7.77717e-6` on a magnitude-27 near-extremal horizon value, while the oracle's
+finite-difference remainder was at most `1.09004e-9`. Negative controls omit
+the `Delta_n` rescaling term or the `eth/ethprime` GHP connection; every slot
+separates from its wrong operator by more than `1e-6`.
+
+At scri the independent coordinate route extrapolates the already normalized
+full-Weyl scalar from six positive nodes with weights
+`(6,-15,20,-15,6,-1)`. This operator is exact through degree five and is
+different from the production numerator extractor; it therefore does not
+silently impose peeling. Its minimum fixed-window ratio is `16.1168`, while
+the provider's is `15.2389`. Because the observed coordinate ratio is not yet
+the formal sixth-order factor, the gate conservatively bounds its `N=33`
+estimate with a fourth-order remainder; it does not apply a sixth-order
+Richardson divisor. That estimate and the provider's fourth-order Richardson
+limit agree within the measured coordinate, provider-radial, and angular
+remainders. The
+largest budgeted discrepancy, `4.38026e-4`, is retained in the diagnostic
+output rather than converted into an absolute-tolerance claim.
 
 There is also now a concrete standalone same-stage seam. One immutable
 five-level Route-B tower is accepted with a single generation; curvature is
@@ -272,9 +302,8 @@ physics-bearing validation trajectory, but it uses manufactured initial data,
 spin-minus-two second-order state, four-Weyl packing, a restored campaign
 checkpoint, solver integration, or accelerator evidence.
 
-Important gaps remain. The eight derivative slots still lack an independent
-coordinate derivative fixture. There is no scri coordinate-Weyl fixture,
-production four-field concurrent/replay trajectory, exact-commit GPU runtime
+Important gaps remain. There is no production four-field concurrent/replay
+trajectory, exact-commit GPU runtime
 evidence, sourced residual campaign, or solver/runtime wiring. The candidate
 is not included by `SpatialPipeline` or `solver_driver`, and `plus2.enabled`
 remains rejected.
@@ -399,7 +428,7 @@ pipeline, or solver enable gate was changed.
 | Raw/evolved source distinction | Met | typed `S0/R6` and `S0/R7` workspaces, two ledgers, versioned metadata |
 | Cancellation-safe scri forcing | Met standalone | exact optical identity and D10-5 outer convergence |
 | Route-B endpoint extraction | Met as component | rational generator, 100-digit audit, N9/17/33, residual gates |
-| Complete Route-B six-field curvature provider | Hardened standalone candidate only | independent interior and exact-future-horizon coordinate-Weyl fixture, disaggregated scri/residual gates, hostile contracts, and hot-path instrumentation exist; scri coordinate authority, derivative-slot oracle, replay, runtime wiring, and GPU qualification remain open |
+| Complete Route-B six-field curvature provider | Hardened standalone candidate only | independent scri/interior/exact-future-horizon coordinate-Weyl fixtures, all-eight derivative-slot oracle, disaggregated residual gates, hostile contracts, and hot-path instrumentation exist; runtime wiring, production four-field replay, sourced residual convergence, and GPU qualification remain open |
 | Linear `Psi0` production spatial graph | Not met | explicitly validation-only ordinary-NP path |
 | Companion checkpoint physical identity | Met standalone v3 | exhaustive mismatch/nonfinite/pre-mutation tests |
 | Live invalid diagnostics clear globally | Met | provenance/stamp and full workspace-zero regressions |
@@ -415,12 +444,11 @@ pipeline, or solver enable gate was changed.
 
 ## 9. Remaining promotion blockers
 
-1. Independently reproduce and try to falsify the new coordinate-Weyl,
-   exact-future-horizon two-axis remainder budget, disaggregated scri/residual,
-   promoted-extractor, hostile contract, and hot-path evidence. Add exact scri
-   coordinate authority and an independent oracle for all eight derivative
-   slots. Keep `N=65` explicitly non-promoting and do not tune the window after
-   seeing results.
+1. Independently reproduce and try to falsify the new coordinate-Weyl scri,
+   derivative, and exact-future-horizon remainder budgets, disaggregated
+   residual, promoted-extractor, hostile-contract, and hot-path evidence. Keep
+   `N=65` explicitly non-promoting and do not tune the window after seeing
+   results.
 2. Replace or retain as validation-only the singular-term ordinary-NP linear
    spatial path with a genuinely regular GHP provider.
 3. Extend the now-qualified standalone sourced replay to the production

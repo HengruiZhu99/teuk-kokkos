@@ -258,12 +258,15 @@ void gate_disaggregated_peeling(const CurvatureRun& coarse,
 struct CoordinateRun {
   Kokkos::View<const C****, Kokkos::LayoutRight, Kokkos::HostSpace>
       curvature;
+  Kokkos::View<const C****, Kokkos::LayoutRight, Kokkos::HostSpace>
+      derivatives;
 };
 
 CoordinateRun run_coordinate_tower(const int spin_index,
                                    const int case_index,
                                    const std::size_t radial_count,
-                                   const int provider_ell_max) {
+                                   const int provider_ell_max,
+                                   const int radial_power = 2) {
   namespace fixture = plus2_routeb_curvature_coordinate_fixture;
   teuk::ExecutionSpace execution;
   const teuk::ModeRegistry registry({-2, 2});
@@ -314,7 +317,8 @@ CoordinateRun run_coordinate_tower(const int spin_index,
                 fixture::lambdas[kind][mode_index].real(),
                 fixture::lambdas[kind][mode_index].imag());
             const double radial_profile =
-                radius * radius * std::exp(fixture::alphas[kind] * radius) *
+                std::pow(radius, radial_power) *
+                std::exp(fixture::alphas[kind] * radius) *
                 (1.0 + fixture::linear[kind] * radius +
                  fixture::quadratic[kind] * radius * radius);
             const double harmonic =
@@ -349,8 +353,11 @@ CoordinateRun run_coordinate_tower(const int spin_index,
       sin_theta, "routeb_coordinate_provider");
   provider.evaluate(execution, {47, tower, stamps});
   execution.fence();
-  return {Kokkos::create_mirror_view_and_copy(
-      Kokkos::HostSpace{}, provider.curvature_stage().fields)};
+  return {
+      Kokkos::create_mirror_view_and_copy(
+          Kokkos::HostSpace{}, provider.curvature_stage().fields),
+      Kokkos::create_mirror_view_and_copy(
+          Kokkos::HostSpace{}, provider.derivative_stage().fields)};
 }
 
 }  // namespace
@@ -460,6 +467,33 @@ TEST_CASE("Route-B curvature provider matches independent coordinate Weyl") {
   double maximum_horizon_fine = 0.0;
   std::size_t resolved_horizon_cells = 0;
   std::size_t horizon_floor_cells = 0;
+  double maximum_derivative_error = 0.0;
+  double maximum_derivative_oracle_remainder = 0.0;
+  const fixture::DerivativeExpected* worst_derivative = nullptr;
+  std::size_t worst_derivative_field = 0;
+  C worst_derivative_actual{};
+  std::array<double, 8> derivative_field_error{};
+  std::array<double, 8> derivative_radial_cm{};
+  std::array<double, 8> derivative_radial_mf{};
+  std::array<double, 8> derivative_angular_12_18{};
+  std::array<double, 8> derivative_angular_18_24{};
+  std::array<double, 8> derivative_wrong_separation{};
+  double minimum_derivative_radial_ratio =
+      std::numeric_limits<double>::infinity();
+  double minimum_derivative_angular_ratio =
+      std::numeric_limits<double>::infinity();
+  std::size_t resolved_derivative_radial_cells = 0;
+  std::size_t resolved_derivative_angular_cells = 0;
+  double maximum_coordinate_scri_error = 0.0;
+  double minimum_coordinate_scri_ratio =
+      std::numeric_limits<double>::infinity();
+  double minimum_provider_scri_ratio =
+      std::numeric_limits<double>::infinity();
+  const fixture::ScriExpected* worst_coordinate_scri = nullptr;
+  std::size_t worst_coordinate_scri_field = 0;
+  C worst_coordinate_scri_actual{};
+  std::size_t resolved_provider_scri_cells = 0;
+  double maximum_coordinate_scri_signal = 0.0;
   for (int case_index = 0; case_index < 4; ++case_index) {
     for (int spin_index = 0; spin_index < 3; ++spin_index) {
       const std::array<CoordinateRun, 3> runs{
@@ -588,7 +622,200 @@ TEST_CASE("Route-B curvature provider matches independent coordinate Weyl") {
         worst_z1 = &expected;
         worst_z1_actual = actual_z1;
       }
+      }
+      for (const auto& expected : fixture::derivative_expected) {
+        if (expected.case_index != case_index ||
+            expected.spin_index != spin_index) {
+          continue;
+        }
+        maximum_derivative_oracle_remainder =
+            std::max(maximum_derivative_oracle_remainder,
+                     expected.finite_difference_remainder);
+        for (std::size_t field = 0; field < expected.values.size(); ++field) {
+          const C actual = runs[2].derivatives(
+              expected.mode_index, field, expected.radial_index,
+              expected.theta_index);
+          const double error = Kokkos::abs(actual - expected.values[field]);
+          const std::size_t coarse_radial = expected.radial_index / 4;
+          const std::size_t medium_radial = expected.radial_index / 2;
+          const double radial_cm = Kokkos::abs(
+              runs[0].derivatives(expected.mode_index, field, coarse_radial,
+                                  expected.theta_index) -
+              runs[1].derivatives(expected.mode_index, field, medium_radial,
+                                  expected.theta_index));
+          const double radial_mf = Kokkos::abs(
+              runs[1].derivatives(expected.mode_index, field, medium_radial,
+                                  expected.theta_index) -
+              actual);
+          const double angular_12_18 = Kokkos::abs(
+              angular12.derivatives(expected.mode_index, field,
+                                    expected.radial_index,
+                                    expected.theta_index) -
+              angular18.derivatives(expected.mode_index, field,
+                                    expected.radial_index,
+                                    expected.theta_index));
+          const double angular_18_24 = Kokkos::abs(
+              angular18.derivatives(expected.mode_index, field,
+                                    expected.radial_index,
+                                    expected.theta_index) -
+              actual);
+          CHECK(std::isfinite(error));
+          CHECK(std::isfinite(radial_cm));
+          CHECK(std::isfinite(radial_mf));
+          CHECK(std::isfinite(angular_12_18));
+          CHECK(std::isfinite(angular_18_24));
+          if (radial_mf > 5.0e-10) {
+            if (!(radial_cm > 15.0 * radial_mf)) {
+              std::cout << "Route-B coordinate derivative radial red "
+                           "spin/r/theta/mode/field/cm/mf "
+                        << spin_index << ' ' << expected.radial_index << ' '
+                        << expected.theta_index << ' '
+                        << expected.mode_index << ' ' << field << ' '
+                        << radial_cm << ' ' << radial_mf << '\n';
+            }
+            CHECK(radial_cm > 15.0 * radial_mf);
+            minimum_derivative_radial_ratio =
+                std::min(minimum_derivative_radial_ratio,
+                         radial_cm / radial_mf);
+            ++resolved_derivative_radial_cells;
+          }
+          if (angular_18_24 > 5.0e-10) {
+            if (!(angular_12_18 > 2.0 * angular_18_24)) {
+              std::cout << "Route-B coordinate derivative angular red "
+                           "spin/r/theta/mode/field/12-18/18-24 "
+                        << spin_index << ' ' << expected.radial_index << ' '
+                        << expected.theta_index << ' '
+                        << expected.mode_index << ' ' << field << ' '
+                        << angular_12_18 << ' ' << angular_18_24 << '\n';
+            }
+            CHECK(angular_12_18 > 2.0 * angular_18_24);
+            minimum_derivative_angular_ratio =
+                std::min(minimum_derivative_angular_ratio,
+                         angular_12_18 / angular_18_24);
+            ++resolved_derivative_angular_cells;
+          }
+          const double continuum_budget =
+              radial_mf / 15.0 + 2.0 * angular_18_24 +
+              10.0 * expected.finite_difference_remainder + 5.0e-10;
+          if (!(error < continuum_budget)) {
+            std::cout << "Route-B coordinate derivative continuum red "
+                         "spin/r/theta/mode/field/error/budget "
+                      << spin_index << ' ' << expected.radial_index << ' '
+                      << expected.theta_index << ' ' << expected.mode_index
+                      << ' ' << field << ' ' << error << ' '
+                      << continuum_budget << '\n';
+          }
+          CHECK(error < continuum_budget);
+          derivative_field_error[field] =
+              std::max(derivative_field_error[field], error);
+          derivative_radial_cm[field] =
+              std::max(derivative_radial_cm[field], radial_cm);
+          derivative_radial_mf[field] =
+              std::max(derivative_radial_mf[field], radial_mf);
+          derivative_angular_12_18[field] =
+              std::max(derivative_angular_12_18[field], angular_12_18);
+          derivative_angular_18_24[field] =
+              std::max(derivative_angular_18_24[field], angular_18_24);
+          derivative_wrong_separation[field] = std::max(
+              derivative_wrong_separation[field],
+              Kokkos::abs(expected.values[field] -
+                          expected.wrong_values[field]));
+          if (error > maximum_derivative_error) {
+            maximum_derivative_error = error;
+            worst_derivative = &expected;
+            worst_derivative_field = field;
+            worst_derivative_actual = actual;
+          }
+        }
+      }
     }
+  }
+  for (const int case_index : {3}) {
+    for (int spin_index = 0; spin_index < 3; ++spin_index) {
+      const std::array<CoordinateRun, 3> runs{
+          run_coordinate_tower(spin_index, case_index, 9,
+                               fixture::provider_ell_max),
+          run_coordinate_tower(spin_index, case_index, 17,
+                               fixture::provider_ell_max),
+          run_coordinate_tower(spin_index, case_index, 33,
+                               fixture::provider_ell_max)};
+      const CoordinateRun angular12 =
+          run_coordinate_tower(spin_index, case_index, 33, 12);
+      const CoordinateRun angular18 =
+          run_coordinate_tower(spin_index, case_index, 33, 18);
+      for (const auto& expected : fixture::scri_expected) {
+        if (expected.case_index != case_index ||
+            expected.spin_index != spin_index) {
+          continue;
+        }
+        for (std::size_t field = 0; field < expected.values.size(); ++field) {
+          const std::size_t curvature_field = 2 * expected.level + field;
+          const C coarse = runs[0].curvature(
+              expected.mode_index, curvature_field, 0, expected.theta_index);
+          const C medium = runs[1].curvature(
+              expected.mode_index, curvature_field, 0, expected.theta_index);
+          const C fine = runs[2].curvature(
+              expected.mode_index, curvature_field, 0, expected.theta_index);
+          const C angular12_value = angular12.curvature(
+              expected.mode_index, curvature_field, 0, expected.theta_index);
+          const C angular18_value = angular18.curvature(
+              expected.mode_index, curvature_field, 0, expected.theta_index);
+          const double provider_cm = Kokkos::abs(coarse - medium);
+          const double provider_mf = Kokkos::abs(medium - fine);
+          const double angular_12_18 =
+              Kokkos::abs(angular12_value - angular18_value);
+          const double angular_18_24 = Kokkos::abs(angular18_value - fine);
+          const C provider_extrapolated = fine + (fine - medium) / 15.0;
+          const double error =
+              Kokkos::abs(provider_extrapolated - expected.values[field]);
+          maximum_coordinate_scri_signal =
+              std::max(maximum_coordinate_scri_signal,
+                       Kokkos::abs(expected.values[field]));
+          CHECK(std::isfinite(error));
+          CHECK(expected.coarse_medium[field] >
+                15.0 * expected.medium_fine[field]);
+          minimum_coordinate_scri_ratio =
+              std::min(minimum_coordinate_scri_ratio,
+                       expected.coarse_medium[field] /
+                           expected.medium_fine[field]);
+          if (provider_mf > 5.0e-10) {
+            if (!(provider_cm > 15.0 * provider_mf)) {
+              std::cout << "Route-B coordinate scri provider red "
+                           "spin/theta/mode/level/field/cm/mf "
+                        << spin_index << ' ' << expected.theta_index << ' '
+                        << expected.mode_index << ' ' << expected.level << ' '
+                        << field << ' ' << provider_cm << ' ' << provider_mf
+                        << '\n';
+            }
+            CHECK(provider_cm > 15.0 * provider_mf);
+            minimum_provider_scri_ratio =
+                std::min(minimum_provider_scri_ratio,
+                         provider_cm / provider_mf);
+            ++resolved_provider_scri_cells;
+          }
+          if (angular_18_24 > 5.0e-10) {
+            CHECK(angular_12_18 > 2.0 * angular_18_24);
+          }
+          const double continuum_budget =
+              expected.medium_fine[field] / 15.0 + provider_mf / 15.0 +
+              2.0 * angular_18_24 + 5.0e-9;
+          if (!(error < continuum_budget)) {
+            std::cout << "Route-B coordinate scri continuum red "
+                         "spin/theta/mode/level/field/error/budget "
+                      << spin_index << ' ' << expected.theta_index << ' '
+                      << expected.mode_index << ' ' << expected.level << ' '
+                      << field << ' ' << error << ' ' << continuum_budget
+                      << '\n';
+          }
+          CHECK(error < continuum_budget);
+          if (error > maximum_coordinate_scri_error) {
+            maximum_coordinate_scri_error = error;
+            worst_coordinate_scri = &expected;
+            worst_coordinate_scri_field = field;
+            worst_coordinate_scri_actual = provider_extrapolated;
+          }
+        }
+      }
     }
   }
   std::cout << "Route-B coordinate-Weyl maximum Z0/Z1 errors "
@@ -597,6 +824,32 @@ TEST_CASE("Route-B curvature provider matches independent coordinate Weyl") {
             << minimum_horizon_ratio << ' ' << maximum_horizon_fine
             << " resolved/floor cells " << resolved_horizon_cells << ' '
             << horizon_floor_cells << '\n';
+  std::cout << "Route-B coordinate-Weyl derivative maximum error/oracle "
+               "remainder "
+            << maximum_derivative_error << ' '
+            << maximum_derivative_oracle_remainder << '\n';
+  std::cout << "Route-B coordinate-Weyl derivative minimum radial/angular "
+               "ratios and resolved cells "
+            << minimum_derivative_radial_ratio << ' '
+            << minimum_derivative_angular_ratio << ' '
+            << resolved_derivative_radial_cells << ' '
+            << resolved_derivative_angular_cells << '\n';
+  for (std::size_t field = 0; field < derivative_field_error.size(); ++field) {
+    std::cout << "Route-B coordinate-Weyl derivative field " << field
+              << " error/radial cm/mf/angular 12-18/18-24 "
+              << derivative_field_error[field] << ' '
+              << derivative_radial_cm[field] << ' '
+              << derivative_radial_mf[field] << ' '
+              << derivative_angular_12_18[field] << ' '
+              << derivative_angular_18_24[field] << " wrong separation "
+              << derivative_wrong_separation[field] << '\n';
+    CHECK(derivative_wrong_separation[field] > 1.0e-6);
+  }
+  std::cout << "Route-B coordinate-Weyl scri maximum error and minimum "
+               "coordinate/provider ratios "
+            << maximum_coordinate_scri_error << ' '
+            << minimum_coordinate_scri_ratio << ' '
+            << minimum_provider_scri_ratio << '\n';
   for (int case_index = 0; case_index < 4; ++case_index) {
     std::cout << "Route-B coordinate-Weyl case " << case_index
               << " Z0/Z1 errors " << case_z0_error[case_index] << ' '
@@ -616,10 +869,36 @@ TEST_CASE("Route-B curvature provider matches independent coordinate Weyl") {
               << worst_z1->level << " actual " << worst_z1_actual
               << " expected " << worst_z1->z1 << '\n';
   }
+  if (worst_derivative != nullptr) {
+    std::cout << "Route-B worst derivative fixture spin/r/theta/mode/field "
+              << worst_derivative->spin_index << ' '
+              << worst_derivative->radial_index << ' '
+              << worst_derivative->theta_index << ' '
+              << worst_derivative->mode_index << ' '
+              << worst_derivative_field << " actual "
+              << worst_derivative_actual << " expected "
+              << worst_derivative->values[worst_derivative_field] << '\n';
+  }
+  if (worst_coordinate_scri != nullptr) {
+    std::cout << "Route-B worst coordinate scri spin/theta/mode/level/field "
+              << worst_coordinate_scri->spin_index << ' '
+              << worst_coordinate_scri->theta_index << ' '
+              << worst_coordinate_scri->mode_index << ' '
+              << worst_coordinate_scri->level << ' '
+              << worst_coordinate_scri_field << " actual "
+              << worst_coordinate_scri_actual << " expected "
+              << worst_coordinate_scri->values[worst_coordinate_scri_field]
+              << '\n';
+  }
   CHECK(maximum_z0_error < 5.0e-11);
   CHECK(maximum_z1_error < 5.0e-11);
   CHECK(resolved_horizon_cells > 0);
   CHECK(minimum_horizon_ratio > 15.0);
+  CHECK(resolved_derivative_radial_cells > 0);
+  CHECK(resolved_derivative_angular_cells > 0);
+  CHECK(maximum_derivative_error < 1.0e-5);
+  CHECK(resolved_provider_scri_cells > 0);
+  CHECK(maximum_coordinate_scri_signal > 1.0e-4);
 }
 
 TEST_CASE("Route-B curvature provider fails closed and stays hot") {

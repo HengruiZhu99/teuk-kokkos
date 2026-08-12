@@ -8,6 +8,18 @@
 > complete tower's red `N=65` binary64 conditioning, so the production
 > Route-B provider and plus2 runtime remain fail-closed.
 
+> **2026-08-12 provider follow-up.** The historical fail-closed disposition
+> below was resolved by the standalone constrained-profile provider in
+> `plus2_routeb_curvature_spatial.hpp`; the rejected `D1(h4)` experiment was
+> not restored. The independent coordinate-Weyl fixture now covers interior,
+> the exact future compact horizon, scri, and all eight derivative slots. At
+> scri it compares two distinct continuum routes: a sixth-order positive-node
+> extrapolation of the already normalized full coordinate-Weyl contractions,
+> and the provider's fourth-order constrained numerator extraction. Neither
+> route overwrites or algebraically removes the separately measured peeling
+> residuals. The standalone provider remains outside `SpatialPipeline` and
+> `solver_driver`; plus2 production remains fail-closed.
+
 **Status:** the linear `Psi1` authority is independently closed, but the
 standalone six-field local provider is withheld because the approved closed
 `h0..h4` graph does not publish the one radial derivative of `h4` required at
