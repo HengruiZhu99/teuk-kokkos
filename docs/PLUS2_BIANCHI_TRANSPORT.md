@@ -1,7 +1,8 @@
 # Common-stage spin `+2` Bianchi transport
 
-**Status:** standalone, allocation-free Route-A transport and restart gate;
-not wired to `solver_driver`, and not a physical scri/boundary qualification.
+**Status:** standalone, allocation-free Route-A transport and restart gate
+with a typed adapter into the standalone live-source composition; not wired to
+`solver_driver`, and not a physical scri/boundary qualification.
 
 ## Owned state and one-way RK contract
 
@@ -45,8 +46,10 @@ The companion derivative adapter also exposes
 ```
 
 These are the four curvature derivative pairs needed by the value-only live
-source contract. Transient adapters are deliberately not checkpointed; the
-first post-restart common stage regenerates them.
+source contract. The live gate copies these pairs into its four corresponding
+`J/K` value/tangent rows and retains producer ownership of the other seven
+`J/K` rows and all three `Q` rows. Transient adapters are deliberately not
+checkpointed; the first post-restart common stage regenerates them.
 
 ## Exact triangular closure order
 

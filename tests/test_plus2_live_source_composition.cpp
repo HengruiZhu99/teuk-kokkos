@@ -36,6 +36,17 @@ KOKKOS_INLINE_FUNCTION std::size_t live_flat4(
          theta;
 }
 
+KOKKOS_INLINE_FUNCTION bool transport_owned_jk(const std::size_t field) {
+  return field == static_cast<std::size_t>(
+                      teuk::Plus2ProductionJkDerivative::CapitalDelta4Z1) ||
+         field == static_cast<std::size_t>(
+                      teuk::Plus2ProductionJkDerivative::EthPrime4Z1) ||
+         field == static_cast<std::size_t>(
+                      teuk::Plus2ProductionJkDerivative::CapitalDelta5Z0) ||
+         field == static_cast<std::size_t>(
+                      teuk::Plus2ProductionJkDerivative::Eth5Z0);
+}
+
 struct WriteLiveSourceSlotsFunctor {
   C* primitive_value;
   C* primitive_tangent;
@@ -48,10 +59,12 @@ struct WriteLiveSourceSlotsFunctor {
   std::uint64_t* jk_tangent_stamps;
   std::uint64_t* q_value_stamps;
   double amplitude;
+  double hostile_transport_amplitude;
   std::uint64_t generation;
   std::size_t radial_count;
   std::size_t theta_count;
   bool omit_last_q_stamp;
+  bool omit_last_producer_jk_stamp;
 
   KOKKOS_INLINE_FUNCTION void operator()(const std::size_t flat) const {
     const std::size_t mode = flat / (radial_count * theta_count);
@@ -76,12 +89,24 @@ struct WriteLiveSourceSlotsFunctor {
     for (std::size_t field = 0; field < jc; ++field) {
       const std::size_t index = live_flat4(
           mode, field, radial, theta, jc, radial_count, theta_count);
-      jk_value[index] =
-          amplitude * C(0.13 + x + 0.007 * field, 0.02 - 0.004 * field);
-      jk_tangent[index] =
-          amplitude * C(-0.02 + 0.006 * field, 0.03 + x);
-      jk_value_stamps[index] = generation;
-      jk_tangent_stamps[index] = generation;
+      if (transport_owned_jk(field)) {
+        // Deliberately hostile producer values and stale stamps: the live
+        // adapter must overwrite these four pairs from Bianchi transport.
+        jk_value[index] = hostile_transport_amplitude * C(3.0, -2.0);
+        jk_tangent[index] = hostile_transport_amplitude * C(-4.0, 5.0);
+        jk_value_stamps[index] = generation - 1;
+        jk_tangent_stamps[index] = generation - 1;
+      } else {
+        jk_value[index] =
+            amplitude * C(0.13 + x + 0.007 * field, 0.02 - 0.004 * field);
+        jk_tangent[index] =
+            amplitude * C(-0.02 + 0.006 * field, 0.03 + x);
+        if (!(omit_last_producer_jk_stamp && mode == 0 && radial == 0 &&
+              theta == 0 && field + 1 == jc)) {
+          jk_value_stamps[index] = generation;
+          jk_tangent_stamps[index] = generation;
+        }
+      }
     }
     constexpr std::size_t qc = static_cast<std::size_t>(
         teuk::Plus2ProductionQDerivative::Count);
@@ -190,6 +215,14 @@ struct LiveFixture {
       static_cast<std::size_t>(
           teuk::Plus2TransportedCurvatureComponent::Count),
       radial_count, theta_count};
+  teuk::Plus2BianchiDerivativeView bianchi_derivatives{
+      "live_bianchi_derivatives", registry.size(),
+      static_cast<std::size_t>(teuk::Plus2BianchiDerivativeComponent::Count),
+      radial_count, theta_count};
+  teuk::Plus2LiveStampView bianchi_derivative_stamps{
+      "live_bianchi_derivative_stamps", registry.size(),
+      static_cast<std::size_t>(teuk::Plus2BianchiDerivativeComponent::Count),
+      radial_count, theta_count};
   teuk::Plus2CompanionForcingView forcing{
       "live_forcing", registry.targets().size(), radial_count, theta_count};
 
@@ -200,6 +233,8 @@ struct LiveFixture {
     const auto second_view = second;
     const auto curvature_view = curvature;
     const auto stamp_view = curvature_stamps;
+    const auto derivative_view = bianchi_derivatives;
+    const auto derivative_stamp_view = bianchi_derivative_stamps;
     Kokkos::parallel_for(
         "fill_live_fixture",
         Kokkos::RangePolicy<teuk::ExecutionSpace>(
@@ -230,6 +265,15 @@ struct LiveFixture {
                               -0.09 + 0.015 * field);
             stamp_view(mode, field, radial, theta) = generation;
           }
+          constexpr std::size_t derivative_count =
+              static_cast<std::size_t>(
+                  teuk::Plus2BianchiDerivativeComponent::Count);
+          for (std::size_t field = 0; field < derivative_count; ++field) {
+            derivative_view(mode, field, radial, theta) =
+                amplitude * C(0.11 + x + 0.013 * field,
+                              0.07 - 0.009 * field);
+            derivative_stamp_view(mode, field, radial, theta) = generation;
+          }
         });
   }
 
@@ -241,19 +285,30 @@ struct LiveFixture {
 
   void restamp(const std::uint64_t generation) {
     const auto stamps = curvature_stamps;
+    const auto derivative_stamps = bianchi_derivative_stamps;
     Kokkos::parallel_for(
-        "restamp_live_curvature",
+        "restamp_live_transport_adapters",
         Kokkos::RangePolicy<teuk::ExecutionSpace>(execution, 0, stamps.size()),
         KOKKOS_LAMBDA(const std::size_t i) { stamps.data()[i] = generation; });
+    Kokkos::parallel_for(
+        "restamp_live_bianchi_derivatives",
+        Kokkos::RangePolicy<teuk::ExecutionSpace>(execution, 0,
+                                                   derivative_stamps.size()),
+        KOKKOS_LAMBDA(const std::size_t i) {
+          derivative_stamps.data()[i] = generation;
+        });
   }
 };
 
 auto complete_source_producer(const double amplitude,
                               const bool omit_last_q_stamp = false,
-                              std::vector<int>* order = nullptr) {
+                              std::vector<int>* order = nullptr,
+                              const double hostile_transport_amplitude = 1.0,
+                              const bool omit_last_producer_jk_stamp = false) {
   return [=](const teuk::ExecutionSpace& execution, const double,
              const auto&, const auto&, const auto&, const auto&, const auto&,
              const teuk::Plus2TransportedCurvatureStage&,
+             const teuk::Plus2BianchiDerivativeStage&,
              const teuk::Plus2LiveSourceWriteTarget target) {
     if (order) order->push_back(1);
     const std::size_t mode_count = target.primitive_value.extent(0);
@@ -276,10 +331,12 @@ auto complete_source_producer(const double amplitude,
             target.jk_derivative_tangent_stamps.data(),
             target.q_derivative_value_stamps.data(),
             amplitude,
+            hostile_transport_amplitude,
             generation,
             radial_count,
             theta_count,
-            omit_last_q_stamp});
+            omit_last_q_stamp,
+            omit_last_producer_jk_stamp});
   };
 }
 
@@ -309,15 +366,19 @@ auto complete_outer_producer(std::vector<int>* order = nullptr) {
 std::vector<C> evaluate_fixture(LiveFixture& fixture, const double amplitude,
                                 const bool omit_stamp = false,
                                 std::vector<int>* order = nullptr,
-                                const bool active = true) {
+                                const bool active = true,
+                                const double hostile_transport_amplitude = 1.0,
+                                const bool omit_jk_stamp = false) {
   const teuk::SourceActivationState activation{
       active, active ? 0.2 : -1.0, active ? 3 : 0, 0.3};
   fixture.composition.evaluate_stage(
       fixture.execution, 0.42, fixture.reconstruction, fixture.tangent,
       fixture.second,
-      {fixture.curvature, fixture.curvature_stamps}, fixture.capability(),
-      activation, {activation, fixture.forcing},
-      complete_source_producer(amplitude, omit_stamp, order),
+      {fixture.curvature, fixture.curvature_stamps},
+      {fixture.bianchi_derivatives, fixture.bianchi_derivative_stamps},
+      fixture.capability(), activation, {activation, fixture.forcing},
+      complete_source_producer(amplitude, omit_stamp, order,
+                               hostile_transport_amplitude, omit_jk_stamp),
       complete_outer_producer(order));
   fixture.execution.fence("finish live composition fixture");
   const auto host = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{},
@@ -351,12 +412,23 @@ TEST_CASE("plus2 live composition fails closed on missing slots and activation")
     retained_ready_point = retained_ready_point || Kokkos::abs(missing[i]) > 0.0;
   }
   CHECK(retained_ready_point);
+  LiveFixture missing_jk_fixture;
+  const auto missing_jk = evaluate_fixture(
+      missing_jk_fixture, 1.0, false, nullptr, true, 1.0, true);
+  CHECK_COMPLEX_NEAR(missing_jk[0], C{}, 0.0);
+  retained_ready_point = false;
+  for (std::size_t i = 1; i < missing_jk.size(); ++i) {
+    retained_ready_point =
+        retained_ready_point || Kokkos::abs(missing_jk[i]) > 0.0;
+  }
+  CHECK(retained_ready_point);
   Kokkos::deep_copy(fixture.forcing, C(9.0, -3.0));
   fixture.restamp(8);
   const teuk::SourceActivationState inactive_activation{false, -1.0, 0, 0.3};
   fixture.composition.evaluate_stage(
       fixture.execution, 0.43, fixture.reconstruction, fixture.tangent,
       fixture.second, {fixture.curvature, fixture.curvature_stamps},
+      {fixture.bianchi_derivatives, fixture.bianchi_derivative_stamps},
       fixture.capability(8), inactive_activation,
       {inactive_activation, fixture.forcing}, complete_source_producer(1.0),
       complete_outer_producer());
@@ -366,6 +438,100 @@ TEST_CASE("plus2 live composition fails closed on missing slots and activation")
   std::vector<C> inactive(inactive_host.data(),
                           inactive_host.data() + inactive_host.size());
   for (const C value : inactive) CHECK_COMPLEX_NEAR(value, C{}, 0.0);
+}
+
+TEST_CASE("plus2 live composition takes four derivative pairs from transport") {
+  LiveFixture positive_hostile;
+  const auto positive = evaluate_fixture(positive_hostile, 1.0, false,
+                                         nullptr, true, 1.0e12);
+  LiveFixture negative_hostile;
+  const auto negative = evaluate_fixture(negative_hostile, 1.0, false,
+                                         nullptr, true, -1.0e12);
+  double maximum = 0.0;
+  for (std::size_t i = 0; i < positive.size(); ++i) {
+    maximum = std::max(maximum, Kokkos::abs(positive[i]));
+    CHECK_COMPLEX_NEAR(positive[i], negative[i], 0.0);
+  }
+  CHECK(maximum > 1.0e-7);
+}
+
+TEST_CASE("plus2 live composition rejects bad derivative adapters") {
+  const teuk::SourceActivationState activation{true, 0.0, 1, 0.0};
+  LiveFixture wrong_shape;
+  teuk::Plus2BianchiDerivativeView short_derivatives{
+      "short_live_bianchi_derivatives", wrong_shape.registry.size(),
+      static_cast<std::size_t>(teuk::Plus2BianchiDerivativeComponent::Count) -
+          1,
+      LiveFixture::radial_count, LiveFixture::theta_count};
+  teuk::Plus2LiveStampView short_stamps{
+      "short_live_bianchi_derivative_stamps", wrong_shape.registry.size(),
+      static_cast<std::size_t>(teuk::Plus2BianchiDerivativeComponent::Count) -
+          1,
+      LiveFixture::radial_count, LiveFixture::theta_count};
+  bool shape_rejected = false;
+  try {
+    wrong_shape.composition.evaluate_stage(
+        wrong_shape.execution, 0.0, wrong_shape.reconstruction,
+        wrong_shape.tangent, wrong_shape.second,
+        {wrong_shape.curvature, wrong_shape.curvature_stamps},
+        {short_derivatives, short_stamps}, wrong_shape.capability(), activation,
+        {activation, wrong_shape.forcing}, complete_source_producer(1.0),
+        complete_outer_producer());
+  } catch (const std::invalid_argument&) {
+    shape_rejected = true;
+  }
+  CHECK(shape_rejected);
+
+  LiveFixture stale_stamp;
+  const auto stamps = stale_stamp.bianchi_derivative_stamps;
+  Kokkos::parallel_for(
+      "stale_one_live_bianchi_derivative",
+      Kokkos::RangePolicy<teuk::ExecutionSpace>(stale_stamp.execution, 0, 1),
+      KOKKOS_LAMBDA(const std::size_t) {
+        stamps(0,
+               static_cast<std::size_t>(
+                   teuk::Plus2BianchiDerivativeComponent::Eth5Z0T),
+               0, 0) = 6;
+      });
+  const auto stale = evaluate_fixture(stale_stamp, 1.0);
+  CHECK_COMPLEX_NEAR(stale[0], C{}, 0.0);
+  bool retained_ready_point = false;
+  for (std::size_t i = 1; i < stale.size(); ++i) {
+    retained_ready_point = retained_ready_point || Kokkos::abs(stale[i]) > 0.0;
+  }
+  CHECK(retained_ready_point);
+}
+
+TEST_CASE("plus2 live source callback receives the common transport stage") {
+  LiveFixture fixture;
+  const teuk::SourceActivationState activation{true, 0.0, 1, 0.0};
+  bool saw_exact_adapters = false;
+  auto delegate = complete_source_producer(1.0);
+  auto source = [&](const teuk::ExecutionSpace& execution,
+                    const double stage_time, const auto& reconstruction,
+                    const auto& tangent, const auto& second_tangent,
+                    const auto& z_plus, const auto& z_plus_valid,
+                    const teuk::Plus2TransportedCurvatureStage& curvature,
+                    const teuk::Plus2BianchiDerivativeStage& derivatives,
+                    const teuk::Plus2LiveSourceWriteTarget target) {
+    saw_exact_adapters =
+        curvature.fields.data() == fixture.curvature.data() &&
+        curvature.stamps.data() == fixture.curvature_stamps.data() &&
+        derivatives.fields.data() == fixture.bianchi_derivatives.data() &&
+        derivatives.stamps.data() ==
+            fixture.bianchi_derivative_stamps.data() &&
+        target.generation == 7;
+    delegate(execution, stage_time, reconstruction, tangent, second_tangent,
+             z_plus, z_plus_valid, curvature, derivatives, target);
+  };
+  fixture.composition.evaluate_stage(
+      fixture.execution, 0.0, fixture.reconstruction, fixture.tangent,
+      fixture.second, {fixture.curvature, fixture.curvature_stamps},
+      {fixture.bianchi_derivatives, fixture.bianchi_derivative_stamps},
+      fixture.capability(), activation, {activation, fixture.forcing}, source,
+      complete_outer_producer());
+  fixture.execution.fence("finish common transport stage regression");
+  CHECK(saw_exact_adapters);
 }
 
 TEST_CASE("plus2 live composition rejects absent scri and common-stage authority") {
@@ -378,6 +544,7 @@ TEST_CASE("plus2 live composition rejects absent scri and common-stage authority
     fixture.composition.evaluate_stage(
         fixture.execution, 0.0, fixture.reconstruction, fixture.tangent,
         fixture.second, {fixture.curvature, fixture.curvature_stamps},
+        {fixture.bianchi_derivatives, fixture.bianchi_derivative_stamps},
         capability, activation, {activation, fixture.forcing},
         complete_source_producer(1.0), complete_outer_producer());
   } catch (const std::invalid_argument&) {
@@ -391,6 +558,7 @@ TEST_CASE("plus2 live composition rejects absent scri and common-stage authority
     fixture.composition.evaluate_stage(
         fixture.execution, 0.0, fixture.reconstruction, fixture.tangent,
         fixture.second, {fixture.curvature, fixture.curvature_stamps},
+        {fixture.bianchi_derivatives, fixture.bianchi_derivative_stamps},
         capability, activation, {activation, fixture.forcing},
         complete_source_producer(1.0), complete_outer_producer());
   } catch (const std::invalid_argument&) {
@@ -407,8 +575,9 @@ TEST_CASE("plus2 live composition stage allocates and fences nothing") {
   fixture.composition.evaluate_stage(
       fixture.execution, 0.0, fixture.reconstruction, fixture.tangent,
       fixture.second, {fixture.curvature, fixture.curvature_stamps},
-      fixture.capability(), activation, {activation, fixture.forcing}, source,
-      outer);
+      {fixture.bianchi_derivatives, fixture.bianchi_derivative_stamps},
+      fixture.capability(), activation, {activation, fixture.forcing},
+      source, outer);
   fixture.execution.fence("warm live source composition");
   fixture.restamp(8);
   live_allocations = 0;
@@ -419,8 +588,9 @@ TEST_CASE("plus2 live composition stage allocates and fences nothing") {
   fixture.composition.evaluate_stage(
       fixture.execution, 0.1, fixture.reconstruction, fixture.tangent,
       fixture.second, {fixture.curvature, fixture.curvature_stamps},
-      fixture.capability(8), activation, {activation, fixture.forcing}, source,
-      outer);
+      {fixture.bianchi_derivatives, fixture.bianchi_derivative_stamps},
+      fixture.capability(8), activation, {activation, fixture.forcing},
+      source, outer);
   Kokkos::Tools::Experimental::set_begin_fence_callback(nullptr);
   Kokkos::Tools::Experimental::set_allocate_data_callback(nullptr);
   fixture.execution.fence("finish live source no-allocation check");

@@ -78,12 +78,14 @@ struct NormalizeSourceInputsFunctor {
   Complex* jk_tangent;
   Complex* q_value;
   const Complex* curvature;
+  const Complex* bianchi_derivatives;
   const std::uint64_t* primitive_value_stamps;
   const std::uint64_t* primitive_tangent_stamps;
   const std::uint64_t* jk_value_stamps;
   const std::uint64_t* jk_tangent_stamps;
   const std::uint64_t* q_value_stamps;
   const std::uint64_t* curvature_stamps;
+  const std::uint64_t* bianchi_derivative_stamps;
   std::uint8_t* ready;
   std::uint64_t generation;
   std::size_t mode_count;
@@ -99,6 +101,8 @@ struct NormalizeSourceInputsFunctor {
         static_cast<std::size_t>(Plus2ProductionQDerivative::Count);
     constexpr std::size_t curvature_count =
         static_cast<std::size_t>(Plus2TransportedCurvatureComponent::Count);
+    constexpr std::size_t bianchi_derivative_count =
+        static_cast<std::size_t>(Plus2BianchiDerivativeComponent::Count);
     const std::size_t plane = radial_count * theta_count;
     const std::size_t mode = flat / plane;
     const std::size_t within = flat - mode * plane;
@@ -110,6 +114,13 @@ struct NormalizeSourceInputsFunctor {
               curvature_stamps[flat4(mode, field, radial, theta,
                                      curvature_count, radial_count,
                                      theta_count)] == generation;
+    }
+    for (std::size_t field = 0; field < bianchi_derivative_count; ++field) {
+      valid =
+          valid &&
+          bianchi_derivative_stamps[flat4(
+              mode, field, radial, theta, bianchi_derivative_count,
+              radial_count, theta_count)] == generation;
     }
     // Z0/Z1 values and their analytic tangents are owned by the transported
     // curvature stage.  A primitive producer cannot silently replace them.
@@ -135,6 +146,40 @@ struct NormalizeSourceInputsFunctor {
                             radial_count, theta_count)] =
         curvature_at(Plus2TransportedCurvatureComponent::Z1T);
 
+    // The Bianchi transport owns exactly these four J/K derivative pairs.
+    // Always overwrite producer storage before source evaluation, and never
+    // use producer stamps as authority for these slots.
+    const auto bianchi_derivative_at =
+        [&](const Plus2BianchiDerivativeComponent f) {
+          return bianchi_derivatives[flat4(
+              mode, static_cast<std::size_t>(f), radial, theta,
+              bianchi_derivative_count, radial_count, theta_count)];
+        };
+    const auto copy_bianchi_pair =
+        [&](const Plus2ProductionJkDerivative output,
+            const Plus2BianchiDerivativeComponent value,
+            const Plus2BianchiDerivativeComponent tangent) {
+          const std::size_t index = flat4(
+              mode, static_cast<std::size_t>(output), radial, theta, jk_count,
+              radial_count, theta_count);
+          jk_value[index] = bianchi_derivative_at(value);
+          jk_tangent[index] = bianchi_derivative_at(tangent);
+        };
+    copy_bianchi_pair(
+        Plus2ProductionJkDerivative::CapitalDelta4Z1,
+        Plus2BianchiDerivativeComponent::CapitalDelta4Z1,
+        Plus2BianchiDerivativeComponent::CapitalDelta4Z1T);
+    copy_bianchi_pair(Plus2ProductionJkDerivative::EthPrime4Z1,
+                      Plus2BianchiDerivativeComponent::EthPrime4Z1,
+                      Plus2BianchiDerivativeComponent::EthPrime4Z1T);
+    copy_bianchi_pair(
+        Plus2ProductionJkDerivative::CapitalDelta5Z0,
+        Plus2BianchiDerivativeComponent::CapitalDelta5Z0,
+        Plus2BianchiDerivativeComponent::CapitalDelta5Z0T);
+    copy_bianchi_pair(Plus2ProductionJkDerivative::Eth5Z0,
+                      Plus2BianchiDerivativeComponent::Eth5Z0,
+                      Plus2BianchiDerivativeComponent::Eth5Z0T);
+
     for (std::size_t field = 0; field < primitive_count; ++field) {
       if (field == z0 || field == z1) continue;
       const std::size_t index = flat4(mode, field, radial, theta,
@@ -144,6 +189,16 @@ struct NormalizeSourceInputsFunctor {
               primitive_tangent_stamps[index] == generation;
     }
     for (std::size_t field = 0; field < jk_count; ++field) {
+      const bool transport_owned =
+          field == static_cast<std::size_t>(
+                       Plus2ProductionJkDerivative::CapitalDelta4Z1) ||
+          field == static_cast<std::size_t>(
+                       Plus2ProductionJkDerivative::EthPrime4Z1) ||
+          field == static_cast<std::size_t>(
+                       Plus2ProductionJkDerivative::CapitalDelta5Z0) ||
+          field == static_cast<std::size_t>(
+                       Plus2ProductionJkDerivative::Eth5Z0);
+      if (transport_owned) continue;
       const std::size_t index = flat4(mode, field, radial, theta, jk_count,
                                       radial_count, theta_count);
       valid = valid && jk_value_stamps[index] == generation &&
@@ -365,12 +420,14 @@ class Plus2LiveSourceComposition {
       const ReconstructionView& tangent,
       const ReconstructionView& second_tangent,
       const Plus2TransportedCurvatureStage& curvature,
+      const Plus2BianchiDerivativeStage& bianchi_derivatives,
       const Plus2LiveSourceCapability& capability,
       const SourceActivationState& activation_snapshot,
       const Plus2StageSourceTarget& target,
       SourceProducer&& source_producer, OuterProducer&& outer_producer,
       const Plus2ReconstructionMetricOffsets offsets = {}) {
-    validate_stage(capability, activation_snapshot, target, curvature);
+    validate_stage(capability, activation_snapshot, target, curvature,
+                   bianchi_derivatives);
     last_generation_ = capability.generation;
     if (!activation_snapshot.active) {
       Kokkos::parallel_for(
@@ -407,7 +464,7 @@ class Plus2LiveSourceComposition {
     source_producer(execution, stage_time, read_only_reconstruction,
                     read_only_tangent, read_only_second_tangent,
                     linear_.z_plus(), linear_.z_plus_valid(), curvature,
-                    source_target);
+                    bianchi_derivatives, source_target);
 
     Kokkos::parallel_for(
         "initialize_plus2_live_readiness",
@@ -421,11 +478,13 @@ class Plus2LiveSourceComposition {
         plus2_live_source_detail::NormalizeSourceInputsFunctor{
             primitive_value_.data(), primitive_tangent_.data(),
             jk_value_.data(), jk_tangent_.data(), q_value_.data(),
-            curvature.fields.data(), primitive_value_stamps_.data(),
+            curvature.fields.data(), bianchi_derivatives.fields.data(),
+            primitive_value_stamps_.data(),
             primitive_tangent_stamps_.data(), jk_value_stamps_.data(),
             jk_tangent_stamps_.data(), q_value_stamps_.data(),
-            curvature.stamps.data(), readiness_.data(), capability.generation,
-            registry_.size(), radial_grid_.size(), sin_theta_.extent(0)});
+            curvature.stamps.data(), bianchi_derivatives.stamps.data(),
+            readiness_.data(), capability.generation, registry_.size(),
+            radial_grid_.size(), sin_theta_.extent(0)});
 
     evaluate_plus2_production_ordered_pair_values(
         execution, radial_grid_, parameters_, cos_theta_, sin_theta_,
@@ -461,9 +520,13 @@ class Plus2LiveSourceComposition {
   void validate_stage(const Plus2LiveSourceCapability& capability,
                       const SourceActivationState& activation,
                       const Plus2StageSourceTarget& target,
-                      const Plus2TransportedCurvatureStage& curvature) const {
+                      const Plus2TransportedCurvatureStage& curvature,
+                      const Plus2BianchiDerivativeStage&
+                          bianchi_derivatives) const {
     constexpr std::size_t curvature_count =
         static_cast<std::size_t>(Plus2TransportedCurvatureComponent::Count);
+    constexpr std::size_t bianchi_derivative_count =
+        static_cast<std::size_t>(Plus2BianchiDerivativeComponent::Count);
     const bool has_scri = radial_grid_.lower_radius() == 0.0;
     const bool supports_nested_fourth_order =
         radial_discretization_ == RadialDiscretization::D105;
@@ -495,8 +558,16 @@ class Plus2LiveSourceComposition {
              view.extent(2) == radial_grid_.size() &&
              view.extent(3) == sin_theta_.extent(0);
     };
+    const auto valid_bianchi_derivative_shape = [&](const auto& view) {
+      return view.extent(0) == registry_.size() &&
+             view.extent(1) == bianchi_derivative_count &&
+             view.extent(2) == radial_grid_.size() &&
+             view.extent(3) == sin_theta_.extent(0);
+    };
     if (!valid_curvature_shape(curvature.fields) ||
         !valid_curvature_shape(curvature.stamps) ||
+        !valid_bianchi_derivative_shape(bianchi_derivatives.fields) ||
+        !valid_bianchi_derivative_shape(bianchi_derivatives.stamps) ||
         target.coordinate_forcing.extent(0) != registry_.targets().size() ||
         target.coordinate_forcing.extent(1) != radial_grid_.size() ||
         target.coordinate_forcing.extent(2) != sin_theta_.extent(0)) {
