@@ -1,8 +1,7 @@
 # Spin `+2` homogeneous validation and normalized-TSI audit
 
-Status: normalized Schwarzschild radial and field fixture passed; a
-moderate-Kerr normalized separated fixture passed; Kerr field-level and QNM
-extensions remain open
+Status: normalized Schwarzschild and moderate-Kerr radial, angular, and
+field-level fixtures passed; QNM and endpoint extensions remain open
 
 Original homogeneous-validation base: `a31e286`
 
@@ -265,22 +264,91 @@ products, residual bounds, signed symmetry, and convergence metadata.
 This closes the moderate-spin, real-frequency, normalized **separated-mode**
 TSI gate.  It does not use or modify any production evolution path.
 
+### Moderate-Kerr ORG metric and field-level `T0[h]` fixture
+
+`tools/numerical/generate_plus2_tsi_kerr_t0_fixture.py` carries the same
+`M=1`, `a=0.6`, `omega=1/5`, `ell=m=2` horizon-in mode through the full
+field-level comparison.  It imports only the independent hatted-mode solver,
+not any production `T0` expression.
+
+For a starting mode of `zeta^4 psi4`, Berens Eq. (2.50) fixes
+
+```text
+A_ORG=0, B_ORG=64/conjugate(CinPrime).
+```
+
+The generator applies all three differential expressions in Eq. (2.52) for
+`H_ll`, `H_lm`, and `H_mm` with `epsilon_g=-1`.  A local rectangular
+bivariate Taylor algebra propagates the radial and angular derivatives needed
+by those expressions and by the final second-order point operator.  It has an
+independent analytic product/quotient/chain-rule self-test.  At `a=0`, all
+nine retained value/derivative coefficients reduce to the already reviewed
+Schwarzschild generator with a maximum absolute difference of `5.40e-15`.
+
+The nonzero-spin coordinate convention is fixed as
+
+```text
+T = t + H(r),       H = r_star - 2r - 4M log(r),
+phi_code = phi_BL + J(r),
+R = 1/r,
+
+r_star = r
+  + (2 M r_+/sigma) log((r-r_+)/(2M))
+  - (2 M r_-/sigma) log((r-r_-)/(2M)),
+J = (a/sigma) log((r-r_+)/(r-r_-)).
+```
+
+These integration constants reduce exactly to the committed Schwarzschild
+phase.  Thus a Boyer--Lindquist mode acquires
+`exp(i omega H-i m J)` at `T=phi_code=0`.  Direct Jacobian transformation of
+all three Boyer--Lindquist Kinnersley vectors independently reproduces every
+nonzero component of the Ripley code tetrad at both fixture points.  The
+projection map is consequently
+
+```text
+(h_ll,h_lm,h_mm)_code = (A_b^2,A_b q,q^2)
+                         (h_ll,h_lm,h_mm)_Kinnersley,
+A_b = Delta/(2 Sigma),
+q = -(r+i a cos(theta))/(r-i a cos(theta)).
+```
+
+The script also checks `abs(q)=1`; no phase is inferred from a squared field
+afterward.  It retains the two distinct Eq. (2.44) sectors:
+
+```text
+same:  (4 DhatPrime/CinPrime) exp(-i omega T+i m phi_code),
+sharp: (48 i omega M/conjugate(CinPrime))
+       exp(+i omega T-i m phi_code).
+```
+
+The generated fixture contains two interior points,
+`(r,theta)=(3,1.1),(4.5,1.8)`, both signed sectors, and three numerical
+levels.  Tightening the angular endpoint seed, Heun series, and ODE controls
+reduces the maximum normalized metric/field change from `8.30e-11` to
+`1.62e-12`.  All twelve cases pass through the production
+`evaluate_plus2_linear_psi0` point operator.  The observed maximum absolute
+and relative discrepancies are `5.98e-12` and `6.66e-11`; the C++ gate is
+both `absolute_error<3e-11` and `relative_error<4e-10`, factors five and six
+over the observed maxima.  This scale is appropriate because the
+reconstructed compact-radial second derivatives reach order `10^3` before
+cancellation, whereas the expected Weyl values are order `10^-2` to `10^-1`.
+
+The generated header records checksums for both generators and all pinned
+primary material.  A CTest target regenerates it byte-for-byte.  This closes
+the moderate-spin, real-frequency, field-level normalized `T0[h]` gate at
+interior points without changing a production source or evolution path.
+
 ### Remaining Kerr and QNM gates
 
-The two current fixtures still do not claim a QNM normalization, a Kerr
-horizon endpoint value, or an evolved-companion comparison.  The
-moderate-Kerr fixture stops before metric reconstruction and therefore does
-not close the field-level `T0[h]` gate at nonzero spin.  Remaining work is:
+The current fixtures still do not claim a QNM normalization, a Kerr horizon
+endpoint value, or an evolved-companion comparison.  Remaining work is:
 
 - supply an independently pinned Schwarzschild QNM mode normalization (not
   merely the frequency already used by the production ringdown regression)
   and repeat the complex-frequency hatted-mode and sharp-partner checks;
 - repeat that normalized QNM calculation at moderate Kerr spin;
-- extend the ORG metric construction and the full Kinnersley-to-code and
-  Boyer--Lindquist-to-hyperboloidal chain to `a != 0`, then compare against
-  `evaluate_plus2_linear_psi0`;
 - add horizon-regular endpoint data and an evolved-companion comparison.
 
 These are separate gates.  In particular, the real-frequency fixture must
-not be relabeled as a QNM test, and its separated identities must not be
-relabeled as a nonzero-spin `T0[h]` comparison.
+not be relabeled as a QNM test, and its interior comparison must not be
+relabeled as a horizon endpoint or evolved-companion test.
