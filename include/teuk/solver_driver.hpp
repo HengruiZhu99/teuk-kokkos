@@ -25,6 +25,7 @@
 #include "teuk/pipeline_diagnostics.hpp"
 #include "teuk/pipeline_independent_reconstruction_diagnostics.hpp"
 #include "teuk/pipeline_reconstruction_diagnostics.hpp"
+#include "teuk/waveform_output.hpp"
 
 #ifndef TEUK_GIT_COMMIT
 #define TEUK_GIT_COMMIT "unknown"
@@ -146,11 +147,18 @@ inline int run_solver(const RunParameters& input) {
   const std::filesystem::path output_directory = input.output.directory;
   std::ofstream diagnostic_file(output_directory / "diagnostics.csv");
   std::ofstream source_pair_file(output_directory / "source_pairs.csv");
-  if (!diagnostic_file || !source_pair_file) {
+  std::ofstream waveform_file(output_directory / "waveforms.csv");
+  if (!diagnostic_file || !source_pair_file || !waveform_file) {
     throw std::runtime_error("cannot open spatial diagnostic output");
   }
   source_pair_file
       << "step,time,pair,m1,m2,target,D_rms,D_max,T_rms,T_max\n";
+  write_endpoint_waveform_header(waveform_file);
+  EndpointWaveformSampler waveform_sampler(
+      registry,
+      {input.grid.ell_max_first, input.grid.ell_max_second},
+      input.grid.theta_points, input.background.compactification_length,
+      horizon);
 
   constexpr std::size_t first_psi =
       static_cast<std::size_t>(PipelineField::FirstPsi);
@@ -225,6 +233,14 @@ inline int run_solver(const RunParameters& input) {
     for (const double value : second_horizon) line << ',' << value;
     std::cout << line.str() << '\n';
     diagnostic_file << line.str() << '\n';
+    write_endpoint_waveform_records(
+        waveform_file,
+        waveform_sampler.sample(execution, pipeline.storage().state(), step,
+                                sample_time));
+    waveform_file.flush();
+    if (!waveform_file) {
+      throw std::runtime_error("failed writing endpoint waveform output");
+    }
 
     const auto per_pair = Kokkos::create_mirror_view_and_copy(
         Kokkos::HostSpace{}, pipeline.per_pair_source());
