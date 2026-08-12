@@ -53,9 +53,14 @@ development environment:
 
 ```bash
 python3 -m venv /tmp/teuk-audit
-/tmp/teuk-audit/bin/python -m pip install -r requirements.txt
+/tmp/teuk-audit/bin/python -m pip install --require-hashes \
+  -r requirements-audit-lock.txt
 /tmp/teuk-audit/bin/python verify_second_order_teukolsky.py
 ```
+
+`requirements-audit-lock.txt` pins the exact CPython 3.12 Linux x86_64 audit
+wheels and hashes used by the production baseline. `requirements.txt`
+retains portable version ranges for other supported development hosts.
 
 To include the same audit in CTest, configure with
 `-DTEUK_ENABLE_SYMBOLIC_AUDIT=ON`
