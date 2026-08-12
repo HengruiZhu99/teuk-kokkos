@@ -50,6 +50,7 @@ struct InitialDataParameters {
   InitialDataType type = InitialDataType::Gaussian;
   std::vector<InitialMode> modes{{2, 2, Complex(1.0e-3, 0.0)}};
   bool add_sharp_partner = false;
+  bool compact_support = false;
   double center_fraction = 0.45;
   double width_fraction = 0.12;
   std::string time_derivative = "zero";

@@ -232,3 +232,55 @@ TEST_CASE("pipeline Gaussian initial data reject invalid modes and sharp storage
   }
   CHECK(ell_rejected);
 }
+
+TEST_CASE("compact Gaussian pulse is smooth inside and exactly support limited") {
+  constexpr int ell_max = 3;
+  constexpr int theta_nodes = 6;
+  const teuk::ModeRegistry registry({-2, 2});
+  const teuk::UniformRadialGrid radial_grid(17, 0.0, 0.8);
+  const teuk::KerrParameters background{1.0, 0.5, 1.2};
+  const teuk::ExecutionSpace execution;
+  teuk::SpatialPipeline pipeline(execution, registry, radial_grid, ell_max,
+                                 theta_nodes, background, 0.1, 0.0,
+                                 teuk::ReductionEvolution::FreeDamped,
+                                 "compact_initial_data_pipeline");
+  teuk::PipelineGaussianPulse pulse;
+  pulse.center = 0.4;
+  pulse.width = 0.2;
+  pulse.compact_support = true;
+  pulse.modes = {{2, 2, teuk::Complex(0.7, -0.1)}};
+  teuk::initialize_compactified_gaussian_pulse(
+      execution, pipeline, registry, ell_max, background, pulse);
+  const auto state = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, pipeline.storage().state());
+  const std::size_t psi =
+      static_cast<std::size_t>(teuk::PipelineField::FirstPsi);
+  const std::size_t mode = registry.index(2);
+
+  for (std::size_t radial = 0; radial < radial_grid.size(); ++radial) {
+    const double coordinate = radial_grid.coordinate(radial);
+    const bool outside = coordinate <= pulse.center - pulse.width ||
+                         coordinate >= pulse.center + pulse.width;
+    for (int theta = 0; theta < theta_nodes; ++theta) {
+      if (outside) {
+        CHECK_COMPLEX_NEAR(
+            state(mode, psi, radial, static_cast<std::size_t>(theta)),
+            teuk::Complex(0.0, 0.0), 0.0);
+      }
+    }
+  }
+  double center_maximum = 0.0;
+  for (int theta = 0; theta < theta_nodes; ++theta) {
+    center_maximum = std::max(
+        center_maximum,
+        static_cast<double>(Kokkos::abs(
+            state(mode, psi, 8, static_cast<std::size_t>(theta)))));
+  }
+  CHECK(center_maximum > 1.0e-3);
+  CHECK(teuk::pipeline_initial_data_detail::radial_profile(pulse, 0.4) ==
+        1.0);
+  CHECK(teuk::pipeline_initial_data_detail::radial_profile(pulse, 0.2) ==
+        0.0);
+  CHECK(teuk::pipeline_initial_data_detail::radial_profile(pulse, 0.6) ==
+        0.0);
+}

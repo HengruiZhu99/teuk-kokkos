@@ -270,6 +270,8 @@ inline RunParameters resolve_run_parameters(
   }
   set_bool("initial_data.add_sharp_partner",
            parameters.initial_data.add_sharp_partner);
+  set_bool("initial_data.compact_support",
+           parameters.initial_data.compact_support);
   set_double("initial_data.center", parameters.initial_data.center_fraction);
   set_double("initial_data.width", parameters.initial_data.width_fraction);
   set_string("initial_data.time_derivative",
@@ -583,6 +585,8 @@ inline std::string resolved_configuration_text(
          << '\n'
          << "initial_data.add_sharp_partner = "
          << parameters.initial_data.add_sharp_partner << '\n'
+         << "initial_data.compact_support = "
+         << parameters.initial_data.compact_support << '\n'
          << "initial_data.center = "
          << parameters.initial_data.center_fraction << '\n'
          << "initial_data.width = "

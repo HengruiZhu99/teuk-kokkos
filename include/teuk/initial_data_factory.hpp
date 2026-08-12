@@ -91,6 +91,7 @@ inline InitializedPipelineState initialize_pipeline_state(
       PipelineGaussianPulse pulse;
       pulse.center = parameters.initial_data.center_fraction * horizon_radius;
       pulse.width = parameters.initial_data.width_fraction * horizon_radius;
+      pulse.compact_support = parameters.initial_data.compact_support;
       pulse.modes = expanded_gaussian_modes(parameters.initial_data);
       initialize_compactified_gaussian_pulse(
           execution, pipeline, registry, parameters.grid.ell_max_first,

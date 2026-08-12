@@ -30,10 +30,14 @@ struct GaussianPulseMode {
 
 struct PipelineGaussianPulse {
   // The stored first-order field is
-  //   Psi(R,theta) = exp(-((R-center)/width)^2)
+  //   Psi(R,theta) = profile((R-center)/width)
   //                  sum_l amplitude_lm {}_{-2}Y_lm(theta).
+  // The default profile is exp(-x^2).  compact_support selects the normalized
+  // C-infinity bump exp(1-1/(1-x^2)) for |x|<1 and exact zero otherwise;
+  // near x=0 its leading behavior is the same Gaussian exp(-x^2).
   Real center = 0.4;
   Real width = 0.1;
+  bool compact_support = false;
   std::vector<GaussianPulseMode> modes;
 
   // Initial coordinate-time derivative is zero in the retained Galerkin
@@ -55,6 +59,16 @@ namespace pipeline_initial_data_detail {
 
 inline bool is_zero(const Complex value) {
   return value.real() == 0.0 && value.imag() == 0.0;
+}
+
+inline Real radial_profile(const PipelineGaussianPulse& pulse,
+                           const Real coordinate) {
+  const Real normalized = (coordinate - pulse.center) / pulse.width;
+  if (!pulse.compact_support) {
+    return std::exp(-normalized * normalized);
+  }
+  if (std::abs(coordinate - pulse.center) >= pulse.width) return 0.0;
+  return std::exp(1.0 - 1.0 / (1.0 - normalized * normalized));
 }
 
 inline void validate_gaussian_pulse(
@@ -233,8 +247,8 @@ inline void initialize_compactified_gaussian_pulse(
         pulse, -2, m, ell_max, static_cast<int>(theta_count));
     for (std::size_t radial = 0; radial < radial_count; ++radial) {
       const Real coordinate = radial_grid.coordinate(radial);
-      const Real normalized = (coordinate - pulse.center) / pulse.width;
-      const Real profile = std::exp(-normalized * normalized);
+      const Real profile =
+          pipeline_initial_data_detail::radial_profile(pulse, coordinate);
       for (std::size_t theta = 0; theta < theta_count; ++theta) {
         host_state(mode, first_psi, radial, theta) =
             profile * angular_values[theta];
@@ -301,8 +315,8 @@ inline void initialize_compactified_gaussian_pulse(
           static_cast<int>(theta_count));
       for (std::size_t radial = 0; radial < radial_count; ++radial) {
         const Real coordinate = radial_grid.coordinate(radial);
-        const Real normalized = (coordinate - pulse.center) / pulse.width;
-        const Real profile = std::exp(-normalized * normalized);
+        const Real profile =
+            pipeline_initial_data_detail::radial_profile(pulse, coordinate);
         for (std::size_t theta = 0; theta < theta_count; ++theta) {
           host_state(mode, pipeline_field, radial, theta) =
               scale * profile * angular_values[theta];

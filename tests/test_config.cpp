@@ -73,6 +73,7 @@ TEST_CASE("runtime configuration defaults fallback and resolved round trip") {
     initial_data.mode.0.m = 2
     initial_data.mode.0.amplitude_real = 1.25e-4
     initial_data.mode.0.amplitude_imag = -2.5e-5
+    initial_data.compact_support = true
     second_order.enabled = true
     second_order.source_mode = unrestricted
     second_order.source_start_time = 0.125
@@ -91,6 +92,7 @@ TEST_CASE("runtime configuration defaults fallback and resolved round trip") {
   CHECK(roundtrip.grid.second_order_modes ==
         configured.grid.second_order_modes);
   CHECK(roundtrip.initial_data.modes.size() == 1);
+  CHECK(roundtrip.initial_data.compact_support);
   CHECK_COMPLEX_NEAR(roundtrip.initial_data.modes[0].amplitude,
                      configured.initial_data.modes[0].amplitude, 0.0);
   CHECK(roundtrip.second_order.source_mode ==

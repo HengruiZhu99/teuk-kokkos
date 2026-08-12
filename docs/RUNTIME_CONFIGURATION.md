@@ -26,7 +26,7 @@ The current required schema marker is `config_version = 1`.
 | Background | `mass`, `spin`, `compactification_length` |
 | Grid and bands | `nr`, `ntheta`, `ellmax_first`, `ellmax_second`, `first_order_modes`, `second_order_modes` |
 | Evolution | `final_time`, `steps`, `cfl`, `reduction_damping`, `dissipation`, `reduction_mode` |
-| Initial data | `initial_data.type`, `initial_data.center`, `initial_data.width`, `initial_data.time_derivative`, `initial_data.add_sharp_partner`, `initial_data.checkpoint_directory` |
+| Initial data | `initial_data.type`, `initial_data.center`, `initial_data.width`, `initial_data.time_derivative`, `initial_data.add_sharp_partner`, `initial_data.compact_support`, `initial_data.checkpoint_directory` |
 | Base Gaussian mode | `initial_data.seed_ell`, `initial_data.seed_m`, `initial_data.amplitude_real`, `initial_data.amplitude_imag` |
 | Additional modes | `initial_data.mode.N.ell`, `.m`, `.amplitude_real`, `.amplitude_imag` |
 | Second order | `second_order.enabled`, `.source_mode`, `.source_start_time`, `.constraint_tolerance`, `.required_consecutive_passes`, `.allow_truncated_daughter_modes` |
@@ -38,7 +38,10 @@ second-order evolution is enabled. `initial_data.type` is currently
 `gaussian` or `checkpoint`; no unverified profile is advertised.
 
 `initial_data.center` and `initial_data.width` are fractions of the compactified
-outer-horizon coordinate `R_H`. Gaussian `Q` uses the production D4-2
+outer-horizon coordinate `R_H`. With `initial_data.compact_support=false`, the
+profile is `exp(-x^2)`. With it enabled, `width` is the exact support
+half-width and the profile is the normalized smooth bump
+`exp(1-1/(1-x^2))` for `|x|<1`, zero otherwise. Gaussian `Q` uses the production D4-2
 derivative. The initializer solves the retained Galerkin system for `P`, so a
 requested zero coordinate-time derivative is enforced without admitting
 Kerr-generated `ellmax_first+1` content. Every generated field is projected
