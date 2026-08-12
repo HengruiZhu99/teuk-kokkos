@@ -11,7 +11,7 @@
 
 #include "teuk/angular.hpp"
 #include "teuk/grid.hpp"
-#include "teuk/sbp.hpp"
+#include "teuk/radial_discretization.hpp"
 #include "teuk/types.hpp"
 
 namespace teuk {
@@ -46,11 +46,14 @@ class SourceConstraintEvaluator {
   SourceConstraintEvaluator(
       const std::size_t mode_count, const UniformRadialGrid& radial_grid,
       const angular::GaussLegendreGrid& angular_grid,
-      const std::string& label = "source_constraint_evaluator")
+      const std::string& label = "source_constraint_evaluator",
+      const RadialDiscretization radial_discretization =
+          RadialDiscretization::D42)
       : mode_count_(mode_count),
         radial_count_(radial_grid.size()),
         theta_count_(angular_grid.size()),
         radial_spacing_(radial_grid.spacing()),
+        radial_discretization_(radial_discretization),
         weight_sum_(static_cast<double>(mode_count) *
                     (radial_grid.upper_radius() -
                      radial_grid.lower_radius()) *
@@ -73,7 +76,8 @@ class SourceConstraintEvaluator {
         host_maximum_normalized_squared_(
             label + "_host_maximum_normalized_squared", 3),
         host_finite_(label + "_host_finite", 1) {
-    if (mode_count_ == 0 || radial_count_ < d42_minimum_points ||
+    if (mode_count_ == 0 ||
+        radial_count_ < radial_minimum_points(radial_discretization_) ||
         theta_count_ == 0 || angular_grid.weights.size() != theta_count_) {
       throw std::invalid_argument(
           "source constraint evaluator requires valid nonempty grids");
@@ -116,6 +120,8 @@ class SourceConstraintEvaluator {
     const std::size_t radial_count = radial_count_;
     const std::size_t theta_count = theta_count_;
     const double spacing = radial_spacing_;
+    const RadialDiscretization radial_discretization =
+        radial_discretization_;
     const std::size_t total = mode_count_ * radial_count * theta_count;
     Kokkos::parallel_for(
         "reduce_source_constraint_natural_norms",
@@ -125,7 +131,8 @@ class SourceConstraintEvaluator {
           const std::size_t radial = (flat / theta_count) % radial_count;
           const std::size_t mode = flat / (theta_count * radial_count);
           const double weight =
-              spacing * d42_norm_weight(radial_count, radial) *
+              spacing *
+              radial_norm_weight(radial_discretization, radial_count, radial) *
               2.0 * angular::pi * theta_weights(theta);
           for (std::size_t family = 0; family < 3; ++family) {
             const double c = Kokkos::abs(residuals(mode, family, radial, theta));
@@ -230,6 +237,7 @@ class SourceConstraintEvaluator {
   std::size_t radial_count_;
   std::size_t theta_count_;
   double radial_spacing_;
+  RadialDiscretization radial_discretization_;
   double weight_sum_;
   Kokkos::View<double*, MemorySpace> theta_weights_;
   Kokkos::View<double*, MemorySpace> weighted_constraint_squared_;

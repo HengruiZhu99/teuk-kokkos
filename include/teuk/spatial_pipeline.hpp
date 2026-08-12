@@ -152,11 +152,13 @@ class SpatialPipeline {
                   const ReductionEvolution reduction =
                       ReductionEvolution::FreeDamped,
                   const std::string& label = "full_pipeline",
-                  const SecondOrderSourcePolicy source_policy = {})
+                  const SecondOrderSourcePolicy source_policy = {},
+                  const RadialDiscretization radial_discretization =
+                      RadialDiscretization::D42)
       : SpatialPipeline(execution, registry, radial_grid,
                         PipelineAngularBands{ell_max, ell_max}, theta_nodes,
                         background, reduction_damping, dissipation, reduction,
-                        label, source_policy) {}
+                        label, source_policy, radial_discretization) {}
 
   SpatialPipeline(const ExecutionSpace& execution,
                   const ModeRegistry& registry,
@@ -168,7 +170,9 @@ class SpatialPipeline {
                   const ReductionEvolution reduction =
                       ReductionEvolution::FreeDamped,
                   const std::string& label = "full_pipeline",
-                  const SecondOrderSourcePolicy source_policy = {})
+                  const SecondOrderSourcePolicy source_policy = {},
+                  const RadialDiscretization radial_discretization =
+                      RadialDiscretization::D42)
       : registry_(registry),
         angular_bands_(angular_bands),
         background_(background),
@@ -181,6 +185,7 @@ class SpatialPipeline {
         dissipation_(dissipation),
         reduction_(reduction),
         source_policy_(source_policy),
+        radial_discretization_(radial_discretization),
         storage_(registry, radial_grid, angular::gauss_legendre(theta_nodes),
                  label),
         first_angular_(execution, registry, -2, -2,
@@ -242,7 +247,7 @@ class SpatialPipeline {
             radial_grid.size(), theta_nodes),
         source_constraint_evaluator_(
             registry.size(), radial_grid, angular::gauss_legendre(theta_nodes),
-            label + "_source_constraint_evaluator"),
+            label + "_source_constraint_evaluator", radial_discretization_),
         source_extra_(
             label + "_source_extra", registry.size(),
             static_cast<std::size_t>(
@@ -311,6 +316,10 @@ class SpatialPipeline {
         (2 * angular_bands.ell_max_first +
          angular_bands.ell_max_second + 2) /
         2;
+    if (radial_grid.size() < radial_minimum_points(radial_discretization_)) {
+      throw std::invalid_argument(
+          "full pipeline radial grid is too small for selected discretization");
+    }
     if (angular_bands.ell_max_first < 3 ||
         angular_bands.ell_max_second < 3 ||
         theta_nodes <
@@ -370,6 +379,9 @@ class SpatialPipeline {
   }
   [[nodiscard]] SecondOrderSourcePolicy source_policy() const {
     return source_policy_;
+  }
+  [[nodiscard]] RadialDiscretization radial_discretization() const {
+    return radial_discretization_;
   }
   [[nodiscard]] SourceActivationState source_activation_state() const {
     return source_activation_;
@@ -483,7 +495,7 @@ class SpatialPipeline {
         storage_.modes(), stage, first_laplacian, zero_forcing_, reduction_,
         first_scratch_, output, dissipation_,
         spatial_pipeline_detail::first_fields,
-        spatial_pipeline_detail::first_fields);
+        spatial_pipeline_detail::first_fields, radial_discretization_);
     project_teukolsky_rhs(execution, output,
                           spatial_pipeline_detail::first_fields);
     if (timing != nullptr) {
@@ -526,7 +538,7 @@ class SpatialPipeline {
         storage_.modes(), output, tangent_laplacian, zero_forcing_, reduction_,
         first_tangent_scratch_, tangent_rhs_, dissipation_,
         spatial_pipeline_detail::first_fields,
-        spatial_pipeline_detail::first_fields);
+        spatial_pipeline_detail::first_fields, radial_discretization_);
     project_teukolsky_rhs(execution, tangent_rhs_,
                           spatial_pipeline_detail::first_fields);
     evaluate_reconstruction_chain(execution, output, tangent_rhs_,
@@ -566,7 +578,7 @@ class SpatialPipeline {
         storage_.modes(), stage, second_laplacian, forcing_, reduction_,
         second_scratch_, output, dissipation_,
         spatial_pipeline_detail::second_fields,
-        spatial_pipeline_detail::second_fields);
+        spatial_pipeline_detail::second_fields, radial_discretization_);
     project_teukolsky_rhs(execution, output,
                           spatial_pipeline_detail::second_fields);
     if (timing != nullptr) {
@@ -657,7 +669,8 @@ class SpatialPipeline {
     using namespace spatial_pipeline_detail;
     evaluate_sbp_reconstruction_full_radial_derivatives(
         execution, storage_.radial_grid(), stage, radial_derivatives,
-        reconstruction_fields, compact_reconstruction_fields);
+        reconstruction_fields, compact_reconstruction_fields,
+        radial_discretization_);
     first_angular_.eth(
         execution, stage, static_cast<std::size_t>(PipelineField::FirstPsi),
         output, static_cast<std::size_t>(PipelineField::FirstPsi),
@@ -676,7 +689,7 @@ class SpatialPipeline {
         execution, storage_.radial_grid(), background_, storage_.theta(),
         storage_.sharp_indices(), stage, psi4, eth1_f, radial_derivatives,
         output, reconstruction_fields, compact_reconstruction_fields,
-        reconstruction_fields);
+        reconstruction_fields, radial_discretization_);
     g_angular_.project(execution, output, reconstruction_fields.G, output,
                        reconstruction_fields.G);
     first_angular_.project(execution, output, reconstruction_fields.Lambda,
@@ -695,7 +708,7 @@ class SpatialPipeline {
         execution, storage_.radial_grid(), background_, storage_.theta(),
         storage_.sharp_indices(), stage, psi4, eth2_g, radial_derivatives,
         output, reconstruction_fields, compact_reconstruction_fields,
-        reconstruction_fields);
+        reconstruction_fields, radial_discretization_);
     scalar_angular_.project(execution, output, reconstruction_fields.H,
                             output, reconstruction_fields.H);
     b_angular_.project(execution, output, reconstruction_fields.B, output,
@@ -734,7 +747,8 @@ class SpatialPipeline {
         execution, storage_.radial_grid(), background_, storage_.theta(),
         storage_.sharp_indices(), stage, psi4, angular_values,
         radial_derivatives, output, reconstruction_fields,
-        compact_reconstruction_fields, reconstruction_fields);
+        compact_reconstruction_fields, reconstruction_fields,
+        radial_discretization_);
     scalar_angular_.project(execution, output, reconstruction_fields.U,
                             output, reconstruction_fields.U);
   }
@@ -1191,7 +1205,7 @@ class SpatialPipeline {
     evaluate_spatial_outer_source_from_ethprime(
         execution, storage_.radial_grid(), background_, storage_.cos_theta(),
         storage_.sin_theta(), projected_inner_, projected_inner_tangent_,
-        ethprime_t_, source_over_r3_, forcing_);
+        ethprime_t_, source_over_r3_, forcing_, radial_discretization_);
   }
 
   void apply_source_activation(const ExecutionSpace& execution) {
@@ -1302,6 +1316,7 @@ class SpatialPipeline {
   double dissipation_;
   ReductionEvolution reduction_;
   SecondOrderSourcePolicy source_policy_;
+  RadialDiscretization radial_discretization_;
   SpatialPipelineStorage storage_;
   SignedModeAngularCoordinator<> first_angular_;
   SignedModeAngularCoordinator<> second_angular_;

@@ -214,3 +214,43 @@ TEST_CASE("normalized source eligibility is invariant under amplitude scaling") 
   CHECK(reports[1].psi3_bianchi.absolute_maximum <
         reports[2].psi3_bianchi.absolute_maximum);
 }
+
+TEST_CASE("D8-4 source constraint gate uses the selected SBP norm") {
+  const teuk::ExecutionSpace execution;
+  const teuk::UniformRadialGrid grid(17, 0.0, 0.8);
+  const auto angular_grid = teuk::angular::gauss_legendre(5);
+  teuk::SourceConstraintEvaluator evaluator(
+      1, grid, angular_grid, "d84_source_constraint_norm",
+      teuk::RadialDiscretization::D84);
+  Kokkos::View<teuk::Complex****, Kokkos::LayoutRight, teuk::MemorySpace>
+      residuals("d84_source_constraint_residuals", 1, 3, grid.size(), 5);
+  Kokkos::View<teuk::Complex****, Kokkos::LayoutRight, teuk::MemorySpace>
+      terms("d84_source_constraint_terms", 1, 6, grid.size(), 5);
+  Kokkos::deep_copy(residuals, teuk::Complex(0.0, 0.0));
+  Kokkos::deep_copy(terms, teuk::Complex(1.0, 0.0));
+  auto host_residuals = Kokkos::create_mirror_view(residuals);
+  Kokkos::deep_copy(host_residuals, teuk::Complex(0.0, 0.0));
+  for (std::size_t theta = 0; theta < 5; ++theta) {
+    host_residuals(0, 0, 0, theta) = teuk::Complex(1.0, 0.0);
+  }
+  Kokkos::deep_copy(execution, residuals, host_residuals);
+  const auto report = evaluator.sample(execution, residuals, terms);
+  const double expected = std::sqrt(
+      teuk::radial_norm_weight(teuk::RadialDiscretization::D84,
+                               grid.size(), 0) /
+      static_cast<double>(grid.size() - 1));
+  CHECK_NEAR(report.psi3_bianchi.weighted_rms, expected, 2.0e-14);
+  CHECK(report.all_finite);
+
+  bool rejected = false;
+  try {
+    const teuk::UniformRadialGrid too_small(15, 0.0, 0.8);
+    teuk::SourceConstraintEvaluator invalid(
+        1, too_small, angular_grid, "undersized_d84_source_constraint_norm",
+        teuk::RadialDiscretization::D84);
+    static_cast<void>(invalid);
+  } catch (const std::invalid_argument&) {
+    rejected = true;
+  }
+  CHECK(rejected);
+}

@@ -16,6 +16,7 @@
 #include "teuk/pipeline_diagnostics.hpp"
 #include "teuk/pipeline_storage.hpp"
 #include "teuk/sbp.hpp"
+#include "teuk/spatial_pipeline.hpp"
 
 namespace {
 
@@ -238,3 +239,24 @@ TEST_CASE("pipeline diagnostics fail closed on nonfinite endpoint values") {
   CHECK(rejected);
 }
 
+TEST_CASE("pipeline diagnostics reject a radial scheme mismatch") {
+  const teuk::ExecutionSpace execution;
+  const teuk::ModeRegistry registry({-1, 0, 1});
+  const teuk::UniformRadialGrid grid(17, 0.0, 0.8);
+  const teuk::KerrParameters background{1.0, 0.2, 1.1};
+  teuk::SpatialPipeline pipeline(
+      execution, registry, grid, 3, 6, background, 0.1, 0.0,
+      teuk::ReductionEvolution::FreeDamped, "d84_diagnostics_pipeline",
+      teuk::SecondOrderSourcePolicy::disabled(),
+      teuk::RadialDiscretization::D84);
+  teuk::PipelineDiagnostics wrong(
+      registry.size(), grid, 6, "d42_diagnostics_for_d84_pipeline",
+      teuk::RadialDiscretization::D42);
+  bool rejected = false;
+  try {
+    static_cast<void>(wrong.sample_pipeline(execution, pipeline));
+  } catch (const std::invalid_argument&) {
+    rejected = true;
+  }
+  CHECK(rejected);
+}

@@ -20,11 +20,12 @@
 #include <vector>
 
 #include "teuk/plus2_field.hpp"
+#include "teuk/radial_discretization.hpp"
 #include "teuk/types.hpp"
 
 namespace teuk {
 
-inline constexpr std::uint32_t four_weyl_output_schema_version = 1;
+inline constexpr std::uint32_t four_weyl_output_schema_version = 2;
 inline constexpr const char* four_weyl_output_schema =
     "teuk.four-weyl-field-output";
 inline constexpr const char* four_weyl_gauge_id =
@@ -207,6 +208,7 @@ struct FourWeylOutputMetadata {
   std::vector<int> parent_modes;
   std::vector<int> target_modes;
   std::uint64_t output_cadence_steps = 0;
+  RadialDiscretization radial_discretization = RadialDiscretization::D42;
   std::string sharp_semantics = four_weyl_sharp_semantics;
   std::string scri_semantics = four_weyl_scri_semantics;
   std::string horizon_semantics = four_weyl_horizon_semantics;
@@ -264,6 +266,7 @@ inline void validate_metadata(const FourWeylOutputMetadata& metadata) {
                  "perturbative convention");
   require_registry(metadata.parent_modes, metadata.ell_max_first, "parent");
   require_registry(metadata.target_modes, metadata.ell_max_second, "target");
+  (void)radial_discretization_name(metadata.radial_discretization);
 }
 
 inline std::vector<int> stored_modes(const FourWeylOutputMetadata& metadata) {
@@ -739,6 +742,9 @@ inline void write_four_weyl_metadata(
   line("parent_modes", four_weyl_detail::encode_modes(metadata.parent_modes));
   line("target_modes", four_weyl_detail::encode_modes(metadata.target_modes));
   output << "output_cadence_steps=" << metadata.output_cadence_steps << '\n';
+  line("radial_discretization",
+       std::string(radial_discretization_name(
+           metadata.radial_discretization)));
   line("sharp_semantics", metadata.sharp_semantics);
   line("scri_semantics", metadata.scri_semantics);
   line("horizon_semantics", metadata.horizon_semantics);
@@ -801,6 +807,8 @@ inline FourWeylOutputMetadata read_four_weyl_metadata(std::istream& input) {
       read_value("target_modes", true));
   result.output_cadence_steps = four_weyl_detail::parse_uint64(
       read_value("output_cadence_steps", false), "output cadence");
+  result.radial_discretization = parse_radial_discretization(
+      read_value("radial_discretization", true));
   result.sharp_semantics = read_value("sharp_semantics", true);
   result.scri_semantics = read_value("scri_semantics", true);
   result.horizon_semantics = read_value("horizon_semantics", true);

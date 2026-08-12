@@ -292,35 +292,12 @@ template <class View4D>
 KOKKOS_INLINE_FUNCTION Complex full_strided_radial_derivative_at(
     const View4D& values, const std::size_t mode, const std::size_t field,
     const std::size_t point_count, const std::size_t radial,
-    const std::size_t theta, const double inverse_spacing) {
-  return d42_first_derivative_strided_at(
+    const std::size_t theta, const double inverse_spacing,
+    const RadialDiscretization discretization = RadialDiscretization::D42) {
+  return radial_first_derivative_strided_at(
+      discretization,
       &values(mode, field, 0, theta), point_count, radial, inverse_spacing,
-      values.extent(3));
-}
-
-template <class View4D>
-KOKKOS_INLINE_FUNCTION Complex full_strided_dissipation_at(
-    const View4D& values, const std::size_t mode, const std::size_t field,
-    const std::size_t point_count, const std::size_t radial,
-    const std::size_t theta, const double spacing, const double strength) {
-  const std::size_t first_row = radial > 3 ? radial - 3 : 0;
-  const std::size_t last_row =
-      radial < point_count - 3 ? radial : point_count - 4;
-  const std::size_t stride = values.extent(3);
-  const Complex* line = &values(mode, field, 0, theta);
-  Complex normal_product = 0.0;
-  for (std::size_t row = first_row; row <= last_row; ++row) {
-    const Complex difference =
-        -line[row * stride] + 3.0 * line[(row + 1) * stride] -
-        3.0 * line[(row + 2) * stride] + line[(row + 3) * stride];
-    const std::size_t position = radial - row;
-    const double transpose =
-        position == 0 ? -1.0 : (position == 1 ? 3.0
-                                               : (position == 2 ? -3.0 : 1.0));
-    normal_product += transpose * difference;
-  }
-  return -strength * normal_product /
-         (spacing * d42_norm_weight(point_count, radial));
+      values.stride(2));
 }
 
 template <class CallerExecutionSpace, class ThetaView, class ModeView,
@@ -426,14 +403,15 @@ inline void evaluate_sbp_reconstruction_full_radial_derivatives(
     const StageView& stage_state,
     const DerivativeView& output_radial_derivatives,
     const ReconstructionFullFieldOffsets stage_fields = {},
-    const ReconstructionFullFieldOffsets derivative_fields = {}) {
+    const ReconstructionFullFieldOffsets derivative_fields = {},
+    const RadialDiscretization discretization = RadialDiscretization::D42) {
   static_assert(StageView::rank == 4 && DerivativeView::rank == 4,
                 "full reconstruction derivatives require rank-4 views");
   const std::size_t mode_count = stage_state.extent(0);
   constexpr std::size_t field_count = 7;
   const std::size_t point_count = grid.size();
   const std::size_t theta_count = stage_state.extent(3);
-  if (point_count < d42_minimum_points ||
+  if (point_count < radial_minimum_points(discretization) ||
       stage_state.extent(1) <= maximum_field_offset(stage_fields) ||
       stage_state.extent(2) != point_count ||
       output_radial_derivatives.extent(0) != mode_count ||
@@ -472,7 +450,7 @@ inline void evaluate_sbp_reconstruction_full_radial_derivatives(
                                   theta) =
             full_strided_radial_derivative_at(
                 stage_state, mode, input_offsets[logical_field], point_count,
-                radial, theta, inverse_spacing);
+                radial, theta, inverse_spacing, discretization);
       });
 }
 
@@ -485,14 +463,16 @@ inline void validate_reconstruction_full_stage_views(
     const OutputView& output_rhs, const DerivativeView& radial_derivatives,
     const ReconstructionFullFieldOffsets& stage_fields,
     const ReconstructionFullFieldOffsets& output_fields,
-    const ReconstructionFullFieldOffsets& derivative_fields) {
+    const ReconstructionFullFieldOffsets& derivative_fields,
+    const RadialDiscretization discretization) {
   static_assert(StageView::rank == 4 && Psi4View::rank == 3 &&
                     OutputView::rank == 4 && DerivativeView::rank == 4,
                 "full reconstruction kernels require rank-4 fields and rank-3 Psi4");
   const std::size_t modes = stage_state.extent(0);
   const std::size_t radial = grid.size();
   const std::size_t theta = stage_state.extent(3);
-  if (!(parameters.compactification_length > 0.0) || radial < d42_minimum_points ||
+  if (!(parameters.compactification_length > 0.0) ||
+      radial < radial_minimum_points(discretization) ||
       stage_state.extent(1) <= maximum_field_offset(stage_fields) ||
       stage_state.extent(2) != radial ||
       theta_coordinates.extent(0) != theta || sharp_indices.extent(0) != modes ||
@@ -519,11 +499,12 @@ inline void evaluate_sbp_reconstruction_full_pass1(
     const DerivativeView& radial_dr, const OutputView& output_rhs,
     const ReconstructionFullFieldOffsets stage_fields = {},
     const ReconstructionFullFieldOffsets derivative_fields = {},
-    const ReconstructionFullFieldOffsets output_fields = {}) {
+    const ReconstructionFullFieldOffsets output_fields = {},
+    const RadialDiscretization discretization = RadialDiscretization::D42) {
   validate_reconstruction_full_stage_views(
       grid, parameters, theta_coordinates, sharp_indices, stage_state,
       stage_psi4, output_rhs, radial_dr, stage_fields, output_fields,
-      derivative_fields);
+      derivative_fields, discretization);
   const std::size_t modes = stage_state.extent(0);
   const std::size_t radial_count = grid.size();
   const std::size_t theta_count = stage_state.extent(3);
@@ -578,11 +559,12 @@ inline void evaluate_sbp_reconstruction_full_pass2(
     const DerivativeView& radial_dr, const OutputView& output_rhs,
     const ReconstructionFullFieldOffsets stage_fields = {},
     const ReconstructionFullFieldOffsets derivative_fields = {},
-    const ReconstructionFullFieldOffsets output_fields = {}) {
+    const ReconstructionFullFieldOffsets output_fields = {},
+    const RadialDiscretization discretization = RadialDiscretization::D42) {
   validate_reconstruction_full_stage_views(
       grid, parameters, theta_coordinates, sharp_indices, stage_state,
       stage_psi4, output_rhs, radial_dr, stage_fields, output_fields,
-      derivative_fields);
+      derivative_fields, discretization);
   const std::size_t modes = stage_state.extent(0);
   const std::size_t radial_count = grid.size();
   const std::size_t theta_count = stage_state.extent(3);
@@ -652,11 +634,12 @@ inline void evaluate_sbp_reconstruction_full_pass3(
     const DerivativeView& radial_dr, const OutputView& output_rhs,
     const ReconstructionFullFieldOffsets stage_fields = {},
     const ReconstructionFullFieldOffsets derivative_fields = {},
-    const ReconstructionFullFieldOffsets output_fields = {}) {
+    const ReconstructionFullFieldOffsets output_fields = {},
+    const RadialDiscretization discretization = RadialDiscretization::D42) {
   validate_reconstruction_full_stage_views(
       grid, parameters, theta_coordinates, sharp_indices, stage_state,
       stage_psi4, output_rhs, radial_dr, stage_fields, output_fields,
-      derivative_fields);
+      derivative_fields, discretization);
   const std::size_t modes = stage_state.extent(0);
   const std::size_t radial_count = grid.size();
   const std::size_t theta_count = stage_state.extent(3);

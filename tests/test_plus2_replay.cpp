@@ -3,8 +3,11 @@
 #include <Kokkos_Core.hpp>
 
 #include <algorithm>
+#include <array>
+#include <bit>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -284,6 +287,38 @@ void replace_checkpoint_bytes(const std::filesystem::path& path,
   if (!output) throw std::runtime_error("failed to corrupt checkpoint marker");
 }
 
+void convert_plus2_checkpoint_to_legacy_v1(
+    const std::filesystem::path& path) {
+  std::ifstream input(path, std::ios::binary);
+  std::vector<char> bytes((std::istreambuf_iterator<char>(input)),
+                          std::istreambuf_iterator<char>());
+  if (input.bad()) throw std::runtime_error("failed reading checkpoint");
+  const std::uint32_t current = teuk::plus2_checkpoint_format_version;
+  const auto version_bytes = std::bit_cast<std::array<char, 4>>(current);
+  const auto match = std::search(bytes.begin(), bytes.end(),
+                                 version_bytes.begin(), version_bytes.end());
+  if (match == bytes.end()) throw std::runtime_error("version not found");
+  const std::uint32_t legacy = teuk::plus2_checkpoint_legacy_d42_version;
+  const auto legacy_bytes = std::bit_cast<std::array<char, 4>>(legacy);
+  std::copy(legacy_bytes.begin(), legacy_bytes.end(), match);
+
+  const std::string scheme = "d4-2";
+  const auto length_bytes = std::bit_cast<std::array<char, 8>>(
+      static_cast<std::uint64_t>(scheme.size()));
+  const std::vector<char> marker = [&] {
+    std::vector<char> result(length_bytes.begin(), length_bytes.end());
+    result.insert(result.end(), scheme.begin(), scheme.end());
+    return result;
+  }();
+  const auto scheme_match = std::search(bytes.begin(), bytes.end(),
+                                        marker.begin(), marker.end());
+  if (scheme_match == bytes.end()) throw std::runtime_error("scheme not found");
+  bytes.erase(scheme_match, scheme_match + marker.size());
+  std::ofstream output(path, std::ios::binary | std::ios::trunc);
+  output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+  if (!output) throw std::runtime_error("failed writing legacy checkpoint");
+}
+
 teuk::Plus2CheckpointMetadata checkpoint_metadata() {
   teuk::Plus2CheckpointMetadata metadata;
   metadata.parent_modes = {-1, 1};
@@ -295,6 +330,7 @@ teuk::Plus2CheckpointMetadata checkpoint_metadata() {
   metadata.initial_policy = teuk::Plus2InitialPolicy::Zero;
   metadata.git_commit = teuk::plus2_build_git_commit();
   metadata.runtime_config_schema_version = 1;
+  metadata.radial_discretization = teuk::RadialDiscretization::D42;
   metadata.progress = {0.5, 5};
   metadata.source_activation = {true, 0.1, 2, 0.4};
   return metadata;
@@ -313,6 +349,7 @@ teuk::Plus2CheckpointExpectations checkpoint_expectations() {
   expected.runtime_config_schema_version = 1;
   expected.radial_count = 2;
   expected.theta_count = 2;
+  expected.radial_discretization = teuk::RadialDiscretization::D42;
   return expected;
 }
 
@@ -525,7 +562,10 @@ TEST_CASE("plus2 checkpoint rejects every scientific metadata mismatch") {
         expected.git_commit[0] =
             expected.git_commit[0] == '0' ? '1' : '0';
       },
-      [](auto& expected) { ++expected.runtime_config_schema_version; }};
+      [](auto& expected) { ++expected.runtime_config_schema_version; },
+      [](auto& expected) {
+        expected.radial_discretization = teuk::RadialDiscretization::D84;
+      }};
 
   for (const auto& modify : mismatches) {
     auto expected = baseline;
@@ -546,6 +586,41 @@ TEST_CASE("plus2 checkpoint rejects every scientific metadata mismatch") {
     for (std::size_t i = 0; i < unchanged.extent(0); ++i) {
       CHECK(unchanged(i) == teuk::Complex(-6.0, 4.0));
     }
+  }
+}
+
+TEST_CASE("plus2 checkpoint v1 is legacy D4-2 and rejects D8-4") {
+  const teuk::ExecutionSpace execution;
+  auto storage = teuk::Plus2CompanionStorage::enabled(
+      3, 2, 2, "plus2_legacy_checkpoint_test");
+  Kokkos::deep_copy(execution, storage.flat_state(), teuk::Complex(1.0, -2.0));
+  TemporaryCheckpoint checkpoint;
+  static_cast<void>(teuk::save_plus2_checkpoint(
+      execution, checkpoint.path(), storage, checkpoint_metadata()));
+  convert_plus2_checkpoint_to_legacy_v1(checkpoint.path());
+
+  const auto expected = checkpoint_expectations();
+  Kokkos::deep_copy(execution, storage.flat_state(), teuk::Complex(0.0, 0.0));
+  const auto metadata = teuk::load_plus2_checkpoint(
+      execution, checkpoint.path(), storage, expected);
+  CHECK(metadata.version == teuk::plus2_checkpoint_legacy_d42_version);
+  CHECK(metadata.radial_discretization == teuk::RadialDiscretization::D42);
+
+  auto d84_expected = expected;
+  d84_expected.radial_discretization = teuk::RadialDiscretization::D84;
+  Kokkos::deep_copy(execution, storage.flat_state(), teuk::Complex(9.0, -4.0));
+  bool rejected = false;
+  try {
+    static_cast<void>(teuk::load_plus2_checkpoint(
+        execution, checkpoint.path(), storage, d84_expected));
+  } catch (const std::runtime_error&) {
+    rejected = true;
+  }
+  CHECK(rejected);
+  const auto unchanged = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, storage.flat_state());
+  for (std::size_t i = 0; i < unchanged.extent(0); ++i) {
+    CHECK(unchanged(i) == teuk::Complex(9.0, -4.0));
   }
 }
 

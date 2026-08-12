@@ -45,7 +45,8 @@ inline PipelineCheckpointConfiguration make_checkpoint_configuration(
           parameters.method.dissipation,
           parameters.method.reduction,
           time_step,
-          make_source_policy(parameters)};
+          make_source_policy(parameters),
+          parameters.method.radial_discretization};
 }
 
 struct InitializedPipelineState {

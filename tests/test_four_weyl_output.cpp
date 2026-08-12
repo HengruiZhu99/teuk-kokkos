@@ -44,6 +44,7 @@ teuk::FourWeylOutputMetadata metadata() {
   result.parent_modes = {-2, 2};
   result.target_modes = {-4, 0, 4};
   result.output_cadence_steps = 5;
+  result.radial_discretization = teuk::RadialDiscretization::D84;
   return result;
 }
 

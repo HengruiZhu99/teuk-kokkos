@@ -143,6 +143,27 @@ void replace_metadata_line(const std::filesystem::path& path,
   if (!output) throw std::runtime_error("cannot write test metadata");
 }
 
+void remove_metadata_line(const std::filesystem::path& path,
+                          const std::string& key) {
+  std::ifstream input(path);
+  if (!input) throw std::runtime_error("cannot read test metadata");
+  std::vector<std::string> lines;
+  std::string line;
+  bool removed = false;
+  while (std::getline(input, line)) {
+    if (line.starts_with(key + "=")) {
+      removed = true;
+    } else {
+      lines.push_back(line);
+    }
+  }
+  if (!removed) throw std::runtime_error("test metadata key not found");
+  input.close();
+  std::ofstream output(path, std::ios::trunc);
+  for (const std::string& output_line : lines) output << output_line << '\n';
+  if (!output) throw std::runtime_error("cannot write test metadata");
+}
+
 }  // namespace
 
 TEST_CASE("full spatial pipeline checkpoint resumes the real RK4 trajectory") {
@@ -218,6 +239,8 @@ TEST_CASE("full spatial pipeline checkpoint resumes the real RK4 trajectory") {
   CHECK(metadata.configuration.background.spin ==
         configuration.background.spin);
   CHECK(metadata.configuration.reduction == configuration.reduction);
+  CHECK(metadata.configuration.radial_discretization ==
+        teuk::RadialDiscretization::D42);
   CHECK(metadata.configuration.time_step == configuration.time_step);
   CHECK(metadata.configuration.source_policy.mode ==
         configuration.source_policy.mode);
@@ -286,11 +309,50 @@ TEST_CASE("pipeline checkpoint rejects malformed truncated and mismatched data")
       configuration.source_policy);
   initialize_pipeline(execution, pipeline, registry,
                       configuration.ell_max_first);
+  const auto valid_state = pipeline_state(execution, pipeline);
 
   TemporaryTestDirectory temporary;
   const auto valid = temporary.path() / "valid";
   teuk::write_pipeline_checkpoint(execution, valid, pipeline, registry,
                                   configuration, {0.0, 0});
+
+  const auto legacy = temporary.path() / "legacy-v4";
+  copy_checkpoint(valid, legacy);
+  replace_metadata_line(legacy / teuk::pipeline_checkpoint_metadata_file,
+                        "version", "4");
+  remove_metadata_line(legacy / teuk::pipeline_checkpoint_metadata_file,
+                       "radial_discretization");
+  const auto legacy_metadata =
+      teuk::read_pipeline_checkpoint_metadata(legacy);
+  CHECK(legacy_metadata.version ==
+        teuk::pipeline_checkpoint_legacy_d42_version);
+  CHECK(legacy_metadata.configuration.radial_discretization ==
+        teuk::RadialDiscretization::D42);
+  set_pipeline_state(execution, pipeline, teuk::Complex(-0.2, 0.3));
+  static_cast<void>(teuk::load_pipeline_checkpoint(
+      execution, legacy, pipeline, registry, configuration));
+  CHECK(pipeline_state(execution, pipeline) == valid_state);
+
+  const teuk::UniformRadialGrid d84_grid(17, 0.0, 0.8);
+  teuk::SpatialPipeline d84_pipeline(
+      execution, registry, d84_grid,
+      teuk::PipelineAngularBands{configuration.ell_max_first,
+                                 configuration.ell_max_second},
+      configuration.theta_nodes, configuration.background,
+      configuration.reduction_damping, configuration.dissipation,
+      configuration.reduction, "legacy_v4_d84_rejection",
+      configuration.source_policy, teuk::RadialDiscretization::D84);
+  const teuk::Complex d84_sentinel(0.41, -0.19);
+  set_pipeline_state(execution, d84_pipeline, d84_sentinel);
+  const auto d84_before = pipeline_state(execution, d84_pipeline);
+  auto d84_configuration = configuration;
+  d84_configuration.radial_discretization =
+      teuk::RadialDiscretization::D84;
+  CHECK(rejects([&] {
+    (void)teuk::load_pipeline_checkpoint(
+        execution, legacy, d84_pipeline, registry, d84_configuration);
+  }));
+  CHECK(pipeline_state(execution, d84_pipeline) == d84_before);
 
   const auto off_band = temporary.path() / "off-band";
   auto off_band_host = Kokkos::create_mirror_view(pipeline.storage().state());

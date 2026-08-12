@@ -19,12 +19,14 @@
 
 #include "teuk/plus2_companion_storage.hpp"
 #include "teuk/plus2_runtime_types.hpp"
+#include "teuk/radial_discretization.hpp"
 #include "teuk/source_activation.hpp"
 #include "teuk/types.hpp"
 
 namespace teuk {
 
-inline constexpr std::uint32_t plus2_checkpoint_format_version = 1;
+inline constexpr std::uint32_t plus2_checkpoint_format_version = 2;
+inline constexpr std::uint32_t plus2_checkpoint_legacy_d42_version = 1;
 inline constexpr const char* plus2_checkpoint_schema =
     "teuk.plus2-companion-checkpoint";
 inline constexpr const char* plus2_fixed_tetrad_raw_scaling =
@@ -77,6 +79,7 @@ struct Plus2CheckpointMetadata {
   int runtime_config_schema_version = 0;
   std::size_t radial_count = 0;
   std::size_t theta_count = 0;
+  RadialDiscretization radial_discretization = RadialDiscretization::D42;
   Plus2CheckpointProgress progress;
   SourceActivationState source_activation;
   std::uint64_t state_checksum = 0;
@@ -96,6 +99,7 @@ struct Plus2CheckpointExpectations {
   int runtime_config_schema_version = 0;
   std::size_t radial_count = 0;
   std::size_t theta_count = 0;
+  RadialDiscretization radial_discretization = RadialDiscretization::D42;
 };
 
 namespace plus2_checkpoint_detail {
@@ -193,11 +197,13 @@ inline void validate_expectations(const Plus2CheckpointExpectations& expected) {
       expected.ell_max_second, expected.linear_method, expected.second_method,
       expected.initial_policy, expected.git_commit,
       expected.runtime_config_schema_version);
+  (void)radial_discretization_name(expected.radial_discretization);
 }
 
 inline void validate_metadata(const Plus2CheckpointMetadata& metadata) {
   if (metadata.schema != plus2_checkpoint_schema ||
-      metadata.version != plus2_checkpoint_format_version ||
+      (metadata.version != plus2_checkpoint_format_version &&
+       metadata.version != plus2_checkpoint_legacy_d42_version) ||
       metadata.byte_order != plus2_native_byte_order() ||
       metadata.floating_point_format != plus2_binary64_format ||
       metadata.complex_component_order != plus2_complex_component_order ||
@@ -221,6 +227,7 @@ inline void validate_metadata(const Plus2CheckpointMetadata& metadata) {
       metadata.initial_policy, metadata.git_commit,
       metadata.runtime_config_schema_version);
   validate_activation(metadata.source_activation, metadata.progress.time);
+  (void)radial_discretization_name(metadata.radial_discretization);
 }
 
 inline std::size_t checked_value_count(const Plus2CheckpointMetadata& metadata) {
@@ -338,6 +345,10 @@ inline void write_payload(std::ostream& output,
                            metadata.runtime_config_schema_version));
   write_scalar(output, static_cast<std::uint64_t>(metadata.radial_count));
   write_scalar(output, static_cast<std::uint64_t>(metadata.theta_count));
+  if (metadata.version >= plus2_checkpoint_format_version) {
+    write_string(output,
+                 radial_discretization_name(metadata.radial_discretization));
+  }
   write_scalar(output, metadata.progress.time);
   write_scalar(output, metadata.progress.step);
   write_scalar(output, static_cast<std::uint8_t>(metadata.source_activation.active));
@@ -389,6 +400,11 @@ inline std::pair<Plus2CheckpointMetadata, std::vector<Complex>> read_payload(
       read_scalar<std::uint64_t>(input, "radial count"));
   metadata.theta_count = static_cast<std::size_t>(
       read_scalar<std::uint64_t>(input, "theta count"));
+  metadata.radial_discretization =
+      metadata.version == plus2_checkpoint_legacy_d42_version
+          ? RadialDiscretization::D42
+          : parse_radial_discretization(
+                read_string(input, "radial discretization"));
   metadata.progress.time = read_scalar<double>(input, "time");
   metadata.progress.step = read_scalar<std::uint64_t>(input, "step");
   const auto active = read_scalar<std::uint8_t>(input, "source active");
@@ -435,7 +451,8 @@ inline void require_metadata_match(
       metadata.runtime_config_schema_version !=
           expected.runtime_config_schema_version ||
       metadata.radial_count != expected.radial_count ||
-      metadata.theta_count != expected.theta_count) {
+      metadata.theta_count != expected.theta_count ||
+      metadata.radial_discretization != expected.radial_discretization) {
     throw std::runtime_error(
         "plus2 checkpoint does not match scaling, registry, methods, provenance, or shape");
   }
@@ -449,6 +466,10 @@ inline Plus2CheckpointMetadata save_plus2_checkpoint(
   using namespace plus2_checkpoint_detail;
   if (!storage.is_enabled()) {
     throw std::invalid_argument("cannot checkpoint disabled plus2 storage");
+  }
+  if (metadata.version != plus2_checkpoint_format_version) {
+    throw std::invalid_argument(
+        "new plus2 checkpoints must use the current format version");
   }
   metadata.radial_count = storage.radial_count();
   metadata.theta_count = storage.theta_count();

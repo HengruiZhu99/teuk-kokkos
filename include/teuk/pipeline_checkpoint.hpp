@@ -35,7 +35,8 @@
 
 namespace teuk {
 
-inline constexpr std::uint64_t pipeline_checkpoint_format_version = 4;
+inline constexpr std::uint64_t pipeline_checkpoint_format_version = 5;
+inline constexpr std::uint64_t pipeline_checkpoint_legacy_d42_version = 4;
 inline constexpr const char* pipeline_checkpoint_metadata_file =
     "metadata.txt";
 inline constexpr const char* pipeline_checkpoint_state_file = "state.bin";
@@ -53,6 +54,7 @@ struct PipelineCheckpointConfiguration {
   ReductionEvolution reduction = ReductionEvolution::FreeDamped;
   double time_step = 0.0;
   SecondOrderSourcePolicy source_policy;
+  RadialDiscretization radial_discretization = RadialDiscretization::D42;
 };
 
 struct PipelineCheckpointProgress {
@@ -163,6 +165,7 @@ inline void validate_configuration(
   }
   (void)reduction_name(configuration.reduction);
   (void)source_mode_name(configuration.source_policy.mode);
+  (void)radial_discretization_name(configuration.radial_discretization);
 }
 
 inline bool same_configuration(
@@ -178,6 +181,7 @@ inline bool same_configuration(
          left.reduction_damping == right.reduction_damping &&
          left.dissipation == right.dissipation &&
          left.reduction == right.reduction &&
+         left.radial_discretization == right.radial_discretization &&
          left.time_step == right.time_step &&
          left.source_policy.mode == right.source_policy.mode &&
          left.source_policy.source_start_time ==
@@ -333,7 +337,8 @@ inline void validate_sorted_registry(const std::vector<int>& modes,
 }
 
 inline void validate_metadata(const PipelineCheckpointMetadata& metadata) {
-  if (metadata.version != pipeline_checkpoint_format_version ||
+  if ((metadata.version != pipeline_checkpoint_format_version &&
+       metadata.version != pipeline_checkpoint_legacy_d42_version) ||
       metadata.shape.fields != point_pipeline_field_count ||
       metadata.shape.modes != metadata.modes.size() ||
       metadata.shape.radial != metadata.radial_coordinates.size() ||
@@ -367,7 +372,9 @@ inline void validate_metadata(const PipelineCheckpointMetadata& metadata) {
   const bool theta_decreasing =
       std::is_sorted(metadata.theta_coordinates.rbegin(),
                      metadata.theta_coordinates.rend());
-  if (metadata.radial_coordinates.size() < 5 ||
+  if (metadata.radial_coordinates.size() <
+          radial_minimum_points(
+              metadata.configuration.radial_discretization) ||
       !std::is_sorted(metadata.radial_coordinates.begin(),
                       metadata.radial_coordinates.end()) ||
       std::adjacent_find(metadata.radial_coordinates.begin(),
@@ -431,6 +438,10 @@ inline void write_metadata_file(
          << "dissipation=" << metadata.configuration.dissipation << '\n'
          << "reduction="
          << reduction_name(metadata.configuration.reduction) << '\n'
+         << "radial_discretization="
+         << radial_discretization_name(
+                metadata.configuration.radial_discretization)
+         << '\n'
          << "time_step=" << metadata.configuration.time_step << '\n'
          << "source_mode="
          << source_mode_name(metadata.configuration.source_policy.mode) << '\n'
@@ -517,7 +528,7 @@ inline std::map<std::string, std::string> read_entries(
   }
   if (!input.eof()) throw std::runtime_error("failed while reading checkpoint metadata");
 
-  static const std::set<std::string> expected{
+  std::set<std::string> expected{
       "format",          "version",          "ordering",
       "complex_storage", "byte_order",       "state_file",
       "modes",           "fields",           "radial",
@@ -527,12 +538,16 @@ inline std::map<std::string, std::string> read_entries(
       "spin",            "compactification_length", "ell_max_first",
       "ell_max_second",
       "theta_nodes",     "reduction_damping", "dissipation",
-      "reduction",       "time_step",        "source_mode",
+      "reduction",       "radial_discretization", "time_step", "source_mode",
       "source_start_time", "source_normalized_constraint_tolerance",
       "source_required_consecutive_passes", "source_active",
       "source_activation_time", "source_consecutive_passes",
       "source_last_eligibility_time", "time",
       "step",            "state_checksum_fnv1a64"};
+  const std::uint64_t version = parse_number<std::uint64_t>(entries, "version");
+  if (version == pipeline_checkpoint_legacy_d42_version) {
+    expected.erase("radial_discretization");
+  }
   if (entries.size() != expected.size()) {
     throw std::runtime_error("checkpoint metadata key set does not match format");
   }
@@ -610,6 +625,11 @@ inline PipelineCheckpointMetadata read_pipeline_checkpoint_metadata(
       parse_number<double>(entries, "dissipation");
   metadata.configuration.reduction =
       parse_reduction(require_text(entries, "reduction"));
+  metadata.configuration.radial_discretization =
+      metadata.version == pipeline_checkpoint_legacy_d42_version
+          ? RadialDiscretization::D42
+          : parse_radial_discretization(
+                require_text(entries, "radial_discretization"));
   metadata.configuration.time_step =
       parse_number<double>(entries, "time_step");
   metadata.configuration.source_policy.mode =
@@ -660,6 +680,11 @@ inline void write_pipeline_checkpoint(
                           configuration.source_policy)) {
     throw std::invalid_argument(
         "checkpoint source policy does not match the pipeline");
+  }
+  if (pipeline.radial_discretization() !=
+      configuration.radial_discretization) {
+    throw std::invalid_argument(
+        "checkpoint radial discretization does not match the pipeline");
   }
   validate_finite(progress.time, "checkpoint time");
   if (progress.time < 0.0) {
@@ -712,6 +737,11 @@ inline PipelineCheckpointMetadata load_pipeline_checkpoint(
                           expected_configuration.source_policy)) {
     throw std::runtime_error(
         "checkpoint source policy does not match the caller pipeline");
+  }
+  if (pipeline.radial_discretization() !=
+      expected_configuration.radial_discretization) {
+    throw std::runtime_error(
+        "checkpoint radial discretization does not match caller pipeline");
   }
   if (metadata.modes != expected_registry.modes() ||
       metadata.parents != expected_registry.parents() ||

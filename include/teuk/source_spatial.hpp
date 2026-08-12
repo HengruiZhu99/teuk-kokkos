@@ -11,7 +11,7 @@
 #include "teuk/ghp.hpp"
 #include "teuk/modes.hpp"
 #include "teuk/second_order.hpp"
-#include "teuk/sbp.hpp"
+#include "teuk/radial_discretization.hpp"
 #include "teuk/types.hpp"
 
 namespace teuk {
@@ -284,7 +284,8 @@ void evaluate_spatial_outer_source(
     const SpatialInnerSourceView& inner_source_dt,
     const SpatialOuterSourceView& lowered_T,
     const SpatialOuterSourceView& source_over_r3,
-    const SpatialOuterSourceView& forcing) {
+    const SpatialOuterSourceView& forcing,
+    const RadialDiscretization discretization = RadialDiscretization::D42) {
   const std::size_t mode_count = inner_source.extent(0);
   const std::size_t radial_points = radial_grid.size();
   const std::size_t theta_points = cos_theta.extent(0);
@@ -299,7 +300,8 @@ void evaluate_spatial_outer_source(
     return view.extent(0) == mode_count && view.extent(1) == radial_points &&
            view.extent(2) == theta_points;
   };
-  if (sin_theta.extent(0) != theta_points || !valid_inner(inner_source) ||
+  if (radial_points < radial_minimum_points(discretization) ||
+      sin_theta.extent(0) != theta_points || !valid_inner(inner_source) ||
       !valid_inner(inner_source_dt) || !valid_outer(lowered_T) ||
       !valid_outer(source_over_r3) || !valid_outer(forcing)) {
     throw std::invalid_argument("spatial outer source view extents do not match");
@@ -310,6 +312,7 @@ void evaluate_spatial_outer_source(
   constexpr std::size_t T =
       static_cast<std::size_t>(SpatialInnerSourceComponent::T);
   const double inverse_spacing = 1.0 / radial_grid.spacing();
+  const std::size_t radial_stride = inner_source.stride(2);
   const std::size_t total = mode_count * radial_points * theta_points;
   Kokkos::parallel_for(
       "teuk_spatial_outer_source",
@@ -323,9 +326,10 @@ void evaluate_spatial_outer_source(
         const double radius = radial_grid.coordinate(radial);
         const Complex D_value = inner_source(mode, D, radial, theta);
         const Complex T_value = inner_source(mode, T, radial, theta);
-        const Complex radial_D = d42_first_derivative_strided_at(
+        const Complex radial_D = radial_first_derivative_strided_at(
+            discretization,
             &inner_source(mode, D, 0, theta), radial_points, radial,
-            inverse_spacing, theta_points);
+            inverse_spacing, radial_stride);
         const Complex delta3_D = delta_n_point(
             D_value, inner_source_dt(mode, D, radial, theta), radial_D, 3,
             radius, parameters.mass, parameters.compactification_length);
@@ -359,7 +363,8 @@ void evaluate_spatial_outer_source_from_ethprime(
     const SpatialInnerSourceView& inner_source_dt,
     const SpatialOuterSourceView& ethprime3_T,
     const SpatialOuterSourceView& source_over_r3,
-    const SpatialOuterSourceView& forcing) {
+    const SpatialOuterSourceView& forcing,
+    const RadialDiscretization discretization = RadialDiscretization::D42) {
   const std::size_t mode_count = inner_source.extent(0);
   const std::size_t radial_points = radial_grid.size();
   const std::size_t theta_points = cos_theta.extent(0);
@@ -374,7 +379,8 @@ void evaluate_spatial_outer_source_from_ethprime(
     return view.extent(0) == mode_count && view.extent(1) == radial_points &&
            view.extent(2) == theta_points;
   };
-  if (sin_theta.extent(0) != theta_points || !valid_inner(inner_source) ||
+  if (radial_points < radial_minimum_points(discretization) ||
+      sin_theta.extent(0) != theta_points || !valid_inner(inner_source) ||
       !valid_inner(inner_source_dt) || !valid_outer(ethprime3_T) ||
       !valid_outer(source_over_r3) || !valid_outer(forcing)) {
     throw std::invalid_argument("spatial outer source view extents do not match");
@@ -384,6 +390,7 @@ void evaluate_spatial_outer_source_from_ethprime(
   constexpr std::size_t T =
       static_cast<std::size_t>(SpatialInnerSourceComponent::T);
   const double inverse_spacing = 1.0 / radial_grid.spacing();
+  const std::size_t radial_stride = inner_source.stride(2);
   const std::size_t total = mode_count * radial_points * theta_points;
   Kokkos::parallel_for(
       "teuk_spatial_outer_source_from_ethprime",
@@ -397,9 +404,10 @@ void evaluate_spatial_outer_source_from_ethprime(
         const double radius = radial_grid.coordinate(radial);
         const Complex D_value = inner_source(mode, D, radial, theta);
         const Complex T_value = inner_source(mode, T, radial, theta);
-        const Complex radial_D = d42_first_derivative_strided_at(
+        const Complex radial_D = radial_first_derivative_strided_at(
+            discretization,
             &inner_source(mode, D, 0, theta), radial_points, radial,
-            inverse_spacing, theta_points);
+            inverse_spacing, radial_stride);
         const Complex delta3_D = delta_n_point(
             D_value, inner_source_dt(mode, D, radial, theta), radial_D, 3,
             radius, parameters.mass, parameters.compactification_length);

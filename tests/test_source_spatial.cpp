@@ -188,7 +188,7 @@ TEST_CASE("spatial source rejects modes without sharp closure") {
 }
 
 TEST_CASE("device spatial outer source includes radial angular and tangent terms") {
-  const teuk::UniformRadialGrid radial_grid(11, 0.0, 0.9);
+  const teuk::UniformRadialGrid radial_grid(17, 0.0, 0.9);
   const auto theta_grid = teuk::angular::gauss_legendre(6);
   constexpr std::size_t mode_count = 3;
   teuk::SpatialThetaView cos_theta("outer_cos", theta_grid.size());
@@ -259,10 +259,11 @@ TEST_CASE("device spatial outer source includes radial angular and tangent terms
   const teuk::ExecutionSpace execution;
   teuk::evaluate_spatial_outer_source(
       execution, radial_grid, parameters, cos_theta, sin_theta, inner,
-      inner_dt, lowered, source, forcing);
+      inner_dt, lowered, source, forcing, teuk::RadialDiscretization::D84);
   teuk::evaluate_spatial_outer_source_from_ethprime(
       execution, radial_grid, parameters, cos_theta, sin_theta, inner,
-      inner_dt, ethprime, source_from_ethprime, forcing_from_ethprime);
+      inner_dt, ethprime, source_from_ethprime, forcing_from_ethprime,
+      teuk::RadialDiscretization::D84);
   execution.fence();
   const auto host_source = Kokkos::create_mirror_view_and_copy(
       Kokkos::HostSpace{}, source);
@@ -276,18 +277,19 @@ TEST_CASE("device spatial outer source includes radial angular and tangent terms
   const std::size_t mode = 2;
   const std::size_t theta = 4;
   std::vector<teuk::Complex> D_line(radial_grid.size());
-  std::vector<teuk::Complex> dr_D(radial_grid.size());
   for (std::size_t radial = 0; radial < radial_grid.size(); ++radial) {
     D_line[radial] = host_inner(mode, 0, radial, theta);
   }
-  teuk::d42_first_derivative(radial_grid, D_line, dr_D);
   for (std::size_t radial = 0; radial < radial_grid.size(); ++radial) {
+    const teuk::Complex dr_D = teuk::radial_first_derivative_at(
+        teuk::RadialDiscretization::D84, D_line.data(), radial_grid.size(),
+        radial, 1.0 / radial_grid.spacing());
     const double radius = radial_grid.coordinate(radial);
     const auto background = teuk::kerr_background_point(
         parameters, radius, host_cos(theta), host_sin(theta));
     const teuk::Complex delta_D = teuk::delta_n_point(
         host_inner(mode, 0, radial, theta),
-        host_dt(mode, 0, radial, theta), dr_D[radial], 3, radius,
+        host_dt(mode, 0, radial, theta), dr_D, 3, radius,
         parameters.mass, parameters.compactification_length);
     const teuk::Complex ethprime_T = teuk::ethprime_n_point(
         host_inner(mode, 1, radial, theta),

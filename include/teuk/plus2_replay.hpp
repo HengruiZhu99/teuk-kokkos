@@ -34,6 +34,7 @@ struct Plus2ReplayConfiguration {
   std::size_t primary_value_count = 0;
   std::size_t radial_count = 0;
   std::size_t theta_count = 0;
+  RadialDiscretization radial_discretization = RadialDiscretization::D42;
   std::string git_commit;
   int runtime_config_schema_version = 0;
 };
@@ -110,6 +111,7 @@ inline void validate_configuration(const Plus2ReplayConfiguration& config) {
     throw std::invalid_argument(
         "plus2 evolving mode requires a runtime config schema version");
   }
+  (void)radial_discretization_name(config.radial_discretization);
 }
 
 inline void validate_accepted_activation(const SourceActivationState& state,
@@ -149,6 +151,7 @@ inline Plus2CheckpointExpectations plus2_checkpoint_expectations(
       configuration.runtime_config_schema_version;
   expected.radial_count = configuration.radial_count;
   expected.theta_count = configuration.theta_count;
+  expected.radial_discretization = configuration.radial_discretization;
   return expected;
 }
 

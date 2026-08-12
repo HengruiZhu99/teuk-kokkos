@@ -129,7 +129,7 @@ inline int run_solver(const RunParameters& input) {
       {input.grid.ell_max_first, input.grid.ell_max_second},
       input.grid.theta_points, background, input.method.reduction_damping,
       input.method.dissipation, input.method.reduction, "full_pipeline",
-      make_source_policy(input));
+      make_source_policy(input), input.method.radial_discretization);
   const auto checkpoint_configuration =
       make_checkpoint_configuration(input, time_step);
   const auto initialized = initialize_pipeline_state(
@@ -139,7 +139,8 @@ inline int run_solver(const RunParameters& input) {
 
   PipelineDiagnostics diagnostics(
       registry.size(), radial_grid,
-      static_cast<std::size_t>(input.grid.theta_points));
+      static_cast<std::size_t>(input.grid.theta_points),
+      "pipeline_diagnostics", input.method.radial_discretization);
   HorizonTransverseDiagnostics horizon_diagnostics(
       radial_grid, registry.size(),
       static_cast<std::size_t>(input.grid.theta_points));

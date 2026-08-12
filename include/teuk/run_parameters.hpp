@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "teuk/plus2_runtime_types.hpp"
+#include "teuk/radial_discretization.hpp"
 #include "teuk/spatial_pipeline.hpp"
 #include "teuk/types.hpp"
 
@@ -45,6 +46,7 @@ struct MethodRunParameters {
   double reduction_damping = 0.1;
   double dissipation = 0.01;
   ReductionEvolution reduction = ReductionEvolution::FreeDamped;
+  RadialDiscretization radial_discretization = RadialDiscretization::D42;
 };
 
 struct InitialDataParameters {

@@ -248,6 +248,10 @@ inline RunParameters resolve_run_parameters(
   set_double("cfl", parameters.time.cfl);
   set_double("reduction_damping", parameters.method.reduction_damping);
   set_double("dissipation", parameters.method.dissipation);
+  if (const auto* text = value("radial_discretization")) {
+    parameters.method.radial_discretization =
+        parse_radial_discretization(*text);
+  }
   if (const auto* text = value("reduction_mode")) {
     if (*text == "free_damped") {
       parameters.method.reduction = ReductionEvolution::FreeDamped;
@@ -431,8 +435,12 @@ inline void validate_run_parameters(const RunParameters& parameters) {
   if (!(parameters.background.compactification_length > 0.0)) {
     throw std::invalid_argument("compactification_length must be positive");
   }
-  if (parameters.grid.radial_points < static_cast<int>(d42_minimum_points)) {
-    throw std::invalid_argument("nr must be at least 8 for D4-2 SBP");
+  if (parameters.grid.radial_points < static_cast<int>(
+          radial_minimum_points(parameters.method.radial_discretization))) {
+    throw std::invalid_argument(
+        "nr is too small for radial_discretization=" +
+        std::string(radial_discretization_name(
+            parameters.method.radial_discretization)));
   }
   if (parameters.grid.ell_max_first < 3 ||
       parameters.grid.ell_max_second < 3) {
@@ -700,6 +708,10 @@ inline std::string resolved_configuration_text(
          << "reduction_damping = " << parameters.method.reduction_damping
          << '\n'
          << "dissipation = " << parameters.method.dissipation << '\n'
+         << "radial_discretization = "
+         << radial_discretization_name(
+                parameters.method.radial_discretization)
+         << '\n'
          << "reduction_mode = "
          << config_detail::reduction_name(parameters.method.reduction) << '\n'
          << "initial_data.type = "

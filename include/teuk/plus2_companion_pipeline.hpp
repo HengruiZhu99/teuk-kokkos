@@ -88,6 +88,10 @@ class Plus2CompanionPipeline {
       throw std::invalid_argument(
           "spin +2 companion pipeline grid extents do not match config");
     }
+    if (config.radial_discretization != discretization_) {
+      throw std::invalid_argument(
+          "spin +2 companion radial discretization does not match config");
+    }
     if (radial_grid_.size() < radial_minimum_points(discretization_)) {
       throw std::invalid_argument(
           "spin +2 companion grid is too short for its radial stencil");

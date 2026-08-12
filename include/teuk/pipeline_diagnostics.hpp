@@ -9,7 +9,7 @@
 #include <string>
 
 #include "teuk/pipeline_storage.hpp"
-#include "teuk/sbp.hpp"
+#include "teuk/radial_discretization.hpp"
 #include "teuk/source_activation.hpp"
 #include "teuk/types.hpp"
 
@@ -78,33 +78,11 @@ template <class StageView>
 KOKKOS_INLINE_FUNCTION Complex radial_derivative(
     const StageView& stage, const std::size_t mode, const std::size_t field,
     const std::size_t radial, const std::size_t theta,
-    const std::size_t radial_count, const double inverse_spacing) {
-  if (radial < 4) {
-    Complex result(0.0, 0.0);
-    for (std::size_t column = 0; column < 6; ++column) {
-      result += d42_derivative_coefficient(radial_count, radial, column) *
-                stage(mode, field, column, theta);
-    }
-    return inverse_spacing * result;
-  }
-  if (radial + 4 >= radial_count) {
-    const std::size_t reflected_radial = radial_count - 1 - radial;
-    Complex result(0.0, 0.0);
-    for (std::size_t reflected_column = 0; reflected_column < 6;
-         ++reflected_column) {
-      result -=
-          d42_derivative_coefficient(radial_count, reflected_radial,
-                                     reflected_column) *
-          stage(mode, field, radial_count - 1 - reflected_column, theta);
-    }
-    return inverse_spacing * result;
-  }
-  return inverse_spacing *
-         ((stage(mode, field, radial - 2, theta) -
-           8.0 * stage(mode, field, radial - 1, theta) +
-           8.0 * stage(mode, field, radial + 1, theta) -
-           stage(mode, field, radial + 2, theta)) /
-          12.0);
+    const std::size_t radial_count, const double inverse_spacing,
+    const RadialDiscretization discretization) {
+  return radial_first_derivative_strided_at(
+      discretization, &stage(mode, field, 0, theta), radial_count, radial,
+      inverse_spacing, stage.stride(2));
 }
 
 }  // namespace pipeline_diagnostics_detail
@@ -118,11 +96,14 @@ class PipelineDiagnostics {
   PipelineDiagnostics(const std::size_t mode_count,
                       const UniformRadialGrid& radial_grid,
                       const std::size_t theta_count,
-                      const std::string& label = "pipeline_diagnostics")
+                      const std::string& label = "pipeline_diagnostics",
+                      const RadialDiscretization radial_discretization =
+                          RadialDiscretization::D42)
       : mode_count_(mode_count),
         radial_count_(radial_grid.size()),
         theta_count_(theta_count),
         inverse_spacing_(1.0 / radial_grid.spacing()),
+        radial_discretization_(radial_discretization),
         field_sum_squared_(label + "_field_sum_squared",
                            2 * point_pipeline_field_count),
         field_max_squared_(label + "_field_max_squared",
@@ -150,9 +131,9 @@ class PipelineDiagnostics {
       throw std::invalid_argument(
           "pipeline diagnostics require nonempty mode and theta dimensions");
     }
-    if (radial_count_ < d42_minimum_points) {
+    if (radial_count_ < radial_minimum_points(radial_discretization_)) {
       throw std::invalid_argument(
-          "pipeline diagnostics reduction constraints require D4-2 grid");
+          "pipeline diagnostics grid is too small for selected radial discretization");
     }
   }
 
@@ -187,6 +168,7 @@ class PipelineDiagnostics {
     const std::size_t radial_count = radial_count_;
     const std::size_t theta_count = theta_count_;
     const double inverse_spacing = inverse_spacing_;
+    const RadialDiscretization radial_discretization = radial_discretization_;
     const std::size_t total_points =
         mode_count_ * radial_count_ * theta_count_;
 
@@ -236,14 +218,16 @@ class PipelineDiagnostics {
               radial_derivative(
                   stage, mode,
                   static_cast<std::size_t>(PipelineField::FirstPsi), radial,
-                  theta, radial_count, inverse_spacing);
+                  theta, radial_count, inverse_spacing,
+                  radial_discretization);
           const Complex second_constraint =
               stage(mode, static_cast<std::size_t>(PipelineField::SecondQ),
                     radial, theta) -
               radial_derivative(
                   stage, mode,
                   static_cast<std::size_t>(PipelineField::SecondPsi), radial,
-                  theta, radial_count, inverse_spacing);
+                  theta, radial_count, inverse_spacing,
+                  radial_discretization);
           if (finite_complex(first_constraint)) {
             const double norm = magnitude_squared(first_constraint);
             Kokkos::atomic_add(&scalar_sum_squared(FirstConstraint), norm);
@@ -338,6 +322,10 @@ class PipelineDiagnostics {
   template <class ExecSpace, class Pipeline>
   PipelineDiagnosticsReport sample_pipeline(const ExecSpace& execution,
                                              const Pipeline& pipeline) {
+    if (pipeline.radial_discretization() != radial_discretization_) {
+      throw std::invalid_argument(
+          "pipeline diagnostics radial discretization does not match pipeline");
+    }
     auto report = sample_storage(execution, pipeline.storage(),
                                  pipeline.source_over_r3(),
                                  pipeline.forcing());
@@ -422,6 +410,7 @@ class PipelineDiagnostics {
   std::size_t radial_count_;
   std::size_t theta_count_;
   double inverse_spacing_;
+  RadialDiscretization radial_discretization_;
   Kokkos::View<double*, MemorySpace> field_sum_squared_;
   Kokkos::View<double*, MemorySpace> field_max_squared_;
   Kokkos::View<double*, MemorySpace> scalar_sum_squared_;

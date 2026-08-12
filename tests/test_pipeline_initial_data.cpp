@@ -233,6 +233,62 @@ TEST_CASE("pipeline Gaussian initial data reject invalid modes and sharp storage
   CHECK(ell_rejected);
 }
 
+TEST_CASE("D8-4 pipeline uses one radial scheme for Gaussian Q and reconstruction") {
+  constexpr int ell_max = 3;
+  constexpr int theta_nodes = 6;
+  const teuk::ExecutionSpace execution;
+  const teuk::ModeRegistry registry({-2, 2});
+  const teuk::UniformRadialGrid grid(17, 0.0, 0.8);
+  const teuk::KerrParameters background{1.0, 0.35, 1.2};
+  teuk::SpatialPipeline pipeline(
+      execution, registry, grid, ell_max, theta_nodes, background, 0.1, 0.0,
+      teuk::ReductionEvolution::FreeDamped, "d84_initial_data_pipeline", {},
+      teuk::RadialDiscretization::D84);
+  CHECK(pipeline.radial_discretization() == teuk::RadialDiscretization::D84);
+
+  teuk::PipelineGaussianPulse pulse;
+  pulse.center = 0.4;
+  pulse.width = 0.17;
+  pulse.modes = {{2, 2, teuk::Complex(0.4, -0.1)}};
+  pulse.reconstruction_scales[static_cast<std::size_t>(
+      teuk::ReconstructionField::G)] = teuk::Complex(0.25, 0.05);
+  teuk::initialize_compactified_gaussian_pulse(
+      execution, pipeline, registry, ell_max, background, pulse);
+  pipeline.evaluate_rhs(execution, pipeline.storage().state(),
+                        pipeline.storage().rhs());
+  execution.fence("sample D8-4 initial and reconstruction derivatives");
+
+  const auto state = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, pipeline.storage().state());
+  const auto reconstruction = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, pipeline.reconstruction_radial_derivatives());
+  constexpr std::size_t psi =
+      static_cast<std::size_t>(teuk::PipelineField::FirstPsi);
+  constexpr std::size_t q =
+      static_cast<std::size_t>(teuk::PipelineField::FirstQ);
+  constexpr std::size_t g = static_cast<std::size_t>(teuk::PipelineField::G);
+  constexpr std::size_t reconstruction_g = 0;
+  const double inverse_spacing = 1.0 / grid.spacing();
+  for (std::size_t mode = 0; mode < registry.size(); ++mode) {
+    for (std::size_t theta = 0; theta < theta_nodes; ++theta) {
+      for (std::size_t radial = 0; radial < grid.size(); ++radial) {
+        const auto psi_dr = teuk::radial_first_derivative_strided_at(
+            teuk::RadialDiscretization::D84,
+            &state(mode, psi, 0, theta), grid.size(), radial, inverse_spacing,
+            state.stride(2));
+        const auto g_dr = teuk::radial_first_derivative_strided_at(
+            teuk::RadialDiscretization::D84,
+            &state(mode, g, 0, theta), grid.size(), radial, inverse_spacing,
+            state.stride(2));
+        CHECK_COMPLEX_NEAR(state(mode, q, radial, theta), psi_dr, 1.0e-13);
+        CHECK_COMPLEX_NEAR(
+            reconstruction(mode, reconstruction_g, radial, theta), g_dr,
+            2.0e-14);
+      }
+    }
+  }
+}
+
 TEST_CASE("compact Gaussian pulse is smooth inside and exactly support limited") {
   constexpr int ell_max = 3;
   constexpr int theta_nodes = 6;

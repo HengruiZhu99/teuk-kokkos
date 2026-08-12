@@ -25,7 +25,7 @@ The current required schema marker is `config_version = 1`.
 |---|---|
 | Background | `mass`, `spin`, `compactification_length` |
 | Grid and bands | `nr`, `ntheta`, `ellmax_first`, `ellmax_second`, `first_order_modes`, `second_order_modes` |
-| Evolution | `final_time`, `steps`, `cfl`, `reduction_damping`, `dissipation`, `reduction_mode` |
+| Evolution | `final_time`, `steps`, `cfl`, `reduction_damping`, `dissipation`, `reduction_mode`, `radial_discretization` |
 | Initial data | `initial_data.type`, `initial_data.center`, `initial_data.width`, `initial_data.time_derivative`, `initial_data.add_sharp_partner`, `initial_data.compact_support`, `initial_data.checkpoint_directory` |
 | Base Gaussian mode | `initial_data.seed_ell`, `initial_data.seed_m`, `initial_data.amplitude_real`, `initial_data.amplitude_imag` |
 | Additional modes | `initial_data.mode.N.ell`, `.m`, `.amplitude_real`, `.amplitude_imag` |
@@ -35,6 +35,11 @@ The current required schema marker is `config_version = 1`.
 | Output | `output.directory`, `output.diagnostic_every`, `output.checkpoint_every` |
 
 `reduction_mode` is `free_damped` or `stage_constrained`.
+`radial_discretization` is `d4-2` (the backward-compatible default) or
+`d8-4`; D8-4 has fourth-order boundary closures and requires at least 16
+radial points. The selected scheme is recorded in resolved configuration and
+checkpoint metadata and is used consistently by evolution, reconstruction,
+source, initial-data, and constraint-diagnostic radial operations.
 `second_order.source_mode` is `constraint_aware` or `unrestricted` when
 second-order evolution is enabled. `initial_data.type` is currently
 `gaussian` or `checkpoint`; no unverified profile is advertised.
@@ -102,7 +107,8 @@ The complete typed configuration is validated before the large pipeline state
 is allocated. Among other checks, the solver rejects:
 
 - `abs(spin) > mass`, invalid compactification or nonfinite values;
-- fewer than eight D4-2 radial points;
+- fewer radial points than the selected SBP operator requires (8 for D4-2,
+  16 for D8-4);
 - signed mode sets not closed under `m -> -m`;
 - `|m|` or seed `ell` outside its declared band;
 - an angular grid too small for both retained bands and padded products;

@@ -41,7 +41,7 @@ struct PipelineGaussianPulse {
   std::vector<GaussianPulseMode> modes;
 
   // Initial coordinate-time derivative is zero in the retained Galerkin
-  // space. Q is computed by the same D4-2 operator used by the production
+  // space. Q is computed by the same selected radial operator used by the production
   // radial path; P is obtained from the small projected C_T^{-1} system, not
   // written pointwise, so Kerr multiplication cannot inject ell_max+1.
 
@@ -74,7 +74,8 @@ inline Real radial_profile(const PipelineGaussianPulse& pulse,
 inline void validate_gaussian_pulse(
     const SpatialPipelineStorage& storage, const ModeRegistry& registry,
     const int ell_max, const KerrParameters& background,
-    const PipelineGaussianPulse& pulse) {
+    const PipelineGaussianPulse& pulse,
+    const RadialDiscretization radial_discretization) {
   if (storage.mode_count() != registry.size()) {
     throw std::invalid_argument(
         "initial-data registry does not match pipeline mode extent");
@@ -88,9 +89,9 @@ inline void validate_gaussian_pulse(
     throw std::invalid_argument(
         "initial-data angular band does not fit the pipeline grid");
   }
-  if (storage.radial_count() < d42_minimum_points) {
+  if (storage.radial_count() < radial_minimum_points(radial_discretization)) {
     throw std::invalid_argument(
-        "Gaussian reduction data require a D4-2 radial grid");
+        "Gaussian reduction data grid is too small for selected radial discretization");
   }
   if (!(pulse.width > 0.0) ||
       pulse.center < storage.radial_grid().lower_radius() ||
@@ -213,7 +214,8 @@ inline void initialize_compactified_gaussian_pulse(
     const KerrParameters& background, const PipelineGaussianPulse& pulse) {
   auto& storage = pipeline.storage();
   pipeline_initial_data_detail::validate_gaussian_pulse(
-      storage, registry, ell_max, background, pulse);
+      storage, registry, ell_max, background, pulse,
+      pipeline.radial_discretization());
   const auto& radial_grid = storage.radial_grid();
   const std::size_t radial_count = storage.radial_count();
   const std::size_t theta_count = storage.theta_count();
@@ -256,7 +258,7 @@ inline void initialize_compactified_gaussian_pulse(
     }
   }
 
-  // Use the exact host D4-2 reference on every (m,theta) radial line.
+  // Use the selected production radial operator on every (m,theta) line.
   std::vector<Complex> psi_line(radial_count);
   std::vector<Complex> q_line(radial_count);
   for (std::size_t mode = 0; mode < registry.size(); ++mode) {
@@ -264,7 +266,11 @@ inline void initialize_compactified_gaussian_pulse(
       for (std::size_t radial = 0; radial < radial_count; ++radial) {
         psi_line[radial] = host_state(mode, first_psi, radial, theta);
       }
-      d42_first_derivative(radial_grid, psi_line, q_line);
+      for (std::size_t radial = 0; radial < radial_count; ++radial) {
+        q_line[radial] = radial_first_derivative_at(
+            pipeline.radial_discretization(), psi_line.data(), radial_count,
+            radial, 1.0 / radial_grid.spacing());
+      }
       for (std::size_t radial = 0; radial < radial_count; ++radial) {
         host_state(mode, first_q, radial, theta) = q_line[radial];
       }

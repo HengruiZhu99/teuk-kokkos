@@ -129,6 +129,23 @@ struct ManufacturedResult {
   std::vector<teuk::Complex> state;
 };
 
+TEST_CASE("plus2 companion rejects a replay radial scheme mismatch") {
+  auto configuration = pipeline_configuration(16, 1);
+  configuration.radial_discretization = teuk::RadialDiscretization::D42;
+  const teuk::UniformRadialGrid grid(16, 0.0, 0.38);
+  bool rejected = false;
+  try {
+    teuk::Plus2CompanionPipeline pipeline(
+        configuration, grid, plus2_parameters(), {0.91},
+        teuk::ReductionEvolution::FreeDamped, 0.0,
+        "plus2_radial_scheme_mismatch", teuk::RadialDiscretization::D84);
+    static_cast<void>(pipeline);
+  } catch (const std::invalid_argument&) {
+    rejected = true;
+  }
+  CHECK(rejected);
+}
+
 ManufacturedResult evolve_manufactured(const int steps) {
   constexpr std::size_t radial_count = 8;
   constexpr double final_time = 0.8;

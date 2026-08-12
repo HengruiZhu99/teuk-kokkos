@@ -65,6 +65,8 @@ TEST_CASE("runtime configuration defaults fallback and resolved round trip") {
   CHECK(defaults.plus2.ell_max_first == defaults.grid.ell_max_first);
   CHECK(defaults.plus2.ell_max_second == defaults.grid.ell_max_second);
   CHECK(defaults.initial_data.modes.size() == 1);
+  CHECK(defaults.method.radial_discretization ==
+        teuk::RadialDiscretization::D42);
 
   const auto configured = teuk::parse_run_configuration_text(R"cfg(
     config_version = 1
@@ -78,6 +80,8 @@ TEST_CASE("runtime configuration defaults fallback and resolved round trip") {
     initial_data.mode.0.amplitude_real = 1.25e-4
     initial_data.mode.0.amplitude_imag = -2.5e-5
     initial_data.compact_support = true
+    radial_discretization = d8-4
+    nr = 17
     second_order.enabled = true
     second_order.source_mode = unrestricted
     second_order.source_start_time = 0.125
@@ -110,6 +114,8 @@ TEST_CASE("runtime configuration defaults fallback and resolved round trip") {
         configured.grid.second_order_modes);
   CHECK(roundtrip.initial_data.modes.size() == 1);
   CHECK(roundtrip.initial_data.compact_support);
+  CHECK(roundtrip.method.radial_discretization ==
+        teuk::RadialDiscretization::D84);
   CHECK_COMPLEX_NEAR(roundtrip.initial_data.modes[0].amplitude,
                      configured.initial_data.modes[0].amplitude, 0.0);
   CHECK(roundtrip.second_order.source_mode ==
@@ -131,6 +137,23 @@ TEST_CASE("runtime configuration defaults fallback and resolved round trip") {
   CHECK(roundtrip.plus2.output.physical_tetrad_field);
   CHECK(roundtrip.plus2.output.source_families);
   CHECK(roundtrip.plus2.output.ordered_pairs);
+}
+
+TEST_CASE("runtime radial discretization is strict and enforces its grid") {
+  CHECK(config_rejects([] {
+    (void)teuk::parse_run_configuration_text(
+        "config_version = 1\nradial_discretization = d6-3\n");
+  }));
+  CHECK(config_rejects([] {
+    (void)teuk::parse_run_configuration_text(
+        "config_version = 1\nradial_discretization = d8-4\nnr = 15\n");
+  }));
+  const auto parameters = teuk::parse_run_configuration_text(
+      "config_version = 1\nradial_discretization = d8-4\nnr = 16\n");
+  CHECK(parameters.method.radial_discretization ==
+        teuk::RadialDiscretization::D84);
+  CHECK(teuk::resolved_configuration_text(parameters).find(
+            "radial_discretization = d8-4\n") != std::string::npos);
 }
 
 TEST_CASE("plus2 runtime settings reject unknown and incompatible combinations") {
