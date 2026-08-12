@@ -437,14 +437,14 @@ arXiv:2008.11770 Eq. (12) must remain an explicit regression test.  The main
 numerical risk is the `R^-3/R^-4` cancellation at scri; convergence against
 the coordinate oracle is mandatory.
 
-The Schwarzschild field-level fixture and moderate-Kerr separated fixture now
-pin hatted angular/radial normalizations, include the sharp partner, and verify
-the complex phase.  The remaining hard gates for a general TSI-normalized
-companion are:
+The Schwarzschild and moderate-Kerr field-level fixtures now pin hatted
+angular/radial normalizations, include the sharp partner, verify the complex
+phase, and pass the complete Kinnersley-to-code/hyperboloidal `T0[h]`
+comparison at their interior sample points.  The remaining hard gates for a
+general TSI-normalized companion are:
 
-- continue the moderate-Kerr separated fixture through the full ORG metric
-  and Kinnersley-to-code/hyperboloidal `T0[h]` comparison;
 - add a normalized QNM fixture rather than checking only its frequency;
+- extend the normalized comparison to the future-horizon endpoint;
 - compare the resulting metric-curvature field with an evolved homogeneous
   companion under radial, angular, and temporal refinement.
 

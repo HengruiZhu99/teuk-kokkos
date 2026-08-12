@@ -155,7 +155,10 @@ reconstruction and `T0[h]`, and an independently reviewed moderate-Kerr
 and complex phase in the separated TSI.  No normalization was inferred from
 an unhatted product.
 
-Those fixtures do not yet provide a moderate-Kerr field-level `T0[h]`
-comparison, a normalized QNM, a horizon endpoint value, or an evolved-field
-residual.  They therefore qualify the named separated cases, not a general
+The moderate-Kerr fixture has also been continued through Berens ORG metric
+reconstruction and the complete rotating Kinnersley-to-code/hyperboloidal
+chain at two interior points and both signed sectors.  It agrees with
+production `T0[h]` within the documented numerical gates.  A normalized QNM,
+a horizon endpoint value, and an evolved-field residual remain open.  The
+fixtures therefore qualify the named real-frequency cases, not a general
 production TSI constructor.
