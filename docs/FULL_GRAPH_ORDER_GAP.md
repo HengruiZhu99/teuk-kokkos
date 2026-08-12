@@ -105,7 +105,12 @@ the RK4 integrator: the time composition is fourth order once the spatial
 operator is held fixed.
 
 The manufactured radial test removes ordinary input-band and quadratic
-product aliasing, but it is not a production angular-convergence campaign.
-Rational Kerr coefficients can generate off-band content.  A scientific run
-still needs independent `ell_max` and `N_theta` refinement (and any selected
-angular filter must be included in that study).
+product aliasing. A later rotating-Kerr source-only qualification, documented
+in `PLUS2_FULL_SOURCE_ANGULAR_QUALIFICATION.md`, independently refines
+`ell_max` and `N_theta` through the complete concrete primitive, ordered-pair,
+projection, and outer-derivative graph. It closes the manufactured angular
+discretization gap for that stage-local graph, but it is not a production
+waveform campaign. Rational Kerr coefficients generate off-band content, so a
+scientific run still needs observable-based `ell_max` and `N_theta` refinement.
+Any selected angular filter must be included in that future study; the current
+graph has no filter.

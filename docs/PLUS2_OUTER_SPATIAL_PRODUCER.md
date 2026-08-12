@@ -64,6 +64,14 @@ nonfinite clearing, amplitude and independent tangent scaling, and a warmed
 allocation/copy/fence audit. The typed one-step Bianchi binding test now uses
 this producer rather than its former outer callback.
 
+The separate complete-graph study in
+`PLUS2_FULL_SOURCE_ANGULAR_QUALIFICATION.md` carries non-bandlimited rotating
+data through the primitive and ordered-pair graph into this producer. It
+separately refines retained `ell_max` and Gauss-Legendre node count, checks
+`eth_6 K` and final forcing in modal all-radius and endpoint norms, and reaches
+the `ell_max=12`, `N_theta=36` reference monotonically. No angular filter is
+present in either test.
+
 ## Limitations
 
 This is a stage-local spatial operator, not a physical runtime qualification.
