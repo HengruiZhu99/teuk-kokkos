@@ -9,6 +9,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "teuk/angular_coordinate_device.hpp"
@@ -16,10 +17,251 @@
 #include "teuk/grid.hpp"
 #include "teuk/modes.hpp"
 #include "teuk/plus2_linear_psi0.hpp"
-#include "teuk/sbp.hpp"
+#include "teuk/radial_discretization.hpp"
 #include "teuk/types.hpp"
 
 namespace teuk {
+
+namespace plus2_linear_spatial_detail {
+
+KOKKOS_INLINE_FUNCTION
+std::size_t flat_metric(const std::size_t mode, const std::size_t component,
+                        const std::size_t radial, const std::size_t theta,
+                        const std::size_t radial_count,
+                        const std::size_t theta_count) {
+  constexpr std::size_t components = 3;
+  return ((mode * components + component) * radial_count + radial) *
+             theta_count +
+         theta;
+}
+
+KOKKOS_INLINE_FUNCTION
+std::size_t flat_field(const std::size_t mode, const std::size_t radial,
+                       const std::size_t theta,
+                       const std::size_t radial_count,
+                       const std::size_t theta_count) {
+  return (mode * radial_count + radial) * theta_count + theta;
+}
+
+template <class InputScalar>
+struct PackMetricFunctor {
+  UniformRadialGrid grid;
+  KerrParameters parameters;
+  const Real* sin_theta;
+  const Real* cos_theta;
+  const InputScalar* reconstruction;
+  const InputScalar* tangent;
+  const InputScalar* second_tangent;
+  const std::size_t* sharp;
+  Complex* stage_metric;
+  Complex* tangent_metric;
+  Complex* second_metric;
+  std::size_t input_fields;
+  std::size_t radial_count;
+  std::size_t theta_count;
+  std::size_t offset_B;
+  std::size_t offset_C;
+  std::size_t offset_U;
+
+  KOKKOS_INLINE_FUNCTION
+  std::size_t input_index(const std::size_t mode, const std::size_t field,
+                          const std::size_t radial,
+                          const std::size_t theta) const {
+    return ((mode * input_fields + field) * radial_count + radial) *
+               theta_count +
+           theta;
+  }
+
+  KOKKOS_INLINE_FUNCTION
+  Plus2OrgMetricFields pack(const InputScalar* input,
+                            const std::size_t mode,
+                            const std::size_t sharp_mode,
+                            const std::size_t radial,
+                            const std::size_t theta, const double radius,
+                            const Complex& mu0) const {
+    return plus2_org_metric_from_reconstruction(
+        radius, mu0,
+        Kokkos::conj(input[input_index(sharp_mode, offset_B, radial, theta)]),
+        Kokkos::conj(input[input_index(sharp_mode, offset_C, radial, theta)]),
+        input[input_index(mode, offset_U, radial, theta)]);
+  }
+
+  KOKKOS_INLINE_FUNCTION
+  void store(Complex* output, const std::size_t mode,
+             const std::size_t radial, const std::size_t theta,
+             const Plus2OrgMetricFields& fields) const {
+    output[flat_metric(mode, 0, radial, theta, radial_count, theta_count)] =
+        fields.h_ll;
+    output[flat_metric(mode, 1, radial, theta, radial_count, theta_count)] =
+        fields.h_lm;
+    output[flat_metric(mode, 2, radial, theta, radial_count, theta_count)] =
+        fields.h_mm;
+  }
+
+  KOKKOS_INLINE_FUNCTION
+  void operator()(const std::size_t flat) const {
+    const std::size_t plane = radial_count * theta_count;
+    const std::size_t mode = flat / plane;
+    const std::size_t within = flat - mode * plane;
+    const std::size_t radial = within / theta_count;
+    const std::size_t theta = within - radial * theta_count;
+    const std::size_t sharp_mode = sharp[mode];
+    const double radius = grid.coordinate(radial);
+    const auto background = kerr_background_point(
+        parameters, radius, cos_theta[theta], sin_theta[theta]);
+    store(stage_metric, mode, radial, theta,
+          pack(reconstruction, mode, sharp_mode, radial, theta, radius,
+               background.mu0));
+    store(tangent_metric, mode, radial, theta,
+          pack(tangent, mode, sharp_mode, radial, theta, radius,
+               background.mu0));
+    store(second_metric, mode, radial, theta,
+          pack(second_tangent, mode, sharp_mode, radial, theta, radius,
+               background.mu0));
+  }
+};
+
+struct FirstRadialFunctor {
+  const Complex* stage;
+  const Complex* tangent;
+  Complex* radial;
+  Complex* time_radial;
+  std::size_t radial_count;
+  std::size_t theta_count;
+  double inverse_spacing;
+  RadialDiscretization discretization;
+
+  KOKKOS_INLINE_FUNCTION
+  void operator()(const std::size_t flat) const {
+    const std::size_t line_plane = radial_count * theta_count;
+    const std::size_t mode_component = flat / line_plane;
+    const std::size_t within = flat - mode_component * line_plane;
+    const std::size_t mode = mode_component / 3;
+    const std::size_t component = mode_component - mode * 3;
+    const std::size_t radial_index = within / theta_count;
+    const std::size_t theta = within - radial_index * theta_count;
+    const std::size_t base =
+        flat_metric(mode, component, 0, theta, radial_count, theta_count);
+    const std::size_t output = flat_metric(mode, component, radial_index,
+                                           theta, radial_count, theta_count);
+    radial[output] = radial_first_derivative_strided_at(
+        discretization, stage + base, radial_count, radial_index,
+        inverse_spacing, theta_count);
+    time_radial[output] = radial_first_derivative_strided_at(
+        discretization, tangent + base, radial_count, radial_index,
+        inverse_spacing, theta_count);
+  }
+};
+
+struct SecondRadialFunctor {
+  const Complex* radial;
+  Complex* radial_radial;
+  std::size_t radial_count;
+  std::size_t theta_count;
+  double inverse_spacing;
+  RadialDiscretization discretization;
+
+  KOKKOS_INLINE_FUNCTION
+  void operator()(const std::size_t flat) const {
+    const std::size_t line_plane = radial_count * theta_count;
+    const std::size_t mode_component = flat / line_plane;
+    const std::size_t within = flat - mode_component * line_plane;
+    const std::size_t mode = mode_component / 3;
+    const std::size_t component = mode_component - mode * 3;
+    const std::size_t radial_index = within / theta_count;
+    const std::size_t theta = within - radial_index * theta_count;
+    const std::size_t base =
+        flat_metric(mode, component, 0, theta, radial_count, theta_count);
+    const std::size_t output = flat_metric(mode, component, radial_index,
+                                           theta, radial_count, theta_count);
+    radial_radial[output] = radial_first_derivative_strided_at(
+        discretization, radial + base, radial_count, radial_index,
+        inverse_spacing, theta_count);
+  }
+};
+
+struct EvaluatePointFunctor {
+  UniformRadialGrid grid;
+  KerrParameters parameters;
+  const Real* sin_theta;
+  const Real* cos_theta;
+  const int* modes;
+  const Complex* stage;
+  const Complex* tangent;
+  const Complex* second_tangent;
+  const Complex* radial;
+  const Complex* time_radial;
+  const Complex* radial_radial;
+  const Complex* theta;
+  const Complex* time_theta;
+  const Complex* radial_theta;
+  const Complex* theta_theta;
+  Complex* raw;
+  Complex* z_plus;
+  std::uint8_t* valid;
+  std::size_t radial_count;
+  std::size_t theta_count;
+
+  KOKKOS_INLINE_FUNCTION
+  Plus2OrgMetricFields load(const Complex* input, const std::size_t mode,
+                            const std::size_t radial_index,
+                            const std::size_t theta_index) const {
+    return {input[flat_metric(mode, 0, radial_index, theta_index,
+                              radial_count, theta_count)],
+            input[flat_metric(mode, 1, radial_index, theta_index,
+                              radial_count, theta_count)],
+            input[flat_metric(mode, 2, radial_index, theta_index,
+                              radial_count, theta_count)]};
+  }
+
+  KOKKOS_INLINE_FUNCTION
+  void operator()(const std::size_t flat) const {
+    const std::size_t plane = radial_count * theta_count;
+    const std::size_t mode = flat / plane;
+    const std::size_t within = flat - mode * plane;
+    const std::size_t radial_index = within / theta_count;
+    const std::size_t theta_index = within - radial_index * theta_count;
+    Plus2OrgMetricStage point_stage{load(stage, mode, radial_index, theta_index),
+                                     load(tangent, mode, radial_index,
+                                          theta_index),
+                                     load(second_tangent, mode, radial_index,
+                                          theta_index)};
+    Plus2OrgMetricDerivativeSlots derivatives{};
+    derivatives.h_R = load(radial, mode, radial_index, theta_index);
+    derivatives.h_TR = load(time_radial, mode, radial_index, theta_index);
+    derivatives.h_RR = load(radial_radial, mode, radial_index, theta_index);
+    derivatives.h_theta = load(theta, mode, radial_index, theta_index);
+    derivatives.h_Ttheta = load(time_theta, mode, radial_index, theta_index);
+    derivatives.h_Rtheta = load(radial_theta, mode, radial_index, theta_index);
+    derivatives.h_thetatheta =
+        load(theta_theta, mode, radial_index, theta_index);
+    plus2_fill_modal_azimuthal_derivatives(modes[mode], point_stage,
+                                           derivatives);
+    const double radius_value = grid.coordinate(radial_index);
+    const auto result = evaluate_plus2_linear_psi0(
+        parameters, radius_value, sin_theta[theta_index],
+        cos_theta[theta_index], point_stage, derivatives);
+    const std::size_t output = flat_field(mode, radial_index, theta_index,
+                                          radial_count, theta_count);
+    raw[output] = result.psi0_code_tetrad;
+    const auto regularized = regularize_plus2_linear_psi0(
+        result.psi0_code_tetrad, radius_value, cos_theta[theta_index],
+        parameters.spin, parameters.compactification_length);
+    valid[output] = static_cast<std::uint8_t>(regularized.valid);
+    z_plus[output] = regularized.valid ? regularized.z_plus : Complex{};
+  }
+};
+
+static_assert(std::is_trivially_copyable_v<PackMetricFunctor<Complex>>);
+static_assert(std::is_trivially_copyable_v<FirstRadialFunctor>);
+static_assert(std::is_trivially_copyable_v<SecondRadialFunctor>);
+static_assert(std::is_trivially_copyable_v<EvaluatePointFunctor>);
+static_assert(sizeof(PackMetricFunctor<Complex>) < 1800);
+static_assert(sizeof(FirstRadialFunctor) < 1800);
+static_assert(sizeof(SecondRadialFunctor) < 1800);
+static_assert(sizeof(EvaluatePointFunctor) < 1800);
+
+}  // namespace plus2_linear_spatial_detail
 
 enum class Plus2MetricComponent : std::size_t {
   LL = 0,
@@ -53,10 +295,13 @@ class Plus2LinearPsi0SpatialWorkspace {
       const execution_space& execution, const ModeRegistry& registry,
       const std::size_t radial_count, const int ell_max,
       const int theta_count,
-      const std::string& label = "plus2_linear_spatial")
+      const std::string& label = "plus2_linear_spatial",
+      const RadialDiscretization discretization =
+          RadialDiscretization::D42)
       : mode_count_(registry.size()),
         radial_count_(radial_count),
         theta_count_(static_cast<std::size_t>(theta_count)),
+        discretization_(discretization),
         modes_(label + "_modes", registry.size()),
         sharp_(label + "_sharp", registry.size()),
         stage_(label + "_stage", registry.size(), component_count(),
@@ -85,7 +330,8 @@ class Plus2LinearPsi0SpatialWorkspace {
                 theta_count_),
         z_plus_valid_(label + "_z_plus_valid", registry.size(), radial_count,
                       theta_count_) {
-    if (!registry.is_closed_under_sharp() || radial_count < d42_minimum_points ||
+    if (!registry.is_closed_under_sharp() ||
+        radial_count < radial_minimum_points(discretization) ||
         theta_count <= 0 || ell_max < 2) {
       throw std::invalid_argument(
           "plus2 linear spatial workspace geometry or registry is invalid");
@@ -128,6 +374,9 @@ class Plus2LinearPsi0SpatialWorkspace {
   [[nodiscard]] validity_view z_plus_valid() const { return z_plus_valid_; }
   [[nodiscard]] mode_view modes() const { return modes_; }
   [[nodiscard]] index_view sharp_indices() const { return sharp_; }
+  [[nodiscard]] RadialDiscretization radial_discretization() const noexcept {
+    return discretization_;
+  }
 
   template <class StageView, class TangentView, class SecondTangentView,
             class SinView, class CosView>
@@ -139,40 +388,33 @@ class Plus2LinearPsi0SpatialWorkspace {
       const Plus2ReconstructionMetricOffsets offsets = {}) {
     validate_reconstruction_views(grid, sin_theta, cos_theta, reconstruction,
                                   tangent, second_tangent, offsets);
-    const auto stage_metric = stage_;
-    const auto tangent_metric = tangent_;
-    const auto second_metric = second_tangent_;
-    const auto sharp = sharp_;
     const std::size_t radial_count = radial_count_;
     const std::size_t theta_count = theta_count_;
     const std::size_t total = mode_count_ * radial_count * theta_count;
+    using input_scalar =
+        std::remove_const_t<typename StageView::value_type>;
+    static_assert(std::is_same_v<input_scalar, Complex>);
+    const plus2_linear_spatial_detail::PackMetricFunctor<input_scalar>
+        functor{grid,
+                parameters,
+                sin_theta.data(),
+                cos_theta.data(),
+                reconstruction.data(),
+                tangent.data(),
+                second_tangent.data(),
+                sharp_.data(),
+                stage_.data(),
+                tangent_.data(),
+                second_tangent_.data(),
+                reconstruction.extent(1),
+                radial_count,
+                theta_count,
+                offsets.B,
+                offsets.C,
+                offsets.U};
     Kokkos::parallel_for(
         "pack_plus2_org_metric",
-        Kokkos::RangePolicy<execution_space>(execution, 0, total),
-        KOKKOS_LAMBDA(const std::size_t flat) {
-          const std::size_t plane = radial_count * theta_count;
-          const std::size_t mode = flat / plane;
-          const std::size_t within = flat - mode * plane;
-          const std::size_t radial = within / theta_count;
-          const std::size_t theta = within - radial * theta_count;
-          const std::size_t sharp_mode = sharp(mode);
-          const double radius = grid.coordinate(radial);
-          const auto background = kerr_background_point(
-              parameters, radius, cos_theta(theta), sin_theta(theta));
-          const auto pack = [&](const auto& input) {
-            return plus2_org_metric_from_reconstruction(
-                radius, background.mu0,
-                Kokkos::conj(input(sharp_mode, offsets.B, radial, theta)),
-                Kokkos::conj(input(sharp_mode, offsets.C, radial, theta)),
-                input(mode, offsets.U, radial, theta));
-          };
-          const auto h = pack(reconstruction);
-          const auto ht = pack(tangent);
-          const auto htt = pack(second_tangent);
-          store_metric(stage_metric, mode, radial, theta, h);
-          store_metric(tangent_metric, mode, radial, theta, ht);
-          store_metric(second_metric, mode, radial, theta, htt);
-        });
+        Kokkos::RangePolicy<execution_space>(execution, 0, total), functor);
   }
 
   template <class SinView, class CosView>
@@ -194,30 +436,6 @@ class Plus2LinearPsi0SpatialWorkspace {
                component_count()>
         workspaces;
   };
-
-  template <class View>
-  KOKKOS_INLINE_FUNCTION static void store_metric(
-      const View& view, const std::size_t mode, const std::size_t radial,
-      const std::size_t theta, const Plus2OrgMetricFields& fields) {
-    view(mode, static_cast<std::size_t>(Plus2MetricComponent::LL), radial,
-         theta) = fields.h_ll;
-    view(mode, static_cast<std::size_t>(Plus2MetricComponent::LM), radial,
-         theta) = fields.h_lm;
-    view(mode, static_cast<std::size_t>(Plus2MetricComponent::MM), radial,
-         theta) = fields.h_mm;
-  }
-
-  template <class View>
-  KOKKOS_INLINE_FUNCTION static Plus2OrgMetricFields load_metric(
-      const View& view, const std::size_t mode, const std::size_t radial,
-      const std::size_t theta) {
-    return {view(mode, static_cast<std::size_t>(Plus2MetricComponent::LL),
-                 radial, theta),
-            view(mode, static_cast<std::size_t>(Plus2MetricComponent::LM),
-                 radial, theta),
-            view(mode, static_cast<std::size_t>(Plus2MetricComponent::MM),
-                 radial, theta)};
-  }
 
   template <class SinView, class CosView>
   void validate_geometry(const UniformRadialGrid& grid,
@@ -253,54 +471,25 @@ class Plus2LinearPsi0SpatialWorkspace {
 
   void evaluate_radial(const execution_space& execution,
                        const UniformRadialGrid& grid) {
-    const auto stage = stage_;
-    const auto tangent = tangent_;
-    const auto radial = radial_;
-    const auto time_radial = time_radial_;
     const std::size_t radial_count = radial_count_;
     const std::size_t theta_count = theta_count_;
     const double inverse_spacing = 1.0 / grid.spacing();
     const std::size_t total =
         mode_count_ * component_count() * radial_count * theta_count;
+    const plus2_linear_spatial_detail::FirstRadialFunctor first_functor{
+        stage_.data(), tangent_.data(), radial_.data(), time_radial_.data(),
+        radial_count, theta_count, inverse_spacing, discretization_};
     Kokkos::parallel_for(
         "plus2_linear_metric_first_radial",
         Kokkos::RangePolicy<execution_space>(execution, 0, total),
-        KOKKOS_LAMBDA(const std::size_t flat) {
-          const std::size_t line_plane = radial_count * theta_count;
-          const std::size_t mode_component = flat / line_plane;
-          const std::size_t within = flat - mode_component * line_plane;
-          const std::size_t mode = mode_component / component_count();
-          const std::size_t component =
-              mode_component - mode * component_count();
-          const std::size_t radial_index = within / theta_count;
-          const std::size_t theta = within - radial_index * theta_count;
-          radial(mode, component, radial_index, theta) =
-              d42_first_derivative_strided_at(
-                  &stage(mode, component, 0, theta), radial_count,
-                  radial_index, inverse_spacing, theta_count);
-          time_radial(mode, component, radial_index, theta) =
-              d42_first_derivative_strided_at(
-                  &tangent(mode, component, 0, theta), radial_count,
-                  radial_index, inverse_spacing, theta_count);
-        });
-    const auto radial_radial = radial_radial_;
+        first_functor);
+    const plus2_linear_spatial_detail::SecondRadialFunctor second_functor{
+        radial_.data(), radial_radial_.data(), radial_count, theta_count,
+        inverse_spacing, discretization_};
     Kokkos::parallel_for(
         "plus2_linear_metric_second_radial",
         Kokkos::RangePolicy<execution_space>(execution, 0, total),
-        KOKKOS_LAMBDA(const std::size_t flat) {
-          const std::size_t line_plane = radial_count * theta_count;
-          const std::size_t mode_component = flat / line_plane;
-          const std::size_t within = flat - mode_component * line_plane;
-          const std::size_t mode = mode_component / component_count();
-          const std::size_t component =
-              mode_component - mode * component_count();
-          const std::size_t radial_index = within / theta_count;
-          const std::size_t theta = within - radial_index * theta_count;
-          radial_radial(mode, component, radial_index, theta) =
-              d42_first_derivative_strided_at(
-                  &radial(mode, component, 0, theta), radial_count,
-                  radial_index, inverse_spacing, theta_count);
-        });
+        second_functor);
   }
 
   void evaluate_angular(const execution_space& execution) {
@@ -337,71 +526,39 @@ class Plus2LinearPsi0SpatialWorkspace {
                        const KerrParameters& parameters,
                        const SinView& sin_theta,
                        const CosView& cos_theta) {
-    const auto stage = stage_;
-    const auto tangent = tangent_;
-    const auto second_tangent = second_tangent_;
-    const auto radial = radial_;
-    const auto time_radial = time_radial_;
-    const auto radial_radial = radial_radial_;
-    const auto theta = theta_;
-    const auto time_theta = time_theta_;
-    const auto radial_theta = radial_theta_;
-    const auto theta_theta = theta_theta_;
-    const auto raw = raw_psi0_;
-    const auto z_plus = z_plus_;
-    const auto valid = z_plus_valid_;
-    const auto modes = modes_;
     const std::size_t radial_count = radial_count_;
     const std::size_t theta_count = theta_count_;
     const std::size_t total = mode_count_ * radial_count * theta_count;
+    const plus2_linear_spatial_detail::EvaluatePointFunctor functor{
+        grid,
+        parameters,
+        sin_theta.data(),
+        cos_theta.data(),
+        modes_.data(),
+        stage_.data(),
+        tangent_.data(),
+        second_tangent_.data(),
+        radial_.data(),
+        time_radial_.data(),
+        radial_radial_.data(),
+        theta_.data(),
+        time_theta_.data(),
+        radial_theta_.data(),
+        theta_theta_.data(),
+        raw_psi0_.data(),
+        z_plus_.data(),
+        z_plus_valid_.data(),
+        radial_count,
+        theta_count};
     Kokkos::parallel_for(
         "evaluate_plus2_linear_psi0_spatial",
-        Kokkos::RangePolicy<execution_space>(execution, 0, total),
-        KOKKOS_LAMBDA(const std::size_t flat) {
-          const std::size_t plane = radial_count * theta_count;
-          const std::size_t mode = flat / plane;
-          const std::size_t within = flat - mode * plane;
-          const std::size_t radial_index = within / theta_count;
-          const std::size_t theta_index = within - radial_index * theta_count;
-          Plus2OrgMetricStage point_stage{
-              load_metric(stage, mode, radial_index, theta_index),
-              load_metric(tangent, mode, radial_index, theta_index),
-              load_metric(second_tangent, mode, radial_index, theta_index)};
-          Plus2OrgMetricDerivativeSlots derivatives{};
-          derivatives.h_R =
-              load_metric(radial, mode, radial_index, theta_index);
-          derivatives.h_TR =
-              load_metric(time_radial, mode, radial_index, theta_index);
-          derivatives.h_RR =
-              load_metric(radial_radial, mode, radial_index, theta_index);
-          derivatives.h_theta =
-              load_metric(theta, mode, radial_index, theta_index);
-          derivatives.h_Ttheta =
-              load_metric(time_theta, mode, radial_index, theta_index);
-          derivatives.h_Rtheta =
-              load_metric(radial_theta, mode, radial_index, theta_index);
-          derivatives.h_thetatheta =
-              load_metric(theta_theta, mode, radial_index, theta_index);
-          plus2_fill_modal_azimuthal_derivatives(modes(mode), point_stage,
-                                                 derivatives);
-          const double radius_value = grid.coordinate(radial_index);
-          const auto result = evaluate_plus2_linear_psi0(
-              parameters, radius_value, sin_theta(theta_index),
-              cos_theta(theta_index), point_stage, derivatives);
-          raw(mode, radial_index, theta_index) = result.psi0_code_tetrad;
-          const auto regularized = regularize_plus2_linear_psi0(
-              result.psi0_code_tetrad, radius_value, cos_theta(theta_index),
-              parameters.spin, parameters.compactification_length);
-          valid(mode, radial_index, theta_index) =
-              static_cast<std::uint8_t>(regularized.valid);
-          z_plus(mode, radial_index, theta_index) =
-              regularized.valid ? regularized.z_plus : Complex(0.0, 0.0);
-        });
+        Kokkos::RangePolicy<execution_space>(execution, 0, total), functor);
   }
 
   std::size_t mode_count_;
   std::size_t radial_count_;
   std::size_t theta_count_;
+  RadialDiscretization discretization_;
   mode_view modes_;
   index_view sharp_;
   metric_view stage_;

@@ -6,11 +6,75 @@
 #include <cstddef>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 
 #include "teuk/angular.hpp"
 #include "teuk/types.hpp"
 
 namespace teuk {
+
+namespace angular_coordinate_detail {
+
+struct AnalyzeFunctor {
+  const Complex* input;
+  const Real* analysis;
+  Complex* modal;
+  std::size_t input_batch_stride;
+  std::size_t input_node_stride;
+  std::size_t analysis_mode_stride;
+  std::size_t analysis_node_stride;
+  std::size_t modal_batch_stride;
+  std::size_t modal_mode_stride;
+  std::size_t nodes;
+  std::size_t modes;
+
+  KOKKOS_INLINE_FUNCTION
+  void operator()(const std::size_t flat) const {
+    const std::size_t batch = flat / modes;
+    const std::size_t mode = flat - batch * modes;
+    Complex value{};
+    for (std::size_t node = 0; node < nodes; ++node) {
+      value += analysis[mode * analysis_mode_stride +
+                        node * analysis_node_stride] *
+               input[batch * input_batch_stride + node * input_node_stride];
+    }
+    modal[batch * modal_batch_stride + mode * modal_mode_stride] = value;
+  }
+};
+
+struct SynthesizeFunctor {
+  const Complex* modal;
+  const Real* derivative;
+  Complex* output;
+  std::size_t modal_batch_stride;
+  std::size_t modal_mode_stride;
+  std::size_t derivative_node_stride;
+  std::size_t derivative_mode_stride;
+  std::size_t output_batch_stride;
+  std::size_t output_node_stride;
+  std::size_t nodes;
+  std::size_t modes;
+
+  KOKKOS_INLINE_FUNCTION
+  void operator()(const std::size_t flat) const {
+    const std::size_t batch = flat / nodes;
+    const std::size_t node = flat - batch * nodes;
+    Complex value{};
+    for (std::size_t mode = 0; mode < modes; ++mode) {
+      value += derivative[node * derivative_node_stride +
+                          mode * derivative_mode_stride] *
+               modal[batch * modal_batch_stride + mode * modal_mode_stride];
+    }
+    output[batch * output_batch_stride + node * output_node_stride] = value;
+  }
+};
+
+static_assert(std::is_trivially_copyable_v<AnalyzeFunctor>);
+static_assert(std::is_trivially_copyable_v<SynthesizeFunctor>);
+static_assert(sizeof(AnalyzeFunctor) < 1800);
+static_assert(sizeof(SynthesizeFunctor) < 1800);
+
+}  // namespace angular_coordinate_detail
 
 // Exact ordinary-coordinate theta derivatives for a band-limited fixed-(s,m)
 // field.  The construction uses the repository's unit-sphere conventions
@@ -155,32 +219,39 @@ class DeviceSpinCoordinateDerivativePlan {
       throw std::invalid_argument(
           "coordinate theta derivative view shape or alias mismatch");
     }
-    const auto analysis = analysis_;
     const auto modal = workspace.modal;
+    const angular_coordinate_detail::AnalyzeFunctor analyze{
+        input.data(),
+        analysis_.data(),
+        modal.data(),
+        input.stride(0),
+        input.stride(1),
+        analysis_.stride(0),
+        analysis_.stride(1),
+        modal.stride(0),
+        modal.stride(1),
+        nodes,
+        modes};
     Kokkos::parallel_for(
         "fixed_m_coordinate_theta_analyze",
         Kokkos::RangePolicy<execution_space>(execution, 0, batches * modes),
-        KOKKOS_LAMBDA(const std::size_t flat) {
-          const std::size_t batch = flat / modes;
-          const std::size_t mode = flat - batch * modes;
-          Complex value(0.0, 0.0);
-          for (std::size_t node = 0; node < nodes; ++node) {
-            value += analysis(mode, node) * input(batch, node);
-          }
-          modal(batch, mode) = value;
-        });
+        analyze);
+    const angular_coordinate_detail::SynthesizeFunctor synthesize{
+        modal.data(),
+        derivative.data(),
+        output.data(),
+        modal.stride(0),
+        modal.stride(1),
+        derivative.stride(0),
+        derivative.stride(1),
+        output.stride(0),
+        output.stride(1),
+        nodes,
+        modes};
     Kokkos::parallel_for(
         kernel_name,
         Kokkos::RangePolicy<execution_space>(execution, 0, batches * nodes),
-        KOKKOS_LAMBDA(const std::size_t flat) {
-          const std::size_t batch = flat / nodes;
-          const std::size_t node = flat - batch * nodes;
-          Complex value(0.0, 0.0);
-          for (std::size_t mode = 0; mode < modes; ++mode) {
-            value += derivative(node, mode) * modal(batch, mode);
-          }
-          output(batch, node) = value;
-        });
+        synthesize);
   }
 
   int spin_;
