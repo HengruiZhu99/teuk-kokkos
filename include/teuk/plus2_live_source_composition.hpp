@@ -299,14 +299,17 @@ class Plus2LiveSourceComposition {
       const int ell_max, const int theta_count,
       const Plus2SpatialThetaView& cos_theta,
       const Plus2SpatialThetaView& sin_theta,
-      const std::string& label = "plus2_live_source")
+      const std::string& label = "plus2_live_source",
+      const RadialDiscretization radial_discretization =
+          RadialDiscretization::D105)
       : registry_(registry),
         radial_grid_(radial_grid),
         parameters_(parameters),
         cos_theta_(cos_theta),
         sin_theta_(sin_theta),
+        radial_discretization_(radial_discretization),
         linear_(execution, registry, radial_grid.size(), ell_max, theta_count,
-                label + "_linear", RadialDiscretization::D84),
+                label + "_linear", radial_discretization),
         source_(registry, radial_grid.size(), theta_count, label + "_source"),
         primitive_value_(label + "_primitive_value", registry.size(),
                          static_cast<std::size_t>(
@@ -359,7 +362,7 @@ class Plus2LiveSourceComposition {
                                           label + "_outer_stamps"),
                       outer_.layout()),
         readiness_(label + "_readiness", radial_grid.size(), theta_count) {
-    if (radial_grid.size() < radial_minimum_points(RadialDiscretization::D84) ||
+    if (radial_grid.size() < radial_minimum_points(radial_discretization_) ||
         cos_theta.extent(0) != static_cast<std::size_t>(theta_count) ||
         sin_theta.extent(0) != static_cast<std::size_t>(theta_count)) {
       throw std::invalid_argument("spin +2 live source geometry is invalid");
@@ -367,7 +370,7 @@ class Plus2LiveSourceComposition {
   }
 
   [[nodiscard]] RadialDiscretization radial_discretization() const noexcept {
-    return RadialDiscretization::D84;
+    return radial_discretization_;
   }
   [[nodiscard]] Plus2LiveReadinessView readiness() const { return readiness_; }
   [[nodiscard]] const Plus2LinearPsi0SpatialWorkspace<execution_space>&
@@ -483,7 +486,10 @@ class Plus2LiveSourceComposition {
     constexpr std::size_t curvature_count =
         static_cast<std::size_t>(Plus2TransportedCurvatureComponent::Count);
     const bool has_scri = radial_grid_.lower_radius() == 0.0;
-    if (capability.radial_discretization != RadialDiscretization::D84 ||
+    const bool supports_nested_fourth_order =
+        radial_discretization_ == RadialDiscretization::D105;
+    if (capability.radial_discretization != radial_discretization_ ||
+        !supports_nested_fourth_order ||
         capability.generation == 0 ||
         capability.generation <= last_generation_ ||
         !capability.transported_curvature_in_common_rk_state ||
@@ -524,6 +530,7 @@ class Plus2LiveSourceComposition {
   KerrParameters parameters_;
   Plus2SpatialThetaView cos_theta_;
   Plus2SpatialThetaView sin_theta_;
+  RadialDiscretization radial_discretization_;
   Plus2LinearPsi0SpatialWorkspace<execution_space> linear_;
   Plus2SourceValueSpatialWorkspace source_;
   Plus2SpatialPrimitiveView primitive_value_;

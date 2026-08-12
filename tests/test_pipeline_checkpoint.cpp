@@ -169,8 +169,9 @@ void remove_metadata_line(const std::filesystem::path& path,
 TEST_CASE("full spatial pipeline checkpoint resumes the real RK4 trajectory") {
   const teuk::ExecutionSpace execution;
   const teuk::ModeRegistry registry({1, -1, 0}, {1, 0, -1});
-  const teuk::UniformRadialGrid radial_grid(9, 0.0, 0.8);
-  const auto configuration = checkpoint_configuration();
+  const teuk::UniformRadialGrid radial_grid(23, 0.0, 0.8);
+  auto configuration = checkpoint_configuration();
+  configuration.radial_discretization = teuk::RadialDiscretization::D105;
   teuk::SpatialPipeline uninterrupted(
       execution, registry, radial_grid,
       teuk::PipelineAngularBands{configuration.ell_max_first,
@@ -178,7 +179,7 @@ TEST_CASE("full spatial pipeline checkpoint resumes the real RK4 trajectory") {
       configuration.theta_nodes, configuration.background,
       configuration.reduction_damping, configuration.dissipation,
       configuration.reduction, "checkpoint_uninterrupted",
-      configuration.source_policy);
+      configuration.source_policy, configuration.radial_discretization);
   teuk::SpatialPipeline interrupted(
       execution, registry, radial_grid,
       teuk::PipelineAngularBands{configuration.ell_max_first,
@@ -186,7 +187,7 @@ TEST_CASE("full spatial pipeline checkpoint resumes the real RK4 trajectory") {
       configuration.theta_nodes, configuration.background,
       configuration.reduction_damping, configuration.dissipation,
       configuration.reduction, "checkpoint_interrupted",
-      configuration.source_policy);
+      configuration.source_policy, configuration.radial_discretization);
   initialize_pipeline(execution, uninterrupted, registry,
                       configuration.ell_max_first);
   initialize_pipeline(execution, interrupted, registry,
@@ -233,14 +234,15 @@ TEST_CASE("full spatial pipeline checkpoint resumes the real RK4 trajectory") {
   CHECK(metadata.targets == std::vector<int>({-1, 0, 1}));
   CHECK(metadata.parents == std::vector<int>({-1, 0, 1}));
   CHECK(metadata.radial_coordinates.front() == radial_grid.lower_radius());
-  CHECK(metadata.radial_coordinates.back() == radial_grid.upper_radius());
+  CHECK_NEAR(metadata.radial_coordinates.back(), radial_grid.upper_radius(),
+             2.0e-16);
   CHECK(metadata.configuration.background.mass ==
         configuration.background.mass);
   CHECK(metadata.configuration.background.spin ==
         configuration.background.spin);
   CHECK(metadata.configuration.reduction == configuration.reduction);
   CHECK(metadata.configuration.radial_discretization ==
-        teuk::RadialDiscretization::D42);
+        teuk::RadialDiscretization::D105);
   CHECK(metadata.configuration.time_step == configuration.time_step);
   CHECK(metadata.configuration.source_policy.mode ==
         configuration.source_policy.mode);
@@ -270,7 +272,8 @@ TEST_CASE("full spatial pipeline checkpoint resumes the real RK4 trajectory") {
       metadata.configuration.background,
       metadata.configuration.reduction_damping,
       metadata.configuration.dissipation, metadata.configuration.reduction,
-      "checkpoint_restarted", metadata.configuration.source_policy);
+      "checkpoint_restarted", metadata.configuration.source_policy,
+      metadata.configuration.radial_discretization);
   const auto loaded = teuk::load_pipeline_checkpoint(
       execution, checkpoint, restarted, restored_registry,
       metadata.configuration);
@@ -353,6 +356,27 @@ TEST_CASE("pipeline checkpoint rejects malformed truncated and mismatched data")
         execution, legacy, d84_pipeline, registry, d84_configuration);
   }));
   CHECK(pipeline_state(execution, d84_pipeline) == d84_before);
+
+  const teuk::UniformRadialGrid d105_grid(23, 0.0, 0.8);
+  teuk::SpatialPipeline d105_pipeline(
+      execution, registry, d105_grid,
+      teuk::PipelineAngularBands{configuration.ell_max_first,
+                                 configuration.ell_max_second},
+      configuration.theta_nodes, configuration.background,
+      configuration.reduction_damping, configuration.dissipation,
+      configuration.reduction, "legacy_v4_d105_rejection",
+      configuration.source_policy, teuk::RadialDiscretization::D105);
+  const teuk::Complex d105_sentinel(-0.37, 0.23);
+  set_pipeline_state(execution, d105_pipeline, d105_sentinel);
+  const auto d105_before = pipeline_state(execution, d105_pipeline);
+  auto d105_configuration = configuration;
+  d105_configuration.radial_discretization =
+      teuk::RadialDiscretization::D105;
+  CHECK(rejects([&] {
+    (void)teuk::load_pipeline_checkpoint(
+        execution, legacy, d105_pipeline, registry, d105_configuration);
+  }));
+  CHECK(pipeline_state(execution, d105_pipeline) == d105_before);
 
   const auto off_band = temporary.path() / "off-band";
   auto off_band_host = Kokkos::create_mirror_view(pipeline.storage().state());

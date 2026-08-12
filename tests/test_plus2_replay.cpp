@@ -455,6 +455,7 @@ TEST_CASE("plus2 checkpoint round trip validates before device mutation") {
   execution.fence("set plus2 checkpoint test state");
 
   auto metadata = checkpoint_metadata();
+  metadata.radial_discretization = teuk::RadialDiscretization::D105;
   TemporaryCheckpoint checkpoint;
   const auto saved = teuk::save_plus2_checkpoint(
       execution, checkpoint.path(), storage, metadata);
@@ -479,7 +480,8 @@ TEST_CASE("plus2 checkpoint round trip validates before device mutation") {
   CHECK(saved.state_checksum != 0);
 
   Kokkos::deep_copy(execution, storage.flat_state(), teuk::Complex(0.0, 0.0));
-  const auto expectations = checkpoint_expectations();
+  auto expectations = checkpoint_expectations();
+  expectations.radial_discretization = teuk::RadialDiscretization::D105;
   const auto loaded = teuk::load_plus2_checkpoint(
       execution, checkpoint.path(), storage, expectations);
   CHECK(loaded.progress.time == 0.5);
@@ -589,7 +591,7 @@ TEST_CASE("plus2 checkpoint rejects every scientific metadata mismatch") {
   }
 }
 
-TEST_CASE("plus2 checkpoint v1 is legacy D4-2 and rejects D8-4") {
+TEST_CASE("plus2 checkpoint v1 is legacy D4-2 and rejects newer schemes") {
   const teuk::ExecutionSpace execution;
   auto storage = teuk::Plus2CompanionStorage::enabled(
       3, 2, 2, "plus2_legacy_checkpoint_test");
@@ -606,21 +608,25 @@ TEST_CASE("plus2 checkpoint v1 is legacy D4-2 and rejects D8-4") {
   CHECK(metadata.version == teuk::plus2_checkpoint_legacy_d42_version);
   CHECK(metadata.radial_discretization == teuk::RadialDiscretization::D42);
 
-  auto d84_expected = expected;
-  d84_expected.radial_discretization = teuk::RadialDiscretization::D84;
-  Kokkos::deep_copy(execution, storage.flat_state(), teuk::Complex(9.0, -4.0));
-  bool rejected = false;
-  try {
-    static_cast<void>(teuk::load_plus2_checkpoint(
-        execution, checkpoint.path(), storage, d84_expected));
-  } catch (const std::runtime_error&) {
-    rejected = true;
-  }
-  CHECK(rejected);
-  const auto unchanged = Kokkos::create_mirror_view_and_copy(
-      Kokkos::HostSpace{}, storage.flat_state());
-  for (std::size_t i = 0; i < unchanged.extent(0); ++i) {
-    CHECK(unchanged(i) == teuk::Complex(9.0, -4.0));
+  for (const auto newer_scheme : {teuk::RadialDiscretization::D84,
+                                  teuk::RadialDiscretization::D105}) {
+    auto newer_expected = expected;
+    newer_expected.radial_discretization = newer_scheme;
+    Kokkos::deep_copy(execution, storage.flat_state(),
+                      teuk::Complex(9.0, -4.0));
+    bool rejected = false;
+    try {
+      static_cast<void>(teuk::load_plus2_checkpoint(
+          execution, checkpoint.path(), storage, newer_expected));
+    } catch (const std::runtime_error&) {
+      rejected = true;
+    }
+    CHECK(rejected);
+    const auto unchanged = Kokkos::create_mirror_view_and_copy(
+        Kokkos::HostSpace{}, storage.flat_state());
+    for (std::size_t i = 0; i < unchanged.extent(0); ++i) {
+      CHECK(unchanged(i) == teuk::Complex(9.0, -4.0));
+    }
   }
 }
 

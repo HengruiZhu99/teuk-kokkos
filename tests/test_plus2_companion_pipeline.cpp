@@ -146,6 +146,18 @@ TEST_CASE("plus2 companion rejects a replay radial scheme mismatch") {
   CHECK(rejected);
 }
 
+TEST_CASE("plus2 companion accepts an explicitly matching D10-5 scheme") {
+  auto configuration = pipeline_configuration(24, 1);
+  configuration.radial_discretization = teuk::RadialDiscretization::D105;
+  const teuk::UniformRadialGrid grid(24, 0.0, 0.38);
+  teuk::Plus2CompanionPipeline pipeline(
+      configuration, grid, plus2_parameters(), {0.91},
+      teuk::ReductionEvolution::FreeDamped, 0.0, "plus2_d105_selection",
+      teuk::RadialDiscretization::D105);
+  CHECK(pipeline.configuration().radial_discretization ==
+        teuk::RadialDiscretization::D105);
+}
+
 ManufacturedResult evolve_manufactured(const int steps) {
   constexpr std::size_t radial_count = 8;
   constexpr double final_time = 0.8;

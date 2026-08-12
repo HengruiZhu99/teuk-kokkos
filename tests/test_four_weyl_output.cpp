@@ -44,7 +44,7 @@ teuk::FourWeylOutputMetadata metadata() {
   result.parent_modes = {-2, 2};
   result.target_modes = {-4, 0, 4};
   result.output_cadence_steps = 5;
-  result.radial_discretization = teuk::RadialDiscretization::D84;
+  result.radial_discretization = teuk::RadialDiscretization::D105;
   return result;
 }
 
@@ -134,6 +134,7 @@ TEST_CASE("four-Weyl metadata has exact roundtrip and physical warnings") {
   CHECK(serialized.find("no-factorial") != std::string::npos);
   CHECK(serialized.find("metric_curvature") == std::string::npos);
   CHECK(serialized.find("both") != std::string::npos);
+  CHECK(serialized.find("d10-5") != std::string::npos);
 
   std::istringstream input(serialized);
   const auto actual = teuk::read_four_weyl_metadata(input);

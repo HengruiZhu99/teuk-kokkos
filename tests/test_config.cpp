@@ -148,12 +148,62 @@ TEST_CASE("runtime radial discretization is strict and enforces its grid") {
     (void)teuk::parse_run_configuration_text(
         "config_version = 1\nradial_discretization = d8-4\nnr = 15\n");
   }));
+  CHECK(config_rejects([] {
+    (void)teuk::parse_run_configuration_text(
+        "config_version = 1\nradial_discretization = d10-5\nnr = 21\n");
+  }));
   const auto parameters = teuk::parse_run_configuration_text(
       "config_version = 1\nradial_discretization = d8-4\nnr = 16\n");
   CHECK(parameters.method.radial_discretization ==
         teuk::RadialDiscretization::D84);
   CHECK(teuk::resolved_configuration_text(parameters).find(
             "radial_discretization = d8-4\n") != std::string::npos);
+  const auto d105 = teuk::parse_run_configuration_text(
+      "config_version = 1\nradial_discretization = d10-5\nnr = 22\n");
+  CHECK(d105.method.radial_discretization ==
+        teuk::RadialDiscretization::D105);
+  CHECK(teuk::resolved_configuration_text(d105).find(
+            "radial_discretization = d10-5\n") != std::string::npos);
+}
+
+TEST_CASE("runtime radial dissipation bound rejects unsafe D10-5 steps") {
+  const std::string near_extremal =
+      "config_version = 1\n"
+      "spin = 0.999\n"
+      "nr = 513\n"
+      "ntheta = 9\n"
+      "ellmax_first = 4\n"
+      "ellmax_second = 4\n"
+      "final_time = 200\n"
+      "steps = 400000\n"
+      "dissipation = 0.005\n";
+  const auto d84 = teuk::parse_run_configuration_text(
+      near_extremal + "radial_discretization = d8-4\n");
+  CHECK(d84.method.radial_discretization ==
+        teuk::RadialDiscretization::D84);
+  CHECK(teuk::resolved_configuration_text(d84).find(
+            "radial_discretization = d8-4\n") != std::string::npos);
+  CHECK(config_rejects([&] {
+    (void)teuk::parse_run_configuration_text(
+        near_extremal + "radial_discretization = d10-5\n");
+  }));
+  const auto safe_d105 = teuk::parse_run_configuration_text(
+      near_extremal + "radial_discretization = d10-5\n",
+      {"steps=1600000"});
+  CHECK(safe_d105.method.radial_discretization ==
+        teuk::RadialDiscretization::D105);
+  CHECK(teuk::resolved_configuration_text(safe_d105).find(
+            "steps = 1600000\n") != std::string::npos);
+
+  CHECK_NEAR(teuk::radial_dissipation_spectral_radius_bound(
+                 teuk::RadialDiscretization::D42),
+             64.0, 0.0);
+  CHECK_NEAR(teuk::radial_dissipation_spectral_radius_bound(
+                 teuk::RadialDiscretization::D84),
+             1371.0, 0.0);
+  CHECK_NEAR(teuk::radial_dissipation_spectral_radius_bound(
+                 teuk::RadialDiscretization::D105),
+             5500.0, 0.0);
 }
 
 TEST_CASE("plus2 runtime settings reject unknown and incompatible combinations") {

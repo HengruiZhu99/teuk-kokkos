@@ -500,6 +500,24 @@ inline void validate_run_parameters(const RunParameters& parameters) {
     throw std::invalid_argument(
         "reduction_damping and dissipation must be nonnegative");
   }
+  const double horizon_radius =
+      parameters.background.mass +
+      std::sqrt(parameters.background.mass * parameters.background.mass -
+                parameters.background.spin * parameters.background.spin);
+  const double compact_horizon =
+      parameters.background.compactification_length *
+      parameters.background.compactification_length / horizon_radius;
+  const double radial_spacing =
+      compact_horizon /
+      static_cast<double>(parameters.grid.radial_points - 1);
+  const double time_step =
+      parameters.time.final_time / static_cast<double>(parameters.time.steps);
+  if (!radial_dissipation_rk4_step_is_admissible(
+          parameters.method.radial_discretization,
+          parameters.method.dissipation, time_step / radial_spacing)) {
+    throw std::invalid_argument(
+        "steps are too small for the selected radial dissipation RK4 bound");
+  }
   if (parameters.initial_data.type == InitialDataType::Gaussian) {
     if (parameters.initial_data.modes.empty()) {
       throw std::invalid_argument("Gaussian initial data require a seed mode");

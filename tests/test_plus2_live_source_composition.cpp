@@ -163,7 +163,7 @@ struct Geometry {
 };
 
 struct LiveFixture {
-  static constexpr std::size_t radial_count = 16;
+  static constexpr std::size_t radial_count = 24;
   static constexpr std::size_t theta_count = 8;
   teuk::ExecutionSpace execution;
   teuk::ModeRegistry registry{{-1, 0, 1}, {-1, 1}, {0}};
@@ -235,7 +235,7 @@ struct LiveFixture {
 
   teuk::Plus2LiveSourceCapability capability(
       const std::uint64_t generation = 7) const {
-    return {true, true, true, true, teuk::RadialDiscretization::D84,
+    return {true, true, true, true, teuk::RadialDiscretization::D105,
             generation};
   }
 
@@ -339,7 +339,7 @@ TEST_CASE("plus2 live composition is same-stage ordered and quadratic") {
   }
   CHECK(maximum > 1.0e-7);
   CHECK(base.composition.radial_discretization() ==
-        teuk::RadialDiscretization::D84);
+        teuk::RadialDiscretization::D105);
 }
 
 TEST_CASE("plus2 live composition fails closed on missing slots and activation") {

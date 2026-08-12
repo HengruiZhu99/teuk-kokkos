@@ -6,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <iostream>
 #include <string>
 #include <vector>
 
@@ -78,27 +79,37 @@ void fill_exact_in_band_state(const HostView& state,
 
 teuk::SpatialPipeline make_graph_pipeline(const teuk::ExecutionSpace& execution,
                                           const std::size_t radial_count,
-                                          const std::string& label) {
+                                          const std::string& label,
+                                          const teuk::RadialDiscretization
+                                              discretization =
+                                                  teuk::RadialDiscretization::D84,
+                                          const double dissipation = 0.0) {
   return teuk::SpatialPipeline(
       execution, teuk::ModeRegistry({0}),
       teuk::UniformRadialGrid(radial_count, 0.0, 0.64), graph_bands,
-      graph_theta_count, teuk::KerrParameters{1.0, 0.41, 1.5}, 0.17, 0.0,
+      graph_theta_count, teuk::KerrParameters{1.0, 0.41, 1.5}, 0.17,
+      dissipation,
       teuk::ReductionEvolution::FreeDamped, label,
       teuk::SecondOrderSourcePolicy::unrestricted(),
-      teuk::RadialDiscretization::D84);
+      discretization);
 }
 
-GraphSnapshot evaluate_graph(const std::size_t radial_count) {
+GraphSnapshot evaluate_graph(
+    const std::size_t radial_count,
+    const teuk::RadialDiscretization discretization =
+        teuk::RadialDiscretization::D84,
+    const double dissipation = 0.0) {
   const teuk::ExecutionSpace execution;
-  auto pipeline =
-      make_graph_pipeline(execution, radial_count, "d84_full_graph_spatial");
+  auto pipeline = make_graph_pipeline(execution, radial_count,
+                                      "full_graph_spatial", discretization,
+                                      dissipation);
   const auto grid = pipeline.storage().radial_grid();
   auto initial = Kokkos::create_mirror_view(pipeline.storage().state());
   fill_exact_in_band_state(initial, grid);
   Kokkos::deep_copy(execution, pipeline.storage().state(), initial);
   pipeline.evaluate_rhs(execution, pipeline.storage().state(),
                         pipeline.storage().rhs());
-  execution.fence("finish D84 full graph spatial evaluation");
+  execution.fence("finish full graph spatial evaluation");
 
   const auto rhs = Kokkos::create_mirror_view_and_copy(
       Kokkos::HostSpace{}, pipeline.storage().rhs());
@@ -248,12 +259,17 @@ struct TemporalSnapshot {
   std::size_t theta_count = 0;
 };
 
-TemporalSnapshot evolve_graph(const int step_count) {
-  constexpr std::size_t radial_count = 17;
-  constexpr double final_time = 0.024;
+TemporalSnapshot evolve_graph(
+    const int step_count,
+    const teuk::RadialDiscretization discretization =
+        teuk::RadialDiscretization::D84,
+    const std::size_t radial_count = 17,
+    const double final_time = 0.024,
+    const double dissipation = 0.0) {
   const teuk::ExecutionSpace execution;
-  auto pipeline =
-      make_graph_pipeline(execution, radial_count, "d84_full_graph_temporal");
+  auto pipeline = make_graph_pipeline(execution, radial_count,
+                                      "full_graph_temporal", discretization,
+                                      dissipation);
   auto initial = Kokkos::create_mirror_view(pipeline.storage().state());
   fill_exact_in_band_state(initial, pipeline.storage().radial_grid());
   for (std::size_t field = 0; field < teuk::point_pipeline_field_count;
@@ -274,7 +290,7 @@ TemporalSnapshot evolve_graph(const int step_count) {
   for (int step = 0; step < step_count; ++step) {
     pipeline.step(execution, step * time_step, time_step);
   }
-  execution.fence("finish D84 full graph temporal trajectory");
+  execution.fence("finish full graph temporal trajectory");
   const auto state = Kokkos::create_mirror_view_and_copy(
       Kokkos::HostSpace{}, pipeline.storage().state());
   TemporalSnapshot result;
@@ -385,6 +401,70 @@ TEST_CASE("complete D84 graph exposes the nested source endpoint order gap") {
   CHECK(forcing_endpoint_ratio < 10.0);
 }
 
+TEST_CASE("complete zero-dissipation D105 graph closes the endpoint order gap") {
+  constexpr double dissipation = 0.0;
+  const auto coarse = evaluate_graph(
+      49, teuk::RadialDiscretization::D105, dissipation);
+  const auto medium = evaluate_graph(
+      97, teuk::RadialDiscretization::D105, dissipation);
+  const auto fine = evaluate_graph(
+      193, teuk::RadialDiscretization::D105, dissipation);
+
+  const auto first_cm = rhs_difference(coarse, medium, 0, 3);
+  const auto first_mf = rhs_difference(medium, fine, 0, 3);
+  const auto reconstruction_cm = rhs_difference(coarse, medium, 3, 7);
+  const auto reconstruction_mf = rhs_difference(medium, fine, 3, 7);
+  const auto second_cm = rhs_difference(coarse, medium, 10, 3);
+  const auto second_mf = rhs_difference(medium, fine, 10, 3);
+  const auto forcing_cm = forcing_difference(coarse, medium);
+  const auto forcing_mf = forcing_difference(medium, fine);
+  const auto source_cm = component_difference(
+      coarse, medium, coarse.inner_source, medium.inner_source, 2);
+  const auto source_mf = component_difference(
+      medium, fine, medium.inner_source, fine.inner_source, 2);
+  const auto tangent_cm = component_difference(
+      coarse, medium, coarse.inner_source_tangent,
+      medium.inner_source_tangent, 2);
+  const auto tangent_mf = component_difference(
+      medium, fine, medium.inner_source_tangent,
+      fine.inner_source_tangent, 2);
+  const auto constraint_cm = component_difference(
+      coarse, medium, coarse.constraints, medium.constraints, 3);
+  const auto constraint_mf = component_difference(
+      medium, fine, medium.constraints, fine.constraints, 3);
+
+  const std::array<std::pair<DifferenceNorm, DifferenceNorm>, 7> pairs{
+      {{first_cm, first_mf},
+       {reconstruction_cm, reconstruction_mf},
+       {second_cm, second_mf},
+       {forcing_cm, forcing_mf},
+       {source_cm, source_mf},
+       {tangent_cm, tangent_mf},
+       {constraint_cm, constraint_mf}}};
+  const std::array<const char*, 7> names{
+      "first RHS", "reconstruction RHS", "second RHS", "forcing",
+      "inner source", "inner-source tangent", "constraints"};
+  for (std::size_t index = 0; index < pairs.size(); ++index) {
+    const auto& pair = pairs[index];
+    std::cout << "D105 full-graph epsilon=" << dissipation << " "
+              << names[index] << " RMS/endpoint ratios "
+              << pair.first.rms / pair.second.rms << " "
+              << pair.first.endpoint_maximum / pair.second.endpoint_maximum
+              << " raw " << pair.first.rms << " " << pair.second.rms << " "
+              << pair.first.endpoint_maximum << " "
+              << pair.second.endpoint_maximum
+              << '\n';
+    CHECK(pair.first.magnitude_maximum > 1.0e-14);
+    const double rms_ratio = pair.first.rms / pair.second.rms;
+    const double endpoint_ratio =
+        pair.first.endpoint_maximum / pair.second.endpoint_maximum;
+    CHECK(std::isfinite(rms_ratio));
+    CHECK(std::isfinite(endpoint_ratio));
+    CHECK(rms_ratio > 15.0);
+    CHECK(endpoint_ratio > 15.0);
+  }
+}
+
 TEST_CASE("complete D84 graph has fourth order RK4 convergence at fixed space") {
   const auto coarse = evolve_graph(16);
   const auto medium = evolve_graph(32);
@@ -401,5 +481,39 @@ TEST_CASE("complete D84 graph has fourth order RK4 convergence at fixed space") 
         fine, reference, sector.first, sector.second);
     CHECK(coarse_error / medium_error > 12.0);
     CHECK(medium_error / fine_error > 12.0);
+  }
+}
+
+TEST_CASE("complete D105 graph has fourth order RK4 convergence at fixed space") {
+  const auto coarse = evolve_graph(
+      4, teuk::RadialDiscretization::D105, 25, 0.24);
+  const auto medium = evolve_graph(
+      8, teuk::RadialDiscretization::D105, 25, 0.24);
+  const auto fine = evolve_graph(
+      16, teuk::RadialDiscretization::D105, 25, 0.24);
+  const auto reference = evolve_graph(
+      256, teuk::RadialDiscretization::D105, 25, 0.24);
+  for (const auto& sector :
+       std::array<std::pair<std::size_t, std::size_t>, 3>{
+           {{0, 3}, {3, 7}, {10, 3}}}) {
+    const double coarse_error = temporal_sector_error(
+        coarse, reference, sector.first, sector.second);
+    const double medium_error = temporal_sector_error(
+        medium, reference, sector.first, sector.second);
+    const double fine_error = temporal_sector_error(
+        fine, reference, sector.first, sector.second);
+    std::cout << "D105 fixed-space RK4 sector " << sector.first
+              << " errors " << coarse_error << " " << medium_error << " "
+              << fine_error << " ratios " << coarse_error / medium_error
+              << " " << medium_error / fine_error << '\n';
+    const double coarse_medium_ratio = coarse_error / medium_error;
+    const double medium_fine_ratio = medium_error / fine_error;
+    CHECK(std::isfinite(coarse_error));
+    CHECK(std::isfinite(medium_error));
+    CHECK(std::isfinite(fine_error));
+    CHECK(std::isfinite(coarse_medium_ratio));
+    CHECK(std::isfinite(medium_fine_ratio));
+    CHECK(coarse_medium_ratio > 12.0);
+    CHECK(medium_fine_ratio > 12.0);
   }
 }
