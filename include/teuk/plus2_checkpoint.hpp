@@ -18,6 +18,7 @@
 #include <type_traits>
 #include <vector>
 
+#include "teuk/checkpoint_identity.hpp"
 #include "teuk/plus2_companion_storage.hpp"
 #include "teuk/plus2_runtime_types.hpp"
 #include "teuk/plus2_source.hpp"
@@ -27,7 +28,11 @@
 
 namespace teuk {
 
-inline constexpr std::uint32_t plus2_checkpoint_format_version = 3;
+class Plus2CompanionPipeline;
+
+inline constexpr std::uint32_t plus2_checkpoint_format_version = 4;
+inline constexpr std::uint32_t plus2_checkpoint_legacy_unbound_pde_version =
+    3;
 inline constexpr std::uint32_t plus2_checkpoint_legacy_representation_version =
     2;
 inline constexpr std::uint32_t plus2_checkpoint_legacy_d42_version = 1;
@@ -44,6 +49,16 @@ inline constexpr const char* plus2_complex_component_order =
     "real-then-imag";
 inline constexpr const char* plus2_state_storage_order =
     "LayoutRight(mode,field,radial,theta);field-order=(P,Q,Z)";
+inline constexpr const char* plus2_provenance_binding_schema =
+    "plus2-pipeline-derived-v1";
+inline constexpr const char* plus2_unbound_codec_schema =
+    "plus2-unbound-codec-v1";
+
+class Plus2PipelineCheckpointAuthority {
+ private:
+  explicit constexpr Plus2PipelineCheckpointAuthority(const int) {}
+  friend class Plus2CompanionPipeline;
+};
 
 #ifndef TEUK_GIT_COMMIT
 #define TEUK_GIT_COMMIT "unknown"
@@ -93,10 +108,10 @@ struct Plus2CheckpointMetadata {
   std::string reduction_mode;
   double reduction_damping = 0.0;
   double dissipation = 0.0;
-  std::uint32_t source_normalization_version =
-      plus2_source_normalization_version;
-  std::string source_normalization_name = plus2_source_normalization_name;
-  std::string primary_checkpoint_identity;
+  std::string provenance_binding_schema = plus2_unbound_codec_schema;
+  Plus2SourceNormalization source_normalization =
+      plus2_source_normalization;
+  PrimaryCheckpointContentIdentity primary_checkpoint_identity;
   Plus2CheckpointProgress progress;
   SourceActivationState source_activation;
   std::uint64_t state_checksum = 0;
@@ -126,10 +141,11 @@ struct Plus2CheckpointExpectations {
   std::string reduction_mode;
   double reduction_damping = 0.0;
   double dissipation = 0.0;
-  std::uint32_t source_normalization_version =
-      plus2_source_normalization_version;
-  std::string source_normalization_name = plus2_source_normalization_name;
-  std::string primary_checkpoint_identity;
+  std::string provenance_binding_schema = plus2_unbound_codec_schema;
+  Plus2SourceNormalization source_normalization =
+      plus2_source_normalization;
+  PrimaryCheckpointContentIdentity primary_checkpoint_identity;
+  Plus2CheckpointProgress progress;
 };
 
 namespace plus2_checkpoint_detail {
@@ -209,6 +225,7 @@ inline void validate_activation(const SourceActivationState& activation,
        (activation.activation_time < 0.0 ||
         activation.activation_time > progress_time)) ||
       (!activation.active && activation.activation_time != -1.0) ||
+      activation.last_eligibility_time < -1.0 ||
       activation.last_eligibility_time > progress_time) {
     throw std::invalid_argument(
         "invalid accepted source-activation state in plus2 checkpoint");
@@ -220,10 +237,13 @@ inline void validate_physical_problem(
     const std::vector<double>& radial_coordinates,
     const std::vector<double>& theta_coordinates, const double time_step,
     const std::string& reduction_mode, const double reduction_damping,
-    const double dissipation, const std::uint32_t normalization_version,
-    const std::string& normalization_name,
-    const std::string& primary_checkpoint_identity,
-    const std::size_t radial_count, const std::size_t theta_count) {
+    const double dissipation, const std::string& provenance_binding,
+    const Plus2SourceNormalization normalization,
+    const PrimaryCheckpointContentIdentity& primary_checkpoint_identity,
+    const std::size_t radial_count, const std::size_t theta_count,
+    const bool require_resolved_step = true,
+    const bool require_primary_identity = true,
+    const bool require_pipeline_binding = true) {
   const auto finite_coordinates = [](const std::vector<double>& coordinates) {
     return std::all_of(coordinates.begin(), coordinates.end(),
                        [](const double value) { return std::isfinite(value); });
@@ -232,25 +252,36 @@ inline void validate_physical_problem(
       std::adjacent_find(radial_coordinates.begin(), radial_coordinates.end(),
                          std::greater_equal<double>()) ==
       radial_coordinates.end();
-  const bool theta_strict =
+  const bool theta_increasing =
       std::adjacent_find(theta_coordinates.begin(), theta_coordinates.end(),
                          std::greater_equal<double>()) ==
+      theta_coordinates.end();
+  const bool theta_decreasing =
+      std::adjacent_find(theta_coordinates.begin(), theta_coordinates.end(),
+                         std::less_equal<double>()) ==
       theta_coordinates.end();
   if (!std::isfinite(mass) || !std::isfinite(spin) ||
       !std::isfinite(length) || mass <= 0.0 || std::abs(spin) > mass ||
       length <= 0.0 || radial_coordinates.size() != radial_count ||
       theta_coordinates.size() != theta_count || !finite_coordinates(radial_coordinates) ||
-      !finite_coordinates(theta_coordinates) || !radial_strict || !theta_strict ||
-      !std::isfinite(time_step) || time_step <= 0.0 ||
+      !finite_coordinates(theta_coordinates) || !radial_strict ||
+      (!theta_increasing && !theta_decreasing) ||
+      !std::isfinite(time_step) || time_step < 0.0 ||
+      (require_resolved_step && time_step == 0.0) ||
       (reduction_mode != "free_damped" &&
        reduction_mode != "stage_constrained") ||
       !std::isfinite(reduction_damping) || reduction_damping < 0.0 ||
       !std::isfinite(dissipation) || dissipation < 0.0 ||
-      normalization_version != plus2_source_normalization_version ||
-      normalization_name != plus2_source_normalization_name ||
-      primary_checkpoint_identity.empty()) {
+      (require_pipeline_binding
+           ? provenance_binding != plus2_provenance_binding_schema
+           : provenance_binding != plus2_unbound_codec_schema) ||
+      normalization != plus2_source_normalization) {
     throw std::invalid_argument(
         "incomplete or nonfinite plus2 physical-problem provenance");
+  }
+  (void)plus2_source_normalization_name_of(normalization);
+  if (require_primary_identity) {
+    validate_primary_checkpoint_content_identity(primary_checkpoint_identity);
   }
 }
 
@@ -272,15 +303,19 @@ inline void validate_expectations(const Plus2CheckpointExpectations& expected) {
       expected.radial_coordinates, expected.theta_coordinates,
       expected.time_step, expected.reduction_mode,
       expected.reduction_damping, expected.dissipation,
-      expected.source_normalization_version,
-      expected.source_normalization_name,
+      expected.provenance_binding_schema, expected.source_normalization,
       expected.primary_checkpoint_identity, expected.radial_count,
-      expected.theta_count);
+      expected.theta_count, true, true,
+      expected.provenance_binding_schema == plus2_provenance_binding_schema);
+  if (!std::isfinite(expected.progress.time) || expected.progress.time < 0.0) {
+    throw std::invalid_argument("invalid expected plus2 checkpoint progress");
+  }
 }
 
 inline void validate_metadata(const Plus2CheckpointMetadata& metadata) {
   if (metadata.schema != plus2_checkpoint_schema ||
       (metadata.version != plus2_checkpoint_format_version &&
+       metadata.version != plus2_checkpoint_legacy_unbound_pde_version &&
        metadata.version != plus2_checkpoint_legacy_representation_version &&
        metadata.version != plus2_checkpoint_legacy_d42_version) ||
       metadata.byte_order != plus2_native_byte_order() ||
@@ -308,15 +343,16 @@ inline void validate_metadata(const Plus2CheckpointMetadata& metadata) {
   validate_activation(metadata.source_activation, metadata.progress.time);
   (void)radial_discretization_name(metadata.radial_discretization);
   if (metadata.version == plus2_checkpoint_format_version) {
+    const bool pipeline_bound =
+        metadata.provenance_binding_schema == plus2_provenance_binding_schema;
     validate_physical_problem(
         metadata.mass, metadata.spin, metadata.compactification_length,
         metadata.radial_coordinates, metadata.theta_coordinates,
         metadata.time_step, metadata.reduction_mode,
         metadata.reduction_damping, metadata.dissipation,
-        metadata.source_normalization_version,
-        metadata.source_normalization_name,
+        metadata.provenance_binding_schema, metadata.source_normalization,
         metadata.primary_checkpoint_identity, metadata.radial_count,
-        metadata.theta_count);
+        metadata.theta_count, true, true, pipeline_bound);
     const double expected_time =
         static_cast<double>(metadata.progress.step) * metadata.time_step;
     const double scale =
@@ -478,7 +514,7 @@ inline void write_payload(std::ostream& output,
     write_string(output,
                  radial_discretization_name(metadata.radial_discretization));
   }
-  if (metadata.version >= plus2_checkpoint_format_version) {
+  if (metadata.version >= plus2_checkpoint_legacy_unbound_pde_version) {
     write_scalar(output, metadata.mass);
     write_scalar(output, metadata.spin);
     write_scalar(output, metadata.compactification_length);
@@ -488,9 +524,22 @@ inline void write_payload(std::ostream& output,
     write_string(output, metadata.reduction_mode);
     write_scalar(output, metadata.reduction_damping);
     write_scalar(output, metadata.dissipation);
-    write_scalar(output, metadata.source_normalization_version);
-    write_string(output, metadata.source_normalization_name);
-    write_string(output, metadata.primary_checkpoint_identity);
+    if (metadata.version == plus2_checkpoint_format_version) {
+      write_string(output, metadata.provenance_binding_schema);
+      write_scalar(output,
+                   static_cast<std::uint32_t>(metadata.source_normalization));
+      write_string(output,
+                   plus2_source_normalization_name_of(
+                       metadata.source_normalization));
+      write_string(output, metadata.primary_checkpoint_identity.algorithm);
+      write_string(output, metadata.primary_checkpoint_identity.state_schema);
+      write_string(output,
+                   sha256_hex(metadata.primary_checkpoint_identity.digest));
+    } else {
+      write_scalar(output, plus2_source_normalization_version);
+      write_string(output, plus2_source_normalization_name);
+      write_string(output, "legacy-unbound-primary-identity");
+    }
   }
   write_scalar(output, metadata.progress.time);
   write_scalar(output, metadata.progress.step);
@@ -548,7 +597,7 @@ inline std::pair<Plus2CheckpointMetadata, std::vector<Complex>> read_payload(
           ? RadialDiscretization::D42
           : parse_radial_discretization(
                 read_string(input, "radial discretization"));
-  if (metadata.version >= plus2_checkpoint_format_version) {
+  if (metadata.version >= plus2_checkpoint_legacy_unbound_pde_version) {
     metadata.mass = read_scalar<double>(input, "mass");
     metadata.spin = read_scalar<double>(input, "spin");
     metadata.compactification_length =
@@ -560,12 +609,30 @@ inline std::pair<Plus2CheckpointMetadata, std::vector<Complex>> read_payload(
     metadata.reduction_damping =
         read_scalar<double>(input, "reduction damping");
     metadata.dissipation = read_scalar<double>(input, "dissipation");
-    metadata.source_normalization_version =
-        read_scalar<std::uint32_t>(input, "source normalization version");
-    metadata.source_normalization_name =
-        read_string(input, "source normalization name");
-    metadata.primary_checkpoint_identity =
-        read_string(input, "primary checkpoint identity");
+    if (metadata.version == plus2_checkpoint_format_version) {
+      metadata.provenance_binding_schema =
+          read_string(input, "provenance binding schema");
+      const auto source_version =
+          read_scalar<std::uint32_t>(input, "source normalization version");
+      const auto source_name = read_string(input, "source normalization name");
+      metadata.source_normalization =
+          parse_plus2_source_normalization(source_version, source_name);
+      metadata.primary_checkpoint_identity.algorithm =
+          read_string(input, "primary identity algorithm");
+      metadata.primary_checkpoint_identity.state_schema =
+          read_string(input, "primary identity state schema");
+      metadata.primary_checkpoint_identity.digest = parse_sha256_hex(
+          read_string(input, "primary identity digest"));
+    } else {
+      const auto source_version =
+          read_scalar<std::uint32_t>(input, "source normalization version");
+      const auto source_name = read_string(input, "source normalization name");
+      metadata.source_normalization =
+          parse_plus2_source_normalization(source_version, source_name);
+      static_cast<void>(read_string(input, "legacy primary identity"));
+      metadata.provenance_binding_schema.clear();
+      metadata.primary_checkpoint_identity = {};
+    }
   }
   metadata.progress.time = read_scalar<double>(input, "time");
   metadata.progress.step = read_scalar<std::uint64_t>(input, "step");
@@ -625,12 +692,13 @@ inline void require_metadata_match(
       metadata.reduction_mode != expected.reduction_mode ||
       metadata.reduction_damping != expected.reduction_damping ||
       metadata.dissipation != expected.dissipation ||
-      metadata.source_normalization_version !=
-          expected.source_normalization_version ||
-      metadata.source_normalization_name !=
-          expected.source_normalization_name ||
+      metadata.provenance_binding_schema !=
+          expected.provenance_binding_schema ||
+      metadata.source_normalization != expected.source_normalization ||
       metadata.primary_checkpoint_identity !=
-          expected.primary_checkpoint_identity) {
+          expected.primary_checkpoint_identity ||
+      metadata.progress.time != expected.progress.time ||
+      metadata.progress.step != expected.progress.step) {
     throw std::runtime_error(
         "plus2 checkpoint does not match scaling, registry, methods, provenance, or shape");
   }
@@ -638,16 +706,22 @@ inline void require_metadata_match(
 
 }  // namespace plus2_checkpoint_detail
 
-inline Plus2CheckpointMetadata save_plus2_checkpoint(
+namespace plus2_checkpoint_detail {
+
+inline Plus2CheckpointMetadata save_checkpoint_impl(
     const ExecutionSpace& execution, const std::filesystem::path& path,
-    const Plus2CompanionStorage& storage, Plus2CheckpointMetadata metadata) {
-  using namespace plus2_checkpoint_detail;
+    const Plus2CompanionStorage& storage, Plus2CheckpointMetadata metadata,
+    const std::string_view required_binding) {
   if (!storage.is_enabled()) {
     throw std::invalid_argument("cannot checkpoint disabled plus2 storage");
   }
   if (metadata.version != plus2_checkpoint_format_version) {
     throw std::invalid_argument(
         "new plus2 checkpoints must use the current format version");
+  }
+  if (metadata.provenance_binding_schema != required_binding) {
+    throw std::invalid_argument(
+        "plus2 checkpoint writer lacks the required binding authority");
   }
   metadata.radial_count = storage.radial_count();
   metadata.theta_count = storage.theta_count();
@@ -689,15 +763,19 @@ inline Plus2CheckpointMetadata save_plus2_checkpoint(
 
 // Validation is deliberately completed against host-owned temporary data
 // before the destination View is mutated.
-inline Plus2CheckpointMetadata load_plus2_checkpoint(
+inline Plus2CheckpointMetadata load_checkpoint_impl(
     const ExecutionSpace& execution, const std::filesystem::path& path,
     Plus2CompanionStorage& storage,
-    const Plus2CheckpointExpectations& expected) {
-  using namespace plus2_checkpoint_detail;
+    const Plus2CheckpointExpectations& expected,
+    const std::string_view required_binding) {
   if (!storage.is_enabled()) {
     throw std::invalid_argument("cannot restore disabled plus2 storage");
   }
   validate_expectations(expected);
+  if (expected.provenance_binding_schema != required_binding) {
+    throw std::invalid_argument(
+        "plus2 checkpoint loader lacks the required binding authority");
+  }
   std::ifstream input(path, std::ios::binary);
   if (!input) throw std::runtime_error("cannot open plus2 checkpoint");
   auto [metadata, values] = read_payload(input);
@@ -718,6 +796,41 @@ inline Plus2CheckpointMetadata load_plus2_checkpoint(
   Kokkos::deep_copy(execution, storage.flat_state(), host);
   execution.fence("restore plus2 checkpoint state");
   return metadata;
+}
+
+}  // namespace plus2_checkpoint_detail
+
+inline Plus2CheckpointMetadata save_plus2_checkpoint(
+    const ExecutionSpace& execution, const std::filesystem::path& path,
+    const Plus2CompanionStorage& storage, Plus2CheckpointMetadata metadata) {
+  return plus2_checkpoint_detail::save_checkpoint_impl(
+      execution, path, storage, std::move(metadata), plus2_unbound_codec_schema);
+}
+
+inline Plus2CheckpointMetadata save_plus2_pipeline_checkpoint(
+    const Plus2PipelineCheckpointAuthority,
+    const ExecutionSpace& execution, const std::filesystem::path& path,
+    const Plus2CompanionStorage& storage, Plus2CheckpointMetadata metadata) {
+  return plus2_checkpoint_detail::save_checkpoint_impl(
+      execution, path, storage, std::move(metadata),
+      plus2_provenance_binding_schema);
+}
+
+inline Plus2CheckpointMetadata load_plus2_checkpoint(
+    const ExecutionSpace& execution, const std::filesystem::path& path,
+    Plus2CompanionStorage& storage,
+    const Plus2CheckpointExpectations& expected) {
+  return plus2_checkpoint_detail::load_checkpoint_impl(
+      execution, path, storage, expected, plus2_unbound_codec_schema);
+}
+
+inline Plus2CheckpointMetadata load_plus2_pipeline_checkpoint(
+    const Plus2PipelineCheckpointAuthority,
+    const ExecutionSpace& execution, const std::filesystem::path& path,
+    Plus2CompanionStorage& storage,
+    const Plus2CheckpointExpectations& expected) {
+  return plus2_checkpoint_detail::load_checkpoint_impl(
+      execution, path, storage, expected, plus2_provenance_binding_schema);
 }
 
 }  // namespace teuk

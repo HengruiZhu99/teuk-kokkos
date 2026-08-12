@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -25,6 +26,7 @@
 #include <vector>
 
 #include "teuk/background.hpp"
+#include "teuk/checkpoint_identity.hpp"
 #include "teuk/io.hpp"
 #include "teuk/modes.hpp"
 #include "teuk/pipeline_bands.hpp"
@@ -414,11 +416,9 @@ inline void validate_metadata(const PipelineCheckpointMetadata& metadata) {
   }
 }
 
-inline void write_metadata_file(
-    const std::filesystem::path& path,
+inline std::string serialize_metadata(
     const PipelineCheckpointMetadata& metadata) {
-  std::ofstream output(path);
-  if (!output) throw std::runtime_error("cannot open checkpoint metadata");
+  std::ostringstream output;
   output << std::setprecision(std::numeric_limits<double>::max_digits10)
          << "format=teuk-kokkos-pipeline-checkpoint\n"
          << "version=" << metadata.version << '\n'
@@ -450,8 +450,8 @@ inline void write_metadata_file(
          << "reduction_damping="
          << metadata.configuration.reduction_damping << '\n'
          << "dissipation=" << metadata.configuration.dissipation << '\n'
-         << "reduction="
-         << reduction_name(metadata.configuration.reduction) << '\n'
+         << "reduction=" << reduction_name(metadata.configuration.reduction)
+         << '\n'
          << "radial_discretization="
          << radial_discretization_name(
                 metadata.configuration.radial_discretization)
@@ -474,13 +474,66 @@ inline void write_metadata_file(
          << "source_consecutive_passes="
          << metadata.source_activation.consecutive_passes << '\n'
          << "source_last_eligibility_time="
-         << metadata.source_activation.last_eligibility_time
-         << '\n'
+         << metadata.source_activation.last_eligibility_time << '\n'
          << "time=" << metadata.progress.time << '\n'
          << "step=" << metadata.progress.step << '\n'
          << "state_checksum_fnv1a64=" << metadata.state_checksum << '\n';
-  output.flush();
-  if (!output) throw std::runtime_error("failed while writing checkpoint metadata");
+  if (!output) throw std::runtime_error("failed serializing checkpoint metadata");
+  return output.str();
+}
+
+inline std::vector<std::uint8_t> serialize_state_bytes(
+    const std::vector<Complex>& values) {
+  std::vector<std::uint8_t> bytes(values.size() * 2U * sizeof(double));
+  std::size_t offset = 0;
+  for (const Complex value : values) {
+    const double parts[2]{value.real(), value.imag()};
+    std::memcpy(bytes.data() + offset, parts, sizeof(parts));
+    offset += sizeof(parts);
+  }
+  return bytes;
+}
+
+inline void write_exact_bytes(const std::filesystem::path& path,
+                              const std::span<const std::uint8_t> bytes) {
+  std::ofstream output(path, std::ios::binary | std::ios::trunc);
+  if (!output) throw std::runtime_error("cannot open checkpoint byte output");
+  output.write(reinterpret_cast<const char*>(bytes.data()),
+               static_cast<std::streamsize>(bytes.size()));
+  if (!output) throw std::runtime_error("failed writing checkpoint bytes");
+}
+
+inline std::vector<std::uint8_t> read_exact_bytes(
+    const std::filesystem::path& path) {
+  std::ifstream input(path, std::ios::binary | std::ios::ate);
+  if (!input) throw std::runtime_error("cannot open checkpoint content");
+  const auto end = input.tellg();
+  if (end < 0) throw std::runtime_error("cannot size checkpoint content");
+  std::vector<std::uint8_t> bytes(static_cast<std::size_t>(end));
+  input.seekg(0);
+  if (!bytes.empty()) {
+    input.read(reinterpret_cast<char*>(bytes.data()),
+               static_cast<std::streamsize>(bytes.size()));
+  }
+  if (!input) throw std::runtime_error("failed reading checkpoint content");
+  return bytes;
+}
+
+inline std::vector<Complex> parse_state_bytes(
+    const std::span<const std::uint8_t> bytes,
+    const std::size_t expected_values) {
+  if (bytes.size() != expected_values * 2U * sizeof(double)) {
+    throw std::runtime_error("binary snapshot size does not match metadata");
+  }
+  std::vector<Complex> values(expected_values);
+  std::size_t offset = 0;
+  for (Complex& value : values) {
+    double parts[2]{};
+    std::memcpy(parts, bytes.data() + offset, sizeof(parts));
+    value = Complex(parts[0], parts[1]);
+    offset += sizeof(parts);
+  }
+  return values;
 }
 
 class TemporaryDirectoryGuard {
@@ -524,10 +577,7 @@ inline std::filesystem::path create_temporary_directory(
   throw std::runtime_error("cannot reserve temporary checkpoint directory");
 }
 
-inline std::map<std::string, std::string> read_entries(
-    const std::filesystem::path& path) {
-  std::ifstream input(path);
-  if (!input) throw std::runtime_error("cannot open checkpoint metadata");
+inline std::map<std::string, std::string> read_entries(std::istream& input) {
   std::map<std::string, std::string> entries;
   std::string line;
   while (std::getline(input, line)) {
@@ -574,6 +624,21 @@ inline std::map<std::string, std::string> read_entries(
   return entries;
 }
 
+inline std::map<std::string, std::string> read_entries(
+    const std::filesystem::path& path) {
+  std::ifstream input(path, std::ios::binary);
+  if (!input) throw std::runtime_error("cannot open checkpoint metadata");
+  return read_entries(input);
+}
+
+inline std::map<std::string, std::string> read_entries(
+    const std::span<const std::uint8_t> bytes) {
+  const std::string text(reinterpret_cast<const char*>(bytes.data()),
+                         bytes.size());
+  std::istringstream input(text);
+  return read_entries(input);
+}
+
 inline void validate_storage_geometry(
     const ExecutionSpace& execution, const SpatialPipelineStorage& storage,
     const PipelineCheckpointMetadata& metadata) {
@@ -594,10 +659,9 @@ inline void validate_storage_geometry(
 
 }  // namespace pipeline_checkpoint_detail
 
-inline PipelineCheckpointMetadata read_pipeline_checkpoint_metadata(
-    const std::filesystem::path& directory) {
+inline PipelineCheckpointMetadata parse_pipeline_checkpoint_metadata(
+    const std::map<std::string, std::string>& entries) {
   using namespace pipeline_checkpoint_detail;
-  const auto entries = read_entries(directory / pipeline_checkpoint_metadata_file);
   if (require_text(entries, "format") !=
           "teuk-kokkos-pipeline-checkpoint" ||
       require_text(entries, "ordering") != "mode,field,radial,theta" ||
@@ -673,10 +737,49 @@ inline PipelineCheckpointMetadata read_pipeline_checkpoint_metadata(
   return metadata;
 }
 
+inline PipelineCheckpointMetadata read_pipeline_checkpoint_metadata(
+    const std::filesystem::path& directory) {
+  using namespace pipeline_checkpoint_detail;
+  return parse_pipeline_checkpoint_metadata(
+      read_entries(directory / pipeline_checkpoint_metadata_file));
+}
+
+struct VerifiedPipelineCheckpointLoad {
+  PipelineCheckpointMetadata metadata;
+  VerifiedPrimaryCheckpointReceipt receipt;
+};
+
+// The receipt constructor is intentionally reachable only from the two
+// primary checkpoint codec operations below.  An arbitrary digest or byte
+// buffer can be inspected, but it cannot be promoted into verified replay
+// authority without passing the writer/loader's complete validation path.
+class PipelineCheckpointCodec {
+ private:
+  static VerifiedPrimaryCheckpointReceipt issue_receipt(
+      const std::span<const std::uint8_t> metadata,
+      const std::span<const std::uint8_t> state, const double time,
+      const std::uint64_t step, const std::size_t state_value_count) {
+    const auto content =
+        make_primary_checkpoint_content_identity(metadata, state).digest;
+    const auto state_digest =
+        checkpoint_identity_detail::checkpoint_state_digest(state);
+    return {content, state_digest, time, step, state_value_count};
+  }
+
+  friend VerifiedPrimaryCheckpointReceipt write_pipeline_checkpoint(
+      const ExecutionSpace&, const std::filesystem::path&,
+      const SpatialPipeline&, const ModeRegistry&,
+      const PipelineCheckpointConfiguration&,
+      PipelineCheckpointProgress);
+  friend VerifiedPipelineCheckpointLoad load_pipeline_checkpoint_verified(
+      const ExecutionSpace&, const std::filesystem::path&, SpatialPipeline&,
+      const ModeRegistry&, const PipelineCheckpointConfiguration&);
+};
+
 // Writes a new checkpoint directory. The complete binary and metadata are
 // first written beneath a unique sibling directory and then published with one
 // directory rename. Existing destinations are rejected rather than replaced.
-inline void write_pipeline_checkpoint(
+inline VerifiedPrimaryCheckpointReceipt write_pipeline_checkpoint(
     const ExecutionSpace& execution, const std::filesystem::path& directory,
     const SpatialPipeline& pipeline, const ModeRegistry& registry,
     const PipelineCheckpointConfiguration& configuration,
@@ -728,24 +831,50 @@ inline void write_pipeline_checkpoint(
   for (std::size_t i = 0; i < values.size(); ++i) values[i] = host_state(i);
   metadata.state_checksum = checksum(values);
 
+  const std::string metadata_text = serialize_metadata(metadata);
+  const std::vector<std::uint8_t> state_bytes =
+      serialize_state_bytes(values);
+  const auto receipt = PipelineCheckpointCodec::issue_receipt(
+      std::span<const std::uint8_t>(
+          reinterpret_cast<const std::uint8_t*>(metadata_text.data()),
+          metadata_text.size()),
+      state_bytes, progress.time, progress.step, values.size());
+
   const std::filesystem::path temporary =
       create_temporary_directory(directory);
   TemporaryDirectoryGuard cleanup(temporary);
-  write_complex_snapshot(temporary / pipeline_checkpoint_state_file, values);
-  write_metadata_file(temporary / pipeline_checkpoint_metadata_file, metadata);
+  write_exact_bytes(temporary / pipeline_checkpoint_state_file, state_bytes);
+  write_exact_bytes(
+      temporary / pipeline_checkpoint_metadata_file,
+      std::span<const std::uint8_t>(
+          reinterpret_cast<const std::uint8_t*>(metadata_text.data()),
+          metadata_text.size()));
   std::filesystem::rename(temporary, directory);
   cleanup.release();
+  return receipt;
+}
+
+// Read-only inspection only.  Unlike VerifiedPrimaryCheckpointReceipt this
+// does not validate metadata, checksum, geometry, or state semantics.
+inline PrimaryCheckpointContentIdentity
+inspect_pipeline_checkpoint_content_identity(
+    const std::filesystem::path& directory) {
+  return make_primary_checkpoint_content_identity(
+      directory / pipeline_checkpoint_metadata_file,
+      directory / pipeline_checkpoint_state_file);
 }
 
 // All metadata, geometry, byte count, and checksum checks complete before the
 // caller's pipeline state is changed.
-inline PipelineCheckpointMetadata load_pipeline_checkpoint(
+inline VerifiedPipelineCheckpointLoad load_pipeline_checkpoint_verified(
     const ExecutionSpace& execution, const std::filesystem::path& directory,
     SpatialPipeline& pipeline, const ModeRegistry& expected_registry,
     const PipelineCheckpointConfiguration& expected_configuration) {
   using namespace pipeline_checkpoint_detail;
+  const std::vector<std::uint8_t> metadata_bytes = read_exact_bytes(
+      directory / pipeline_checkpoint_metadata_file);
   const PipelineCheckpointMetadata metadata =
-      read_pipeline_checkpoint_metadata(directory);
+      parse_pipeline_checkpoint_metadata(read_entries(metadata_bytes));
   validate_configuration(expected_configuration);
   if (!same_source_policy(pipeline.source_policy(),
                           expected_configuration.source_policy)) {
@@ -767,8 +896,9 @@ inline PipelineCheckpointMetadata load_pipeline_checkpoint(
   }
   validate_storage_geometry(execution, pipeline.storage(), metadata);
   const std::size_t count = checked_snapshot_value_count(metadata.shape);
-  const std::vector<Complex> values = read_complex_snapshot(
-      directory / pipeline_checkpoint_state_file, count);
+  const std::vector<std::uint8_t> state_bytes =
+      read_exact_bytes(directory / pipeline_checkpoint_state_file);
+  const std::vector<Complex> values = parse_state_bytes(state_bytes, count);
   if (checksum(values) != metadata.state_checksum) {
     throw std::runtime_error("pipeline checkpoint state checksum mismatch");
   }
@@ -789,6 +919,9 @@ inline PipelineCheckpointMetadata load_pipeline_checkpoint(
     throw std::runtime_error(
         "pipeline checkpoint contains meaningful off-band angular content");
   }
+  const auto receipt = PipelineCheckpointCodec::issue_receipt(
+      metadata_bytes, state_bytes, metadata.progress.time,
+      metadata.progress.step, values.size());
 
   Kokkos::View<Complex*, Kokkos::HostSpace> host("checkpoint_read_state",
                                                   values.size());
@@ -796,7 +929,43 @@ inline PipelineCheckpointMetadata load_pipeline_checkpoint(
   Kokkos::deep_copy(execution, pipeline.storage().flat_state(), host);
   pipeline.restore_source_activation(execution, metadata.source_activation);
   execution.fence("restore pipeline checkpoint state");
-  return metadata;
+  return {metadata, receipt};
+}
+
+inline PipelineCheckpointMetadata load_pipeline_checkpoint(
+    const ExecutionSpace& execution, const std::filesystem::path& directory,
+    SpatialPipeline& pipeline, const ModeRegistry& expected_registry,
+    const PipelineCheckpointConfiguration& expected_configuration) {
+  return load_pipeline_checkpoint_verified(execution, directory, pipeline,
+                                           expected_registry,
+                                           expected_configuration)
+      .metadata;
+}
+
+template <class PrimaryStateView>
+inline void require_primary_state_matches_receipt(
+    const ExecutionSpace& execution, const PrimaryStateView& primary,
+    const VerifiedPrimaryCheckpointReceipt& receipt) {
+  static_assert(PrimaryStateView::rank == 1,
+                "verified primary checkpoint state must be rank one");
+  if (primary.extent(0) != receipt.state_value_count()) {
+    throw std::invalid_argument(
+        "primary state extent does not match checkpoint receipt");
+  }
+  Kokkos::View<Complex*, Kokkos::HostSpace> host(
+      "verify_primary_checkpoint_receipt", primary.extent(0));
+  Kokkos::deep_copy(execution, host, primary);
+  execution.fence("verify primary checkpoint state content");
+  std::vector<Complex> values(host.extent(0));
+  for (std::size_t index = 0; index < values.size(); ++index) {
+    values[index] = host(index);
+  }
+  const auto state_bytes = pipeline_checkpoint_detail::serialize_state_bytes(values);
+  if (checkpoint_identity_detail::checkpoint_state_digest(state_bytes) !=
+      receipt.state_digest()) {
+    throw std::invalid_argument(
+        "primary state bytes do not match checkpoint receipt");
+  }
 }
 
 }  // namespace teuk

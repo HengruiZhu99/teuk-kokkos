@@ -43,6 +43,17 @@ struct Plus2LiveSourceCapability {
   bool angular_projection_graph_qualified = false;
   RadialDiscretization radial_discretization = RadialDiscretization::D42;
   std::uint64_t generation = 0;
+  Plus2SourceNormalization source_normalization =
+      plus2_source_normalization;
+};
+
+template <class ExecSpace>
+struct Plus2RouteBStageSourceInputs {
+  Plus2RouteBCurvatureTowerStage tower;
+  Plus2RouteBCurvatureSpatialProvider<ExecSpace>* curvature = nullptr;
+  Plus2SourcePrimitiveSpatialProducer<ExecSpace>* primitive = nullptr;
+  Plus2SourceOuterSpatialProducer<ExecSpace>* outer = nullptr;
+  Plus2RouteBCurvatureOffsets offsets{};
 };
 
 struct Plus2LiveSourceWriteTarget {
@@ -572,6 +583,36 @@ class Plus2LiveSourceComposition {
   [[nodiscard]] const Plus2SourceValueSpatialWorkspace& source_workspace()
       const { return source_; }
 
+  [[nodiscard]] Plus2SourceProvenanceAuthority
+  source_provenance_authority() const {
+    return Plus2SourceProvenanceAuthority{this};
+  }
+
+  template <class Provider>
+  [[nodiscard]] Plus2BoundStageSourceAdapter<execution_space, Provider>
+  bind_routeb_stage_source(Provider& provider) {
+    return Plus2BoundStageSourceAdapter<execution_space, Provider>{*this,
+                                                                   provider};
+  }
+
+  template <class PrimaryStage, class Provider>
+  void evaluate_bound_routeb_stage(
+      const execution_space& execution, const double stage_time,
+      const PrimaryStage& primary_stage,
+      const Plus2StageSourceTarget& target, Provider& provider) {
+    auto inputs = provider.routeb_stage_source_inputs(
+        execution, stage_time, primary_stage, target);
+    if (inputs.curvature == nullptr || inputs.primitive == nullptr ||
+        inputs.outer == nullptr) {
+      throw std::invalid_argument(
+          "spin +2 bound Route-B source provider is incomplete");
+    }
+    evaluate_routeb_stage(execution, stage_time, inputs.tower,
+                          target.accepted_activation, target,
+                          *inputs.curvature, *inputs.primitive, *inputs.outer,
+                          inputs.offsets);
+  }
+
   // Complete local Route-B scientific path. The five-level tower is one
   // immutable common-stage object. Curvature is evaluated exactly once, then
   // levels h0/h1/h2 are packed into the concrete primitive producer without a
@@ -713,6 +754,10 @@ class Plus2LiveSourceComposition {
     finish_stage(execution, stage_time, curvature, bianchi_derivatives,
                  capability, target,
                  std::forward<OuterProducer>(outer_producer));
+  }
+
+  [[nodiscard]] std::uint64_t last_generation() const {
+    return last_generation_;
   }
 
  private:
@@ -904,6 +949,7 @@ class Plus2LiveSourceComposition {
         radial_discretization_ == RadialDiscretization::D105;
     if (capability.radial_discretization != radial_discretization_ ||
         !supports_nested_fourth_order ||
+        capability.source_normalization != plus2_source_normalization ||
         capability.generation == 0 ||
         capability.generation <= last_generation_ ||
         !capability.curvature_bound_to_common_rk_stage ||

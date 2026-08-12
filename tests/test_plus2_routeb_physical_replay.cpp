@@ -236,19 +236,17 @@ class RouteBPhysicalStageGraph {
   }
 
   template <class PrimaryStage>
-  void evaluate_source(const Execution& execution, const double stage_time,
-                       const PrimaryStage& primary_stage,
-                       const teuk::Plus2StageSourceTarget& target) {
+  teuk::Plus2RouteBStageSourceInputs<Execution>
+  routeb_stage_source_inputs(const Execution&, const double stage_time,
+                             const PrimaryStage& primary_stage,
+                             const teuk::Plus2StageSourceTarget&) {
     common_stage_identity_ =
         common_stage_identity_ && primary_stage.data() == last_primary_stage_;
     source_stage_times_.push_back(stage_time);
     source_generations_.push_back(generation_);
-    composition_.evaluate_routeb_stage(
-        execution, stage_time,
-        teuk::Plus2RouteBCurvatureTowerStage{
-            generation_, coordinator_.reconstruction_values(),
-            coordinator_.reconstruction_stamps()},
-        target.accepted_activation, target, curvature_, primitive_, outer_);
+    return {{generation_, coordinator_.reconstruction_values(),
+             coordinator_.reconstruction_stamps()},
+            &curvature_, &primitive_, &outer_, {}};
   }
 
   [[nodiscard]] std::size_t value_count() const {
@@ -343,7 +341,8 @@ class RouteBPhysicalReplayFixture {
                         C(companion_initial, -0.3 * companion_initial));
     }
     if (mode == teuk::Plus2RunMode::Replay) {
-      pipeline_.initialize_replay_primary(execution_, initial_primary_);
+      pipeline_.initialize_replay_primary_validation_only(execution_,
+                                                          initial_primary_);
     } else {
       Kokkos::deep_copy(execution_, concurrent_primary_, initial_primary_);
     }
@@ -355,11 +354,7 @@ class RouteBPhysicalReplayFixture {
                            const auto& input, const auto& output) {
       graph_.evaluate_primary_rhs(execution, time, input, output);
     };
-    auto source = [&](const Execution& execution, const double time,
-                      const auto& primary,
-                      const teuk::Plus2StageSourceTarget target) {
-      graph_.evaluate_source(execution, time, primary, target);
-    };
+    auto bound_source = composition_.bind_routeb_stage_source(graph_);
     auto angular = [&](const Execution& execution, const double,
                        const auto& companion,
                        const auto& angular_laplacian) {
@@ -381,11 +376,11 @@ class RouteBPhysicalReplayFixture {
       const double time = replay_step * static_cast<double>(step_index);
       if (pipeline_.configuration().mode == teuk::Plus2RunMode::Replay) {
         pipeline_.advance_replay(execution_, time, replay_step, activation,
-                                 primary_rhs, source, angular);
+                                 primary_rhs, bound_source, angular);
       } else {
         pipeline_.advance_concurrent(
             execution_, concurrent_primary_, time, replay_step, activation,
-            primary_rhs, source, angular, primary_workspace_);
+            primary_rhs, bound_source, angular, primary_workspace_);
       }
     }
     Kokkos::Tools::Experimental::set_begin_fence_callback(nullptr);
@@ -478,8 +473,6 @@ class RouteBPhysicalReplayFixture {
     configuration.reduction_mode = "free_damped";
     configuration.reduction_damping = 0.17;
     configuration.dissipation = 0.0;
-    configuration.primary_checkpoint_identity =
-        "routeb-physical-replay-initial-v1";
     configuration.git_commit = teuk::plus2_build_git_commit();
     configuration.runtime_config_schema_version = 1;
     return configuration;

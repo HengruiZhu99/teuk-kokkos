@@ -16,6 +16,45 @@ reviewer obtains its exact object name with `git rev-parse HEAD`; the pushed
 identity was also reported to the owner after the push. A commit cannot contain
 its own future SHA without changing that SHA.
 
+## Post-handoff Milestone-1 termination addendum
+
+After the original handoff, work began on physical checkpoint provenance.  The
+owner subsequently stopped further implementation and transferred scientific
+assessment to a remote reviewer.  This addendum records that later frozen state
+without rewriting the evidence below, which remains the history of commit
+`c841ef7d4ee5ed2df635e88d37f777e099646095` and its scientific parent.
+
+The later candidate adds a version-4 companion format; bitwise binding of the
+actual companion `M,a,L`, radial/theta coordinates, radial operator, reduction,
+damping and dissipation; exact-step `dt` latching; a domain-separated SHA-256
+primary checkpoint receipt derived from the validated serialized bytes; and a
+physical multi-node checkpoint round trip.  Before the final source-authority
+edit, the dirty development tree passed `396/396` Serial unit cases.  That
+result is not exact-final-candidate evidence: no new full build or CTest was
+launched after the stop instruction.
+
+Milestone 1 remains open.  Independent read-only review identified these
+unclosed boundaries:
+
+1. public header-level checkpoint `detail` functions can still be called
+   without the pipeline token and therefore can mint or consume a nominally
+   pipeline-derived binding;
+2. the source trajectory now distinguishes a concrete Route-B adapter from
+   validation-only callbacks, but checkpoint-only authority is still a bare
+   composition identity and does not bind all source registry/band/geometry
+   semantics;
+3. the verified primary receipt binds exact bytes, state count, time and step,
+   but not the signed registry and angular-band metadata that the companion
+   independently claims;
+4. explicit progress-mismatch and raw-versus-bound codec boundary regressions
+   remain incomplete; and
+5. the last mechanical source-adapter completion received only an incremental
+   Serial `teuk_tests` build, which passed; the binary and CTest were not run.
+
+Accordingly this later commit is a preserved fail-closed research handoff, not
+a completed checkpoint milestone.  `plus2.enabled=true` remains rejected and
+the spin-minus-two production path remains the only enabled runtime path.
+
 ## Executive termination state
 
 The external-review remediation is a coherent and extensively tested

@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <stdexcept>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "teuk/plus2_live_source_composition.hpp"
@@ -599,6 +600,44 @@ TEST_CASE("plus2 live composition rejects absent scri and common-stage authority
     stage_rejected = true;
   }
   CHECK(stage_rejected);
+  capability = fixture.capability();
+  capability.source_normalization =
+      static_cast<teuk::Plus2SourceNormalization>(99);
+  Kokkos::deep_copy(fixture.execution, fixture.forcing,
+                    teuk::Complex(7.0, -2.0));
+  fixture.execution.fence("set live source authority mutation sentinel");
+  int source_calls = 0;
+  int outer_calls = 0;
+  auto source_delegate = complete_source_producer(1.0);
+  auto outer_delegate = complete_outer_producer();
+  auto counted_source = [&](auto&&... arguments) {
+    ++source_calls;
+    source_delegate(std::forward<decltype(arguments)>(arguments)...);
+  };
+  auto counted_outer = [&](auto&&... arguments) {
+    ++outer_calls;
+    outer_delegate(std::forward<decltype(arguments)>(arguments)...);
+  };
+  bool normalization_rejected = false;
+  try {
+    fixture.composition.evaluate_stage(
+        fixture.execution, 0.0, fixture.reconstruction, fixture.tangent,
+        fixture.second, {fixture.curvature, fixture.curvature_stamps},
+        {fixture.bianchi_derivatives, fixture.bianchi_derivative_stamps},
+        capability, activation, {activation, fixture.forcing},
+        counted_source, counted_outer);
+  } catch (const std::invalid_argument&) {
+    normalization_rejected = true;
+  }
+  CHECK(normalization_rejected);
+  CHECK(source_calls == 0);
+  CHECK(outer_calls == 0);
+  CHECK(fixture.composition.last_generation() == 0);
+  const auto unchanged_forcing = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, fixture.forcing);
+  for (std::size_t index = 0; index < unchanged_forcing.size(); ++index) {
+    CHECK(unchanged_forcing.data()[index] == teuk::Complex(7.0, -2.0));
+  }
 }
 
 TEST_CASE("plus2 live composition stage allocates and fences nothing") {

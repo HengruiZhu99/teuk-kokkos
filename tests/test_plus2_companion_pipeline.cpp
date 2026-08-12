@@ -3,13 +3,21 @@
 #include <Kokkos_Core.hpp>
 
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <filesystem>
+#include <limits>
+#include <string>
 #include <type_traits>
 #include <vector>
 
 #include "teuk/plus2_companion_pipeline.hpp"
+#include "teuk/plus2_live_source_composition.hpp"
+#include "teuk/angular.hpp"
+#include "teuk/pipeline_checkpoint.hpp"
 
 namespace {
 
@@ -45,6 +53,19 @@ struct CopyTripleToStridedFunctor {
     destination[field * destination_field_stride +
                 radial * destination_radial_stride +
                 theta * destination_theta_stride] = source[flat];
+  }
+};
+
+struct SpoofedNormalizedSourceAdapter {
+  int* calls;
+
+  [[nodiscard]] teuk::Plus2SourceNormalization source_normalization() const {
+    return teuk::plus2_source_normalization;
+  }
+
+  template <class... Arguments>
+  void operator()(Arguments&&...) {
+    ++*calls;
   }
 };
 
@@ -90,6 +111,33 @@ teuk::TeukolskyParameters plus2_parameters() {
   return parameters;
 }
 
+teuk::Plus2ReplayConfiguration complete_pipeline_configuration(
+    const teuk::UniformRadialGrid& grid,
+    const std::vector<double>& theta_coordinates,
+    const teuk::ReductionEvolution reduction,
+    const double dissipation, const double time_step = 0.0) {
+  auto configuration =
+      pipeline_configuration(grid.size(), theta_coordinates.size());
+  const auto parameters = plus2_parameters();
+  configuration.mass = parameters.mass;
+  configuration.spin = parameters.spin;
+  configuration.compactification_length =
+      parameters.compactification_length;
+  configuration.radial_coordinates.resize(grid.size());
+  for (std::size_t radial = 0; radial < grid.size(); ++radial) {
+    configuration.radial_coordinates[radial] = grid.coordinate(radial);
+  }
+  configuration.theta_coordinates = theta_coordinates;
+  configuration.time_step = time_step;
+  configuration.reduction_mode =
+      reduction == teuk::ReductionEvolution::FreeDamped
+          ? "free_damped"
+          : "stage_constrained";
+  configuration.reduction_damping = parameters.reduction_damping;
+  configuration.dissipation = dissipation;
+  return configuration;
+}
+
 template <class View>
 void zero_angular_action(const teuk::ExecutionSpace& execution, const double,
                          const auto&, const View& angular_laplacian) {
@@ -129,10 +177,527 @@ struct ManufacturedResult {
   std::vector<teuk::Complex> state;
 };
 
+class TemporaryPlus2Checkpoint {
+ public:
+  TemporaryPlus2Checkpoint() {
+    root_ = std::filesystem::temp_directory_path() /
+            ("teuk-plus2-pipeline-checkpoint-" +
+             std::to_string(std::chrono::steady_clock::now()
+                                .time_since_epoch()
+                                .count()));
+    std::filesystem::create_directory(root_);
+  }
+  ~TemporaryPlus2Checkpoint() {
+    std::error_code ignored;
+    std::filesystem::remove_all(root_, ignored);
+  }
+  std::filesystem::path path() const { return root_ / "companion.bin"; }
+  std::filesystem::path mismatched_path() const {
+    return root_ / "mismatched-companion.bin";
+  }
+  std::filesystem::path primary_path() const { return root_ / "primary"; }
+  std::filesystem::path other_primary_path() const {
+    return root_ / "other-primary";
+  }
+
+ private:
+  std::filesystem::path root_;
+};
+
+TEST_CASE("plus2 companion derives and rejects every physical PDE mismatch") {
+  const teuk::UniformRadialGrid grid(8, 0.0, 0.38);
+  const std::vector<double> theta{0.41, 1.2, 2.47};
+  const auto parameters = plus2_parameters();
+  constexpr double dissipation = 0.003;
+  auto canonical = complete_pipeline_configuration(
+      grid, theta, teuk::ReductionEvolution::FreeDamped, dissipation, 0.02);
+
+  std::vector<std::function<void(teuk::Plus2ReplayConfiguration&)>> corrupt{
+      [](auto& value) { value.mass = 1.01; },
+      [](auto& value) { value.spin = -0.31; },
+      [](auto& value) { value.compactification_length = 1.71; },
+      [](auto& value) {
+        value.radial_coordinates[3] = std::nextafter(
+            value.radial_coordinates[3],
+            std::numeric_limits<double>::infinity());
+      },
+      [](auto& value) { value.radial_coordinates[0] = -0.0; },
+      [](auto& value) {
+        value.theta_coordinates[1] = std::nextafter(
+            value.theta_coordinates[1],
+            std::numeric_limits<double>::infinity());
+      },
+      [](auto& value) { value.reduction_mode = "stage_constrained"; },
+      [](auto& value) { value.reduction_damping = 1.41; },
+      [](auto& value) { value.dissipation = 0.004; },
+      [](auto& value) {
+        value.source_normalization =
+            static_cast<teuk::Plus2SourceNormalization>(99);
+      }};
+  for (std::size_t index = 0; index < corrupt.size(); ++index) {
+    auto candidate = canonical;
+    corrupt[index](candidate);
+    pipeline_allocations = 0;
+    Kokkos::Tools::Experimental::set_allocate_data_callback(
+        count_pipeline_allocation);
+    bool rejected = false;
+    try {
+      teuk::Plus2CompanionPipeline pipeline(
+          candidate, grid, parameters, theta,
+          teuk::ReductionEvolution::FreeDamped, dissipation,
+          "plus2_physical_mismatch_" + std::to_string(index));
+      static_cast<void>(pipeline);
+    } catch (const std::invalid_argument&) {
+      rejected = true;
+    }
+    Kokkos::Tools::Experimental::set_allocate_data_callback(nullptr);
+    CHECK(rejected);
+    CHECK(pipeline_allocations == 0);
+  }
+
+  auto partial = pipeline_configuration(grid.size(), theta.size());
+  partial.mass = parameters.mass;
+  bool partial_rejected = false;
+  try {
+    teuk::Plus2CompanionPipeline pipeline(
+        partial, grid, parameters, theta,
+        teuk::ReductionEvolution::FreeDamped, dissipation,
+        "plus2_partial_physical_provenance");
+    static_cast<void>(pipeline);
+  } catch (const std::invalid_argument&) {
+    partial_rejected = true;
+  }
+  CHECK(partial_rejected);
+
+  auto derived = pipeline_configuration(grid.size(), theta.size());
+  derived.time_step = 0.02;
+  teuk::Plus2CompanionPipeline pipeline(
+      derived, grid, parameters, theta,
+      teuk::ReductionEvolution::FreeDamped, dissipation,
+      "plus2_derived_physical_provenance");
+  CHECK(pipeline.configuration().mass == parameters.mass);
+  CHECK(pipeline.configuration().spin == parameters.spin);
+  CHECK(pipeline.configuration().compactification_length ==
+        parameters.compactification_length);
+  CHECK(pipeline.configuration().radial_coordinates ==
+        canonical.radial_coordinates);
+  CHECK(pipeline.configuration().theta_coordinates == theta);
+  CHECK(pipeline.configuration().reduction_mode == "free_damped");
+  CHECK(pipeline.configuration().reduction_damping ==
+        parameters.reduction_damping);
+  CHECK(pipeline.configuration().dissipation == dissipation);
+}
+
+TEST_CASE("plus2 timestep mismatch rejects before callbacks or state mutation") {
+  const teuk::ExecutionSpace execution;
+  const teuk::UniformRadialGrid grid(8, 0.0, 0.3);
+  constexpr double configured_step = 0.03;
+  auto configuration = pipeline_configuration(8, 1);
+  configuration.time_step = configured_step;
+  teuk::Plus2CompanionPipeline pipeline(
+      configuration, grid, plus2_parameters(), {0.91},
+      teuk::ReductionEvolution::FreeDamped);
+  pipeline.initialize_zero(execution);
+  Kokkos::View<teuk::Complex*, teuk::MemorySpace> primary(
+      "plus2_wrong_step_primary", 2);
+  Kokkos::parallel_for(
+      "plus2_wrong_step_initialize_primary",
+      Kokkos::RangePolicy<teuk::ExecutionSpace>(execution, 0, 2),
+      KOKKOS_LAMBDA(const std::size_t index) {
+        primary(index) = teuk::Complex(0.3 + 0.2 * index, -0.1 * index);
+      });
+  Kokkos::deep_copy(execution, pipeline.companion_state(),
+                    teuk::Complex(0.4, -0.2));
+  execution.fence("initialize wrong-step sentinels");
+  const auto primary_before = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, primary);
+  const auto companion_before = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, pipeline.companion_state());
+  teuk::DeviceRK4Workspace<teuk::Complex, teuk::ExecutionSpace> workspace(2);
+  int primary_calls = 0;
+  int source_calls = 0;
+  int angular_calls = 0;
+  const auto primary_rhs = [&](const auto& e, const double, const auto& input,
+                               const auto& output) {
+    ++primary_calls;
+    Kokkos::parallel_for(
+        "plus2_wrong_step_primary_rhs",
+        Kokkos::RangePolicy<teuk::ExecutionSpace>(e, 0, input.extent(0)),
+        ZeroComplexFunctor{output.data()});
+  };
+  const auto source = [&](const auto& e, const double, const auto&,
+                          const teuk::Plus2StageSourceTarget target) {
+    ++source_calls;
+    Kokkos::parallel_for(
+        "plus2_wrong_step_source",
+        Kokkos::RangePolicy<teuk::ExecutionSpace>(
+            e, 0, target.coordinate_forcing.size()),
+        ZeroComplexFunctor{target.coordinate_forcing.data()});
+  };
+  const auto angular = [&](const auto& e, const double, const auto&,
+                           const auto& laplacian) {
+    ++angular_calls;
+    Kokkos::parallel_for(
+        "plus2_wrong_step_angular",
+        Kokkos::RangePolicy<teuk::ExecutionSpace>(e, 0, laplacian.size()),
+        ZeroComplexFunctor{laplacian.data()});
+  };
+  bool rejected = false;
+  try {
+    pipeline.advance_concurrent_validation_only(
+        execution, primary, 0.0,
+        std::nextafter(configured_step,
+                       std::numeric_limits<double>::infinity()),
+        {}, primary_rhs, source, angular, workspace);
+  } catch (const std::invalid_argument&) {
+    rejected = true;
+  }
+  CHECK(rejected);
+  CHECK(primary_calls == 0);
+  CHECK(source_calls == 0);
+  CHECK(angular_calls == 0);
+  const auto primary_after = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, primary);
+  const auto companion_after = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, pipeline.companion_state());
+  for (std::size_t index = 0; index < primary_before.extent(0); ++index) {
+    CHECK(primary_after(index) == primary_before(index));
+  }
+  for (std::size_t index = 0; index < companion_before.extent(0); ++index) {
+    CHECK(companion_after(index) == companion_before(index));
+  }
+
+}
+
+TEST_CASE("plus2 source authority rejects before dt callbacks or mutation") {
+  const teuk::ExecutionSpace execution;
+  const teuk::UniformRadialGrid grid(8, 0.0, 0.38);
+  teuk::Plus2CompanionPipeline pipeline(
+      pipeline_configuration(8, 1), grid, plus2_parameters(), {0.91},
+      teuk::ReductionEvolution::FreeDamped, 0.0,
+      "plus2_wrong_source_authority");
+  pipeline.initialize_zero(execution);
+  Kokkos::View<teuk::Complex*, teuk::MemorySpace> primary(
+      "plus2_wrong_source_primary", 2);
+  Kokkos::deep_copy(execution, primary, teuk::Complex(2.0, -1.0));
+  Kokkos::deep_copy(execution, pipeline.companion_state(),
+                    teuk::Complex(-3.0, 4.0));
+  execution.fence("set wrong-source mutation sentinels");
+  const auto primary_before = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, primary);
+  const auto companion_before = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, pipeline.companion_state());
+  teuk::DeviceRK4Workspace<teuk::Complex, teuk::ExecutionSpace> workspace(2);
+  int primary_calls = 0;
+  int source_calls = 0;
+  int angular_calls = 0;
+  const auto primary_rhs = [&](const auto&, const double, const auto&,
+                               const auto&) { ++primary_calls; };
+  auto source = [&](const auto&, const double, const auto&,
+                    const teuk::Plus2StageSourceTarget) { ++source_calls; };
+  const auto angular = [&](const auto&, const double, const auto&,
+                           const auto&) { ++angular_calls; };
+  bool rejected = false;
+  try {
+    pipeline.advance_concurrent(execution, primary, 0.0, 0.02, {},
+                                primary_rhs, source, angular, workspace);
+  } catch (const std::invalid_argument&) {
+    rejected = true;
+  }
+  CHECK(rejected);
+  CHECK(pipeline.configuration().time_step == 0.0);
+  CHECK(primary_calls == 0);
+  CHECK(source_calls == 0);
+  CHECK(angular_calls == 0);
+  const auto primary_after = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, primary);
+  const auto companion_after = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, pipeline.companion_state());
+  for (std::size_t index = 0; index < primary_before.extent(0); ++index) {
+    CHECK(primary_after(index) == primary_before(index));
+  }
+  for (std::size_t index = 0; index < companion_before.extent(0); ++index) {
+    CHECK(companion_after(index) == companion_before(index));
+  }
+
+  SpoofedNormalizedSourceAdapter spoofed{&source_calls};
+  rejected = false;
+  try {
+    pipeline.advance_concurrent(execution, primary, 0.0, 0.02, {},
+                                primary_rhs, spoofed, angular, workspace);
+  } catch (const std::invalid_argument&) {
+    rejected = true;
+  }
+  CHECK(rejected);
+  CHECK(pipeline.configuration().time_step == 0.0);
+  CHECK(primary_calls == 0);
+  CHECK(source_calls == 0);
+  CHECK(angular_calls == 0);
+}
+
+TEST_CASE("plus2 physical checkpoint derives and binds the actual PDE") {
+  constexpr std::size_t radial_count = 24;
+  constexpr std::size_t theta_count = 3;
+  constexpr double step = 0.02;
+  constexpr double dissipation = 0.003;
+  const teuk::ExecutionSpace execution;
+  const teuk::UniformRadialGrid grid(radial_count, 0.0, 0.38);
+  const auto angular_grid = teuk::angular::gauss_legendre(theta_count);
+  std::vector<double> theta(theta_count);
+  for (std::size_t index = 0; index < theta_count; ++index) {
+    theta[index] = angular_grid.theta(index);
+  }
+  teuk::Plus2SpatialThetaView cos_theta("checkpoint_source_cos", theta_count);
+  teuk::Plus2SpatialThetaView sin_theta("checkpoint_source_sin", theta_count);
+  auto host_cos = Kokkos::create_mirror_view(cos_theta);
+  auto host_sin = Kokkos::create_mirror_view(sin_theta);
+  for (std::size_t index = 0; index < theta_count; ++index) {
+    host_cos(index) = std::cos(theta[index]);
+    host_sin(index) = std::sin(theta[index]);
+  }
+  Kokkos::deep_copy(execution, cos_theta, host_cos);
+  Kokkos::deep_copy(execution, sin_theta, host_sin);
+  const teuk::ModeRegistry source_registry({-1, 0, 1}, {-1, 1}, {0});
+  const teuk::KerrParameters source_background{
+      plus2_parameters().mass, plus2_parameters().spin,
+      plus2_parameters().compactification_length};
+  teuk::Plus2LiveSourceComposition<> source_composition(
+      execution, source_registry, grid, source_background, 2, theta_count,
+      cos_theta, sin_theta, "checkpoint_source_authority",
+      teuk::RadialDiscretization::D105);
+  TemporaryPlus2Checkpoint checkpoint;
+  const teuk::ModeRegistry primary_registry({-1, 0, 1});
+  const teuk::UniformRadialGrid primary_grid(radial_count, 0.0, 0.38);
+  const teuk::KerrParameters primary_background{
+      plus2_parameters().mass, plus2_parameters().spin,
+      plus2_parameters().compactification_length};
+  constexpr int primary_ell_max = 3;
+  constexpr int primary_theta_count = 6;
+  teuk::SpatialPipeline primary_pipeline(
+      execution, primary_registry, primary_grid, primary_ell_max,
+      primary_theta_count, primary_background,
+      plus2_parameters().reduction_damping, 0.0,
+      teuk::ReductionEvolution::FreeDamped,
+      "plus2_physical_checkpoint_primary", {},
+      teuk::RadialDiscretization::D105);
+  teuk::PipelineCheckpointConfiguration primary_configuration;
+  primary_configuration.background = primary_background;
+  primary_configuration.ell_max_first = primary_ell_max;
+  primary_configuration.ell_max_second = primary_ell_max;
+  primary_configuration.theta_nodes = primary_theta_count;
+  primary_configuration.reduction_damping =
+      plus2_parameters().reduction_damping;
+  primary_configuration.dissipation = 0.0;
+  primary_configuration.reduction = teuk::ReductionEvolution::FreeDamped;
+  primary_configuration.time_step = step;
+  primary_configuration.source_policy = primary_pipeline.source_policy();
+  primary_configuration.radial_discretization =
+      teuk::RadialDiscretization::D105;
+  const auto primary_identity = teuk::write_pipeline_checkpoint(
+      execution, checkpoint.primary_path(), primary_pipeline,
+      primary_registry, primary_configuration, {2.0 * step, 2});
+  const auto source_authority =
+      source_composition.source_provenance_authority();
+  std::vector<teuk::Complex> expected;
+  {
+    auto configuration = pipeline_configuration(radial_count, theta_count);
+    configuration.time_step = step;
+    configuration.radial_discretization = teuk::RadialDiscretization::D105;
+    teuk::Plus2CompanionPipeline pipeline(
+        configuration, grid, plus2_parameters(), theta,
+        teuk::ReductionEvolution::FreeDamped, dissipation,
+        "plus2_physical_checkpoint_writer", teuk::RadialDiscretization::D105);
+    pipeline.initialize_zero(execution);
+    const auto state = pipeline.companion_state();
+    Kokkos::parallel_for(
+        "plus2_physical_checkpoint_state",
+        Kokkos::RangePolicy<teuk::ExecutionSpace>(execution, 0, state.size()),
+        KOKKOS_LAMBDA(const std::size_t index) {
+          state(index) = teuk::Complex(
+              0.01 * static_cast<double>(index + 1),
+              -0.003 * static_cast<double>(index));
+        });
+    execution.fence("initialize physical plus2 checkpoint state");
+    const auto host = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{},
+                                                           state);
+    expected.resize(host.extent(0));
+    for (std::size_t index = 0; index < expected.size(); ++index) {
+      expected[index] = host(index);
+    }
+    Kokkos::View<teuk::Complex*, teuk::MemorySpace> wrong_primary(
+        "wrong_primary_checkpoint_state",
+        primary_pipeline.storage().flat_state().extent(0));
+    Kokkos::deep_copy(execution, wrong_primary,
+                      primary_pipeline.storage().flat_state());
+    Kokkos::parallel_for(
+        "alter_wrong_primary_checkpoint_state",
+        Kokkos::RangePolicy<teuk::ExecutionSpace>(execution, 0, 1),
+        KOKKOS_LAMBDA(const std::size_t) {
+          wrong_primary(0) += teuk::Complex(1.0, 0.0);
+        });
+    bool wrong_primary_rejected = false;
+    try {
+      static_cast<void>(pipeline.save_checkpoint(
+          execution, checkpoint.mismatched_path(), {2.0 * step, 2}, {},
+          primary_identity, wrong_primary, source_authority));
+    } catch (const std::invalid_argument&) {
+      wrong_primary_rejected = true;
+    }
+    CHECK(wrong_primary_rejected);
+    CHECK(!std::filesystem::exists(checkpoint.mismatched_path()));
+    const auto saved = pipeline.save_checkpoint(
+        execution, checkpoint.path(), {2.0 * step, 2}, {}, primary_identity,
+        primary_pipeline.storage().flat_state(), source_authority);
+    CHECK(saved.mass == plus2_parameters().mass);
+    CHECK(saved.spin == plus2_parameters().spin);
+    CHECK(saved.compactification_length ==
+          plus2_parameters().compactification_length);
+    CHECK(saved.radial_coordinates ==
+          pipeline.configuration().radial_coordinates);
+    CHECK(saved.theta_coordinates == theta);
+    CHECK(saved.time_step == step);
+    CHECK(saved.primary_checkpoint_identity ==
+          primary_identity.content_identity());
+  }
+
+  auto restore_configuration =
+      pipeline_configuration(radial_count, theta_count);
+  restore_configuration.mode = teuk::Plus2RunMode::Replay;
+  restore_configuration.primary_value_count =
+      primary_pipeline.storage().flat_state().extent(0);
+  restore_configuration.initial_policy = teuk::Plus2InitialPolicy::Checkpoint;
+  restore_configuration.checkpoint = checkpoint.path();
+  restore_configuration.time_step = step;
+  restore_configuration.radial_discretization =
+      teuk::RadialDiscretization::D105;
+  teuk::Plus2CompanionPipeline restored(
+      restore_configuration, grid, plus2_parameters(), theta,
+      teuk::ReductionEvolution::FreeDamped, dissipation,
+      "plus2_physical_checkpoint_reader", teuk::RadialDiscretization::D105);
+  const auto restored_metadata = restored.initialize_checkpoint(
+      execution, primary_pipeline.storage().flat_state(), primary_identity,
+      source_authority);
+  CHECK(restored_metadata.progress.time == 2.0 * step);
+  CHECK(restored_metadata.progress.step == 2);
+  const auto restored_host = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, restored.companion_state());
+  for (std::size_t index = 0; index < expected.size(); ++index) {
+    CHECK(restored_host(index) == expected[index]);
+  }
+
+  teuk::SpatialPipeline other_primary_pipeline(
+      execution, primary_registry, primary_grid, primary_ell_max,
+      primary_theta_count, primary_background,
+      plus2_parameters().reduction_damping, 0.0,
+      teuk::ReductionEvolution::FreeDamped,
+      "plus2_physical_checkpoint_other_primary", {},
+      teuk::RadialDiscretization::D105);
+  Kokkos::deep_copy(execution, other_primary_pipeline.storage().flat_state(),
+                    teuk::Complex(1.0, 0.0));
+  const auto other_primary_receipt = teuk::write_pipeline_checkpoint(
+      execution, checkpoint.other_primary_path(), other_primary_pipeline,
+      primary_registry, primary_configuration, {2.0 * step, 2});
+  teuk::Plus2CompanionPipeline wrong_receipt_restore(
+      restore_configuration, grid, plus2_parameters(), theta,
+      teuk::ReductionEvolution::FreeDamped, dissipation,
+      "plus2_physical_checkpoint_wrong_receipt",
+      teuk::RadialDiscretization::D105);
+  Kokkos::deep_copy(execution, wrong_receipt_restore.companion_state(),
+                    teuk::Complex(9.0, -5.0));
+  execution.fence("set wrong receipt companion sentinel");
+  bool wrong_receipt_rejected = false;
+  try {
+    static_cast<void>(wrong_receipt_restore.initialize_checkpoint(
+        execution, other_primary_pipeline.storage().flat_state(),
+        other_primary_receipt, source_authority));
+  } catch (const std::runtime_error&) {
+    wrong_receipt_rejected = true;
+  }
+  CHECK(wrong_receipt_rejected);
+  const auto unchanged_wrong_receipt = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, wrong_receipt_restore.companion_state());
+  for (std::size_t index = 0; index < unchanged_wrong_receipt.extent(0);
+       ++index) {
+    CHECK(unchanged_wrong_receipt(index) == teuk::Complex(9.0, -5.0));
+  }
+  const auto recovered_metadata = wrong_receipt_restore.initialize_checkpoint(
+      execution, primary_pipeline.storage().flat_state(), primary_identity,
+      source_authority);
+  CHECK(recovered_metadata.progress.time == 2.0 * step);
+  const auto recovered_companion = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, wrong_receipt_restore.companion_state());
+  for (std::size_t index = 0; index < expected.size(); ++index) {
+    CHECK(recovered_companion(index) == expected[index]);
+  }
+
+  teuk::Plus2CompanionPipeline wrong_primary_restore(
+      restore_configuration, grid, plus2_parameters(), theta,
+      teuk::ReductionEvolution::FreeDamped, dissipation,
+      "plus2_physical_checkpoint_wrong_primary",
+      teuk::RadialDiscretization::D105);
+  Kokkos::deep_copy(execution, wrong_primary_restore.companion_state(),
+                    teuk::Complex(8.0, -3.0));
+  Kokkos::deep_copy(
+      execution, wrong_primary_restore.orchestrator().replay_primary_state(),
+      teuk::Complex(-7.0, 2.0));
+  Kokkos::View<teuk::Complex*, teuk::MemorySpace> unrelated_primary(
+      "plus2_unrelated_primary",
+      primary_pipeline.storage().flat_state().extent(0));
+  Kokkos::deep_copy(execution, unrelated_primary, teuk::Complex(1.0, 0.0));
+  execution.fence("set wrong primary receipt sentinels");
+  bool wrong_view_rejected = false;
+  try {
+    static_cast<void>(wrong_primary_restore.initialize_checkpoint(
+        execution, unrelated_primary, primary_identity, source_authority));
+  } catch (const std::invalid_argument&) {
+    wrong_view_rejected = true;
+  }
+  CHECK(wrong_view_rejected);
+  const auto unchanged_primary = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{},
+      wrong_primary_restore.orchestrator().replay_primary_state());
+  const auto unchanged_companion = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, wrong_primary_restore.companion_state());
+  for (std::size_t index = 0; index < unchanged_primary.extent(0); ++index) {
+    CHECK(unchanged_primary(index) == teuk::Complex(-7.0, 2.0));
+  }
+  for (std::size_t index = 0; index < unchanged_companion.extent(0); ++index) {
+    CHECK(unchanged_companion(index) == teuk::Complex(8.0, -3.0));
+  }
+
+  auto mismatched_parameters = plus2_parameters();
+  mismatched_parameters.spin = 0.32;
+  teuk::Plus2CompanionPipeline mismatched(
+      restore_configuration, grid, mismatched_parameters, theta,
+      teuk::ReductionEvolution::FreeDamped, dissipation,
+      "plus2_physical_checkpoint_wrong_pde",
+      teuk::RadialDiscretization::D105);
+  Kokkos::deep_copy(execution, mismatched.companion_state(),
+                    teuk::Complex(8.0, -3.0));
+  execution.fence("set physical checkpoint mismatch sentinel");
+  bool rejected = false;
+  try {
+    static_cast<void>(mismatched.initialize_checkpoint(
+        execution, primary_pipeline.storage().flat_state(), primary_identity,
+        source_authority));
+  } catch (const std::runtime_error&) {
+    rejected = true;
+  }
+  CHECK(rejected);
+  const auto unchanged = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, mismatched.companion_state());
+  for (std::size_t index = 0; index < unchanged.extent(0); ++index) {
+    CHECK(unchanged(index) == teuk::Complex(8.0, -3.0));
+  }
+}
+
 TEST_CASE("plus2 companion rejects a replay radial scheme mismatch") {
   auto configuration = pipeline_configuration(16, 1);
   configuration.radial_discretization = teuk::RadialDiscretization::D42;
   const teuk::UniformRadialGrid grid(16, 0.0, 0.38);
+  pipeline_allocations = 0;
+  Kokkos::Tools::Experimental::set_allocate_data_callback(
+      count_pipeline_allocation);
   bool rejected = false;
   try {
     teuk::Plus2CompanionPipeline pipeline(
@@ -143,7 +708,9 @@ TEST_CASE("plus2 companion rejects a replay radial scheme mismatch") {
   } catch (const std::invalid_argument&) {
     rejected = true;
   }
+  Kokkos::Tools::Experimental::set_allocate_data_callback(nullptr);
   CHECK(rejected);
+  CHECK(pipeline_allocations == 0);
 }
 
 TEST_CASE("plus2 companion accepts an explicitly matching D10-5 scheme") {
@@ -224,7 +791,7 @@ ManufacturedResult evolve_manufactured(const int steps) {
   const double step = final_time / static_cast<double>(steps);
   const teuk::SourceActivationState activation{true, 0.0, 1, 0.0};
   for (int n = 0; n < steps; ++n) {
-    pipeline.advance_concurrent(
+    pipeline.advance_concurrent_validation_only(
         execution, primary, step * static_cast<double>(n), step, activation,
         primary_rhs, source_adapter, angular_action, primary_workspace);
   }
@@ -399,8 +966,9 @@ TEST_CASE("plus2 pipeline uses exact common stage times and activation snapshot"
     zero_angular_action(e, t, s, lap);
   };
   const teuk::SourceActivationState activation{true, 0.2, 7, 0.34};
-  pipeline.advance_concurrent(execution, primary, 0.35, 0.08, activation,
-                              primary_rhs, source, angular, workspace);
+  pipeline.advance_concurrent_validation_only(
+      execution, primary, 0.35, 0.08, activation, primary_rhs, source, angular,
+      workspace);
   execution.fence("finish plus2 stage-time test");
   const std::array<double, 4> expected{0.35, 0.39, 0.39, 0.43};
   CHECK(primary_times.size() == expected.size());
@@ -458,8 +1026,9 @@ TEST_CASE("plus2 companion cannot feed back into the primary trajectory") {
   const teuk::SourceActivationState inactive{};
   for (int n = 0; n < 5; ++n) {
     const double time = 0.03 * static_cast<double>(n);
-    pipeline.advance_concurrent(execution, coupled, time, 0.03, inactive, rhs,
-                                source, angular, coupled_ws);
+    pipeline.advance_concurrent_validation_only(
+        execution, coupled, time, 0.03, inactive, rhs, source, angular,
+        coupled_ws);
     teuk::device_classical_rk4_step(execution, standalone, time, 0.03, rhs,
                                     standalone_ws);
   }
@@ -505,8 +1074,9 @@ TEST_CASE("plus2 reduction constraint is preserved or damped as selected") {
                             const auto& s, const auto& lap) {
       zero_angular_action(e, t, s, lap);
     };
-    pipeline.advance_concurrent(execution, primary, 0.0, step, {},
-                                primary_rhs, source, angular, workspace);
+    pipeline.advance_concurrent_validation_only(
+        execution, primary, 0.0, step, {}, primary_rhs, source, angular,
+        workspace);
     execution.fence("finish plus2 reduction evolution");
     const auto host = Kokkos::create_mirror_view_and_copy(
         Kokkos::HostSpace{}, pipeline.companion_storage().state());
@@ -562,8 +1132,9 @@ TEST_CASE("plus2 pipeline timestep keeps allocations fences and pointers stable"
   Kokkos::Tools::Experimental::set_allocate_data_callback(
       count_pipeline_allocation);
   Kokkos::Tools::Experimental::set_begin_fence_callback(count_pipeline_fence);
-  pipeline.advance_concurrent(execution, primary, 0.0, 0.01, {}, primary_rhs,
-                              source, angular, workspace);
+  pipeline.advance_concurrent_validation_only(
+      execution, primary, 0.0, 0.01, {}, primary_rhs, source, angular,
+      workspace);
   Kokkos::Tools::Experimental::set_begin_fence_callback(nullptr);
   Kokkos::Tools::Experimental::set_allocate_data_callback(nullptr);
   execution.fence("finish plus2 allocation-free pipeline step");

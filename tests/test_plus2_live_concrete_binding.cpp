@@ -440,7 +440,7 @@ BindingResult run_binding_evolution(const double amplitude, const int steps,
                                                angular_laplacian.size()),
           ZeroBindingAngularFunctor{angular_laplacian.data()});
     };
-    fixture.pipeline->evaluate_common_stage_rhs(
+    fixture.pipeline->evaluate_common_stage_rhs_validation_only(
         execution, stage_time, primary_stage, companion_stage, output,
         activation, source, angular);
   };

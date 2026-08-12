@@ -8,6 +8,13 @@
 > complex-frequency QNM interior fixture, the complete failed-approach ledger,
 > and the final standalone-only verdict. This document remains the detailed
 > remediation derivation; use the termination report for final status.
+>
+> A post-handoff Milestone-1 checkpoint candidate was later frozen at the
+> owner's stop instruction.  Its exact incomplete status and the distinction
+> between pre-final-WIP `396/396` Serial evidence and the final incremental
+> build-only check are recorded in the termination-report addendum.  Nothing in this historical
+> report should be read as closing those later codec/source/primary-provenance
+> authority blockers.
 
 Date: 2026-08-12 (America/New_York)
 

@@ -7,6 +7,15 @@
 > promotion gates. This prompt remains the detailed skeptical audit procedure;
 > where dated status differs, the termination report is later authority.
 
+> **Post-handoff checkpoint note.** A later frozen Milestone-1 candidate may be
+> present at `HEAD`.  Read the post-handoff addendum in the termination report
+> and `docs/PRODUCTION_BASELINE.md` before accepting any version-4 checkpoint
+> claim.  The last edit received only an incremental Serial build, not a unit or
+> CTest run, after the owner's stop instruction, and
+> the repository explicitly records unresolved codec-token, source-authority,
+> primary-registry/band, and progress-test boundaries.  Treat `396/396` only as
+> pre-final-WIP Serial evidence.
+
 You have access only to this Git repository. You do **not** have access to the
 author's ignored `run/` directory, historical checkpoints, waveform CSVs,
 plots, build trees, `/tmp` virtual environments, GPU driver logs, or any other

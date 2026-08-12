@@ -134,6 +134,28 @@ objects, reject every retained duplicate before mutation, bind advance `dt`,
 bind a content identity for primary state, and bind the concrete source
 normalization capability.
 
+Post-baseline termination status: a version-4 checkpoint-provenance repair was
+implemented as an unpromoted Milestone-1 candidate.  It derives canonical
+physical fields from the actual companion objects, uses binary64-bit
+coordinate/PDE comparisons, binds `dt` before callbacks, replaces the free
+primary label with a domain-separated SHA-256 receipt issued from validated
+checkpoint buffers, and adds a physical multi-node fail-before-mutate round
+trip.  This is material progress, but the starting blocker is **not yet closed**.
+
+The frozen candidate still needs independent closure of three authority
+boundaries: the pipeline-bound codec implementation must not be callable
+through public `detail` functions; the source receipt must bind the exact
+concrete source configuration and complete qualified trajectory rather than a
+composition identity alone; and the verified primary receipt must carry and
+cross-check the signed registry/band metadata claimed by the companion.  Tests
+for progress mismatches and raw-versus-bound codec boundaries also remain
+incomplete.  The last source-authority hardening passed an incremental Serial
+`teuk_tests` build but was not executed after the owner's stop instruction, so
+the earlier `396/396` result is pre-final-WIP evidence, not exact-final-candidate
+qualification.  Atomic publication and
+selection of both checkpoint artifacts remains a later production-integration
+gate.
+
 ### Route-B live endpoint readiness is not conditioned
 
 The constrained endpoint moment formulas and standalone exact/high-precision

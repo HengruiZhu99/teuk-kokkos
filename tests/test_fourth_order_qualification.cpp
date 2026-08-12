@@ -201,7 +201,7 @@ CoupledEvolutionError evolve_stage_coupled_manufactured(const int step_count) {
   const teuk::SourceActivationState active{true, 0.0, 1, 0.0};
   const double step = final_time / static_cast<double>(step_count);
   for (int n = 0; n < step_count; ++n) {
-    pipeline.advance_concurrent(
+    pipeline.advance_concurrent_validation_only(
         execution, primary, step * static_cast<double>(n), step, active,
         primary_rhs, source, angular_action, primary_workspace);
   }

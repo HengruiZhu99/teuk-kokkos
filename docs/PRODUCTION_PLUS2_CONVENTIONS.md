@@ -138,6 +138,27 @@ endpoint-method versions, activation state, exact code commit, and a content
 identity for the primary checkpoint. Validation and checksum checks precede
 all state mutation. Old formats are never silently reinterpreted.
 
+Companion checkpoint version 4 is the first format with the explicit binding
+schema `plus2-pipeline-derived-v1`.  Runtime radial and theta coordinate bits
+are authoritative: the two-ULP allowance used to verify that a serialized
+uniform grid is internally uniform is not a tolerance for checkpoint-to-PDE
+matching.  The latter remains exact.  The primary identity is SHA-256 over
+domain-separated, length-framed exact `metadata.txt` and `state.bin` bytes.
+Only the primary codec can issue the non-aggregate verified receipt, and it
+hashes the same in-memory buffers that it writes or validates; an
+inspection-only path digest is not authority.  Companion save/restore also
+matches the actual primary view bytes and exact step/time to the receipt before
+companion mutation.  FNV-1a remains the fast internal state-corruption
+checksum, not an identity.
+Zero initialization may bind one positive finite `dt` on its first step;
+checkpoint restore requires it before loading and all subsequent steps match
+exactly.  Source normalization is the typed
+`S0OverR7CompleteFieldFactorV2` capability.  Production checkpoint authority
+must bind that capability to the exact concrete live-source configuration and
+to every accepted trajectory step.  A composition identity or a caller-owned
+callback alone is insufficient.  Raw callback paths remain validation-only and
+must not mint pipeline-derived checkpoints.
+
 Physical replay means primary, curvature, source, and companion traverse one
 restored trajectory. Structural callback equality is not physical replay.
 

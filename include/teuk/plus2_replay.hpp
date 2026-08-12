@@ -45,10 +45,8 @@ struct Plus2ReplayConfiguration {
   std::string reduction_mode;
   double reduction_damping = 0.0;
   double dissipation = 0.0;
-  std::uint32_t source_normalization_version =
-      plus2_source_normalization_version;
-  std::string source_normalization_name = plus2_source_normalization_name;
-  std::string primary_checkpoint_identity;
+  Plus2SourceNormalization source_normalization =
+      plus2_source_normalization;
   std::string git_commit;
   int runtime_config_schema_version = 0;
 };
@@ -126,6 +124,13 @@ inline void validate_configuration(const Plus2ReplayConfiguration& config) {
         "plus2 evolving mode requires a runtime config schema version");
   }
   (void)radial_discretization_name(config.radial_discretization);
+  plus2_checkpoint_detail::validate_physical_problem(
+      config.mass, config.spin, config.compactification_length,
+      config.radial_coordinates, config.theta_coordinates, config.time_step,
+      config.reduction_mode, config.reduction_damping, config.dissipation,
+      plus2_provenance_binding_schema, config.source_normalization,
+      PrimaryCheckpointContentIdentity{}, config.radial_count,
+      config.theta_count, false, false);
 }
 
 inline void validate_accepted_activation(const SourceActivationState& state,
@@ -137,6 +142,7 @@ inline void validate_accepted_activation(const SourceActivationState& state,
       (state.active &&
        (state.activation_time < 0.0 || state.activation_time > accepted_time)) ||
       (!state.active && state.activation_time != -1.0) ||
+      state.last_eligibility_time < -1.0 ||
       state.last_eligibility_time > accepted_time) {
     throw std::invalid_argument(
         "invalid accepted source-activation state for plus2 step");
@@ -145,12 +151,24 @@ inline void validate_accepted_activation(const SourceActivationState& state,
 
 }  // namespace plus2_replay_detail
 
-inline Plus2CheckpointExpectations plus2_checkpoint_expectations(
-    const Plus2ReplayConfiguration& configuration) {
+inline Plus2CheckpointExpectations bound_plus2_checkpoint_expectations(
+    const Plus2ReplayConfiguration& configuration,
+    const VerifiedPrimaryCheckpointReceipt& primary_receipt) {
   plus2_replay_detail::validate_configuration(configuration);
   if (!plus2_replay_detail::evolves_companion(configuration.mode)) {
     throw std::invalid_argument(
         "only an evolving plus2 mode has checkpoint expectations");
+  }
+  if (!(configuration.time_step > 0.0)) {
+    throw std::invalid_argument(
+        "plus2 checkpoint expectations require a resolved time step and "
+        "primary checkpoint identity");
+  }
+  if (configuration.mode == Plus2RunMode::Replay &&
+      configuration.primary_value_count !=
+          primary_receipt.state_value_count()) {
+    throw std::invalid_argument(
+        "plus2 replay storage does not match the verified primary state");
   }
   Plus2CheckpointExpectations expected;
   expected.parent_modes = configuration.parent_modes;
@@ -175,12 +193,18 @@ inline Plus2CheckpointExpectations plus2_checkpoint_expectations(
   expected.reduction_mode = configuration.reduction_mode;
   expected.reduction_damping = configuration.reduction_damping;
   expected.dissipation = configuration.dissipation;
-  expected.source_normalization_version =
-      configuration.source_normalization_version;
-  expected.source_normalization_name = configuration.source_normalization_name;
+  expected.provenance_binding_schema = plus2_provenance_binding_schema;
+  expected.source_normalization = configuration.source_normalization;
   expected.primary_checkpoint_identity =
-      configuration.primary_checkpoint_identity;
+      primary_receipt.content_identity();
+  expected.progress = {primary_receipt.time(), primary_receipt.step()};
   return expected;
+}
+
+inline Plus2CheckpointExpectations plus2_checkpoint_expectations(
+    const Plus2ReplayConfiguration&) {
+  throw std::logic_error(
+      "config-only plus2 checkpoint expectations are not physically bound");
 }
 
 // Standalone orchestration slice for the passive spin +2 state. It is not a
@@ -241,22 +265,40 @@ class Plus2ReplayOrchestrator {
   }
 
   Plus2CheckpointMetadata initialize_checkpoint(
-      const ExecutionSpace& execution) {
+      const ExecutionSpace&) {
+    throw std::logic_error(
+        "config-only plus2 checkpoint restore is validation-only and disabled");
+  }
+
+  template <class PrimaryStateView>
+  void initialize_replay_primary_validation_only(
+      const ExecutionSpace& execution,
+      const PrimaryStateView& initial_primary) {
+    initialize_replay_primary_unchecked(execution, initial_primary);
+  }
+
+ private:
+  friend class Plus2CompanionPipeline;
+
+  Plus2CheckpointMetadata initialize_checkpoint_bound(
+      const ExecutionSpace& execution,
+      const Plus2CheckpointExpectations& expected,
+      const Plus2PipelineCheckpointAuthority authority) {
     require_companion();
     if (configuration_.initial_policy != Plus2InitialPolicy::Checkpoint) {
       throw std::logic_error("plus2 run does not request a checkpoint");
     }
-    const auto expected = plus2_checkpoint_expectations(configuration_);
-    auto metadata = load_plus2_checkpoint(
-        execution, configuration_.checkpoint, companion_, expected);
+    auto metadata = load_plus2_pipeline_checkpoint(
+        authority, execution, configuration_.checkpoint, companion_, expected);
     companion_initialized_ = true;
     restored_accepted_time_ = metadata.progress.time;
     return metadata;
   }
 
   template <class PrimaryStateView>
-  void initialize_replay_primary(const ExecutionSpace& execution,
-                                 const PrimaryStateView& initial_primary) {
+  void initialize_replay_primary_unchecked(
+      const ExecutionSpace& execution,
+      const PrimaryStateView& initial_primary) {
     static_assert(PrimaryStateView::rank == 1,
                   "replay primary state must be rank one");
     if (!replay_primary_ ||
@@ -268,6 +310,7 @@ class Plus2ReplayOrchestrator {
     replay_primary_initialized_ = true;
   }
 
+ public:
   template <class PrimaryStateView, class PrimaryRightHandSide,
             class CompanionRightHandSide>
   void advance_concurrent(
@@ -337,6 +380,11 @@ class Plus2ReplayOrchestrator {
         throw std::invalid_argument(
             "plus2 replay continuation does not match restored accepted time");
       }
+    }
+    if (configuration_.time_step == 0.0) configuration_.time_step = step;
+    if (step != configuration_.time_step) {
+      throw std::invalid_argument(
+          "plus2 step does not match the resolved companion time step");
     }
     const SourceActivationState activation_snapshot = accepted_activation;
     auto stage_companion_rhs =

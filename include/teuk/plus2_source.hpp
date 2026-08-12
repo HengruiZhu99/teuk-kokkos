@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
+#include <string>
 
 #include "teuk/background.hpp"
 #include "teuk/modes.hpp"
@@ -12,9 +13,34 @@
 namespace teuk {
 
 inline constexpr std::size_t plus2_compact_source_ledger_term_count = 51;
-inline constexpr std::uint32_t plus2_source_normalization_version = 2;
+enum class Plus2SourceNormalization : std::uint32_t {
+  S0OverR7CompleteFieldFactorV2 = 2
+};
+
+inline constexpr Plus2SourceNormalization plus2_source_normalization =
+    Plus2SourceNormalization::S0OverR7CompleteFieldFactorV2;
+inline constexpr std::uint32_t plus2_source_normalization_version =
+    static_cast<std::uint32_t>(plus2_source_normalization);
 inline constexpr const char* plus2_source_normalization_name =
     "plus2_s0_over_r7_complete_field_factor_v2";
+
+inline const char* plus2_source_normalization_name_of(
+    const Plus2SourceNormalization normalization) {
+  switch (normalization) {
+    case Plus2SourceNormalization::S0OverR7CompleteFieldFactorV2:
+      return plus2_source_normalization_name;
+  }
+  throw std::invalid_argument("unsupported spin +2 source normalization");
+}
+
+inline Plus2SourceNormalization parse_plus2_source_normalization(
+    const std::uint32_t version, const std::string& name) {
+  if (version == plus2_source_normalization_version &&
+      name == plus2_source_normalization_name) {
+    return plus2_source_normalization;
+  }
+  throw std::invalid_argument("unsupported spin +2 source normalization");
+}
 
 // Standalone compact raw fixed-tetrad spin +2 source.  The cancellation-safe
 // constructions of Z0=Psi0/R^5 and Z1=Psi1/R^4 are deliberately outside this

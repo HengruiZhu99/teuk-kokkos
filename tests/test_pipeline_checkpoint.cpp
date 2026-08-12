@@ -224,9 +224,13 @@ TEST_CASE("full spatial pipeline checkpoint resumes the real RK4 trajectory") {
 
   TemporaryTestDirectory temporary;
   const auto checkpoint = temporary.path() / "checkpoint-000002";
-  teuk::write_pipeline_checkpoint(
+  const auto written_identity = teuk::write_pipeline_checkpoint(
       execution, checkpoint, interrupted, registry, configuration,
       {checkpoint_step * configuration.time_step, checkpoint_step});
+  teuk::validate_primary_checkpoint_content_identity(
+      written_identity.content_identity());
+  CHECK(written_identity.content_identity() ==
+        teuk::inspect_pipeline_checkpoint_content_identity(checkpoint));
   CHECK(std::filesystem::is_regular_file(
       checkpoint / teuk::pipeline_checkpoint_metadata_file));
   CHECK(std::filesystem::is_regular_file(
@@ -288,19 +292,21 @@ TEST_CASE("full spatial pipeline checkpoint resumes the real RK4 trajectory") {
       metadata.configuration.dissipation, metadata.configuration.reduction,
       "checkpoint_restarted", metadata.configuration.source_policy,
       metadata.configuration.radial_discretization);
-  const auto loaded = teuk::load_pipeline_checkpoint(
+  const auto loaded = teuk::load_pipeline_checkpoint_verified(
       execution, checkpoint, restarted, restored_registry,
       metadata.configuration);
+  CHECK(loaded.receipt == written_identity);
   const auto loaded_state = pipeline_state(execution, restarted);
   CHECK(loaded_state == state_at_checkpoint);
   CHECK(restarted.source_activation_state().active);
   CHECK_NEAR(restarted.source_activation_state().activation_time, 3.0e-5,
              0.0);
 
-  for (std::uint64_t step = loaded.progress.step; step < total_steps; ++step) {
+  for (std::uint64_t step = loaded.metadata.progress.step; step < total_steps;
+       ++step) {
     restarted.step(execution, static_cast<double>(step) *
-                                  loaded.configuration.time_step,
-                   loaded.configuration.time_step);
+                                  loaded.metadata.configuration.time_step,
+                   loaded.metadata.configuration.time_step);
   }
   execution.fence("finish restarted checkpoint trajectory");
   const auto expected = pipeline_state(execution, uninterrupted);

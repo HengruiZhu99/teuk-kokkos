@@ -24,6 +24,11 @@
 
 namespace {
 
+teuk::PrimaryCheckpointContentIdentity test_primary_identity() {
+  return teuk::primary_checkpoint_identity_from_hex(
+      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+}
+
 int replay_step_allocations = 0;
 
 void count_replay_step_allocation(
@@ -54,7 +59,6 @@ teuk::Plus2ReplayConfiguration concurrent_configuration() {
   config.reduction_mode = "free_damped";
   config.reduction_damping = 0.1;
   config.dissipation = 0.0;
-  config.primary_checkpoint_identity = "primary-test-checkpoint-sha256";
   return config;
 }
 
@@ -180,7 +184,8 @@ Trajectory run_replay() {
   set_primary(initial_primary);
   teuk::Plus2ReplayOrchestrator orchestrator(replay_configuration());
   orchestrator.initialize_zero(execution);
-  orchestrator.initialize_replay_primary(execution, initial_primary);
+  orchestrator.initialize_replay_primary_validation_only(execution,
+                                                         initial_primary);
 
   std::vector<double> primary_times;
   std::vector<double> companion_times;
@@ -325,8 +330,8 @@ void convert_plus2_checkpoint_to_legacy_v2(
   const auto scheme_match = std::search(bytes.begin(), bytes.end(),
                                         marker.begin(), marker.end());
   if (scheme_match == bytes.end()) throw std::runtime_error("scheme not found");
-  // Retain the v2 radial-scheme field and erase exactly the newly introduced
-  // v3 physical-problem block following it.
+  // Retain the v2 radial-scheme field and erase exactly the current v4
+  // physical-problem and typed-binding block following it.
   const auto provenance_begin = scheme_match + marker.size();
   const auto string_size = [](const std::string& value) {
     return sizeof(std::uint64_t) + value.size();
@@ -335,9 +340,12 @@ void convert_plus2_checkpoint_to_legacy_v2(
       3 * sizeof(double) +
       (sizeof(std::uint64_t) + 2 * sizeof(double)) * 2 + sizeof(double) +
       string_size("free_damped") + 2 * sizeof(double) +
+      string_size(teuk::plus2_unbound_codec_schema) +
       sizeof(std::uint32_t) +
       string_size(teuk::plus2_source_normalization_name) +
-      string_size("primary-test-checkpoint-sha256");
+      string_size(teuk::checkpoint_content_hash_algorithm) +
+      string_size(teuk::primary_checkpoint_state_schema) +
+      string_size(std::string(64, '0'));
   bytes.erase(provenance_begin, provenance_begin + provenance_size);
   std::ofstream output(path, std::ios::binary | std::ios::trunc);
   output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
@@ -367,7 +375,7 @@ teuk::Plus2CheckpointMetadata checkpoint_metadata() {
   metadata.reduction_mode = "free_damped";
   metadata.reduction_damping = 0.1;
   metadata.dissipation = 0.005;
-  metadata.primary_checkpoint_identity = "primary-test-checkpoint-sha256";
+  metadata.primary_checkpoint_identity = test_primary_identity();
   return metadata;
 }
 
@@ -394,7 +402,8 @@ teuk::Plus2CheckpointExpectations checkpoint_expectations() {
   expected.reduction_mode = "free_damped";
   expected.reduction_damping = 0.1;
   expected.dissipation = 0.005;
-  expected.primary_checkpoint_identity = "primary-test-checkpoint-sha256";
+  expected.primary_checkpoint_identity = test_primary_identity();
+  expected.progress = {0.5, 5};
   return expected;
 }
 
@@ -443,16 +452,14 @@ TEST_CASE("plus2 modes and initial policies are strict and typed") {
   const teuk::Plus2ReplayOrchestrator diagnostic_orchestrator(diagnostic);
   CHECK(!diagnostic_orchestrator.has_companion());
 
-  const auto replay = replay_configuration();
-  const auto expected = teuk::plus2_checkpoint_expectations(replay);
-  CHECK(expected.ell_max_first == replay.ell_max_first);
-  CHECK(expected.ell_max_second == replay.ell_max_second);
-  CHECK(expected.linear_method == replay.linear_method);
-  CHECK(expected.second_method == replay.second_method);
-  CHECK(expected.initial_policy == replay.initial_policy);
-  CHECK(expected.git_commit == replay.git_commit);
-  CHECK(expected.runtime_config_schema_version ==
-        replay.runtime_config_schema_version);
+  bool unbound_expectations_rejected = false;
+  try {
+    static_cast<void>(
+        teuk::plus2_checkpoint_expectations(replay_configuration()));
+  } catch (const std::logic_error&) {
+    unbound_expectations_rejected = true;
+  }
+  CHECK(unbound_expectations_rejected);
 }
 
 TEST_CASE("plus2 concurrent and deterministic replay are bitwise identical") {
@@ -531,12 +538,10 @@ TEST_CASE("plus2 checkpoint round trip validates before device mutation") {
   CHECK(saved.reduction_mode == "free_damped");
   CHECK(saved.reduction_damping == 0.1);
   CHECK(saved.dissipation == 0.005);
-  CHECK(saved.source_normalization_version ==
-        teuk::plus2_source_normalization_version);
-  CHECK(saved.source_normalization_name ==
-        teuk::plus2_source_normalization_name);
-  CHECK(saved.primary_checkpoint_identity ==
-        "primary-test-checkpoint-sha256");
+  CHECK(saved.provenance_binding_schema ==
+        teuk::plus2_unbound_codec_schema);
+  CHECK(saved.source_normalization == teuk::plus2_source_normalization);
+  CHECK(saved.primary_checkpoint_identity == test_primary_identity());
   CHECK(saved.state_checksum != 0);
 
   Kokkos::deep_copy(execution, storage.flat_state(), teuk::Complex(0.0, 0.0));
@@ -637,9 +642,20 @@ TEST_CASE("plus2 checkpoint rejects every scientific metadata mismatch") {
       [](auto& expected) { expected.reduction_mode = "stage_constrained"; },
       [](auto& expected) { expected.reduction_damping = 0.2; },
       [](auto& expected) { expected.dissipation = 0.006; },
-      [](auto& expected) { ++expected.source_normalization_version; },
-      [](auto& expected) { expected.source_normalization_name += "-wrong"; },
-      [](auto& expected) { expected.primary_checkpoint_identity += "-wrong"; }};
+      [](auto& expected) { expected.provenance_binding_schema += "-wrong"; },
+      [](auto& expected) {
+        expected.source_normalization =
+            static_cast<teuk::Plus2SourceNormalization>(99);
+      },
+      [](auto& expected) {
+        expected.primary_checkpoint_identity.digest[7] ^= 0x01U;
+      },
+      [](auto& expected) {
+        expected.primary_checkpoint_identity.state_schema += "-wrong";
+      },
+      [](auto& expected) {
+        expected.primary_checkpoint_identity.algorithm = "fnv1a64";
+      }};
 
   for (const auto& modify : mismatches) {
     auto expected = baseline;
@@ -737,9 +753,41 @@ TEST_CASE("plus2 legacy checkpoints lacking physical provenance are rejected") {
   for (std::size_t i = 0; i < unchanged.extent(0); ++i) {
     CHECK(unchanged(i) == teuk::Complex(9.0, -4.0));
   }
+
+  TemporaryCheckpoint legacy_v3;
+  auto legacy_metadata = checkpoint_metadata();
+  legacy_metadata.version =
+      teuk::plus2_checkpoint_legacy_unbound_pde_version;
+  legacy_metadata.radial_count = storage.radial_count();
+  legacy_metadata.theta_count = storage.theta_count();
+  std::vector<teuk::Complex> legacy_values(storage.value_count(),
+                                            teuk::Complex(1.0, -2.0));
+  legacy_metadata.state_checksum =
+      teuk::plus2_checkpoint_detail::checksum(legacy_values);
+  {
+    std::ofstream output(legacy_v3.path(),
+                         std::ios::binary | std::ios::trunc);
+    teuk::plus2_checkpoint_detail::write_payload(
+        output, legacy_metadata, legacy_values);
+  }
+  Kokkos::deep_copy(execution, storage.flat_state(),
+                    teuk::Complex(6.0, -5.0));
+  rejected = false;
+  try {
+    static_cast<void>(teuk::load_plus2_checkpoint(
+        execution, legacy_v3.path(), storage, expected));
+  } catch (const std::runtime_error&) {
+    rejected = true;
+  }
+  CHECK(rejected);
+  const auto unchanged_v3 = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, storage.flat_state());
+  for (std::size_t i = 0; i < unchanged_v3.extent(0); ++i) {
+    CHECK(unchanged_v3(i) == teuk::Complex(6.0, -5.0));
+  }
 }
 
-TEST_CASE("plus2 replay continuation is bound to restored accepted time") {
+TEST_CASE("config-only plus2 checkpoint restore is rejected before mutation") {
   const teuk::ExecutionSpace execution;
   TemporaryCheckpoint checkpoint;
   auto storage = teuk::Plus2CompanionStorage::enabled(
@@ -761,39 +809,22 @@ TEST_CASE("plus2 replay continuation is bound to restored accepted time") {
   config.initial_policy = teuk::Plus2InitialPolicy::Checkpoint;
   config.checkpoint = checkpoint.path();
   teuk::Plus2ReplayOrchestrator orchestrator(config);
-  const auto restored = orchestrator.initialize_checkpoint(execution);
-  CHECK(restored.progress.time == 0.2);
-  Kokkos::View<teuk::Complex*> primary("time_bound_primary", 2);
-  teuk::DeviceRK4Workspace<teuk::Complex, teuk::ExecutionSpace> workspace(2);
-  const auto zero_rhs = [](const teuk::ExecutionSpace& stage_execution,
-                           const double, const auto&, const auto& output) {
-    Kokkos::deep_copy(stage_execution, output, teuk::Complex{});
-  };
-  const auto zero_companion_rhs =
-      [](const teuk::ExecutionSpace& stage_execution, const double,
-         const auto&, const auto&, const auto& output,
-         const teuk::SourceActivationState) {
-        Kokkos::deep_copy(stage_execution, output, teuk::Complex{});
-      };
-  const teuk::SourceActivationState activation{true, 0.1, 2, 0.1};
+  Kokkos::deep_copy(execution, orchestrator.companion_state(),
+                    teuk::Complex(6.0, -2.0));
+  execution.fence("set config-only restore mutation sentinel");
   bool rejected = false;
   try {
-    orchestrator.advance_concurrent(execution, primary, 0.1, 0.1, activation,
-                                    zero_rhs, zero_companion_rhs, workspace);
-  } catch (const std::invalid_argument&) {
+    static_cast<void>(orchestrator.initialize_checkpoint(execution));
+  } catch (const std::logic_error&) {
     rejected = true;
   }
   CHECK(rejected);
-  orchestrator.advance_concurrent(execution, primary, 0.2, 0.1, activation,
-                                  zero_rhs, zero_companion_rhs, workspace);
-  rejected = false;
-  try {
-    orchestrator.advance_concurrent(execution, primary, 0.2, 0.1, activation,
-                                    zero_rhs, zero_companion_rhs, workspace);
-  } catch (const std::invalid_argument&) {
-    rejected = true;
+  CHECK(!orchestrator.initialized());
+  const auto unchanged = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, orchestrator.companion_state());
+  for (std::size_t index = 0; index < unchanged.extent(0); ++index) {
+    CHECK(unchanged(index) == teuk::Complex(6.0, -2.0));
   }
-  CHECK(rejected);
 }
 
 TEST_CASE("plus2 checkpoint rejects representation metadata corruption") {
@@ -847,6 +878,14 @@ TEST_CASE("plus2 step rejects inconsistent accepted activation before RHS") {
   teuk::DeviceRK4Workspace<teuk::Complex, teuk::ExecutionSpace> workspace(2);
   teuk::Plus2ReplayOrchestrator orchestrator(concurrent_configuration());
   orchestrator.initialize_zero(execution);
+  Kokkos::deep_copy(execution, primary, teuk::Complex(4.0, -1.0));
+  Kokkos::deep_copy(execution, orchestrator.companion_state(),
+                    teuk::Complex(-2.0, 3.0));
+  execution.fence("set invalid activation mutation sentinels");
+  const auto primary_before = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, primary);
+  const auto companion_before = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, orchestrator.companion_state());
   int calls = 0;
   const auto primary_rhs = [&](const auto&, double, const auto&, const auto&) {
     ++calls;
@@ -865,4 +904,49 @@ TEST_CASE("plus2 step rejects inconsistent accepted activation before RHS") {
   }
   CHECK(rejected);
   CHECK(calls == 0);
+  rejected = false;
+  try {
+    orchestrator.advance_concurrent(
+        execution, primary, 0.2, 0.1,
+        teuk::SourceActivationState{
+            false, -1.0, 0,
+            std::nextafter(-1.0,
+                           -std::numeric_limits<double>::infinity())},
+        primary_rhs,
+        companion_rhs, workspace);
+  } catch (const std::invalid_argument&) {
+    rejected = true;
+  }
+  CHECK(rejected);
+  CHECK(calls == 0);
+  const auto primary_after = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, primary);
+  const auto companion_after = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, orchestrator.companion_state());
+  for (std::size_t index = 0; index < primary_before.extent(0); ++index) {
+    CHECK(primary_after(index) == primary_before(index));
+  }
+  for (std::size_t index = 0; index < companion_before.extent(0); ++index) {
+    CHECK(companion_after(index) == companion_before(index));
+  }
+
+  teuk::Plus2ReplayOrchestrator exact_sentinel(concurrent_configuration());
+  exact_sentinel.initialize_zero(execution);
+  int sentinel_calls = 0;
+  const auto zero_primary_rhs = [&](const auto& stage_execution, double,
+                                    const auto&, const auto& output) {
+    ++sentinel_calls;
+    Kokkos::deep_copy(stage_execution, output, teuk::Complex{});
+  };
+  const auto zero_companion_rhs =
+      [&](const auto& stage_execution, double, const auto&, const auto&,
+          const auto& output, const auto&) {
+        ++sentinel_calls;
+        Kokkos::deep_copy(stage_execution, output, teuk::Complex{});
+      };
+  exact_sentinel.advance_concurrent(
+      execution, primary, 0.0, 0.1,
+      teuk::SourceActivationState{false, -1.0, 0, -1.0}, zero_primary_rhs,
+      zero_companion_rhs, workspace);
+  CHECK(sentinel_calls == 8);
 }
