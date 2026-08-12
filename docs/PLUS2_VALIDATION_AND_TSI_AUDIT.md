@@ -1,7 +1,8 @@
 # Spin `+2` homogeneous validation and normalized-TSI audit
 
 Status: normalized Schwarzschild and moderate-Kerr radial, angular, and
-field-level fixtures passed; QNM and endpoint extensions remain open
+field-level fixtures passed; a normalized Schwarzschild QNM interior fixture
+passed; Kerr-QNM and endpoint extensions remain open
 
 Original homogeneous-validation base: `a31e286`
 
@@ -338,14 +339,43 @@ primary material.  A CTest target regenerates it byte-for-byte.  This closes
 the moderate-spin, real-frequency, field-level normalized `T0[h]` gate at
 interior points without changing a production source or evolution path.
 
-### Remaining Kerr and QNM gates
+### Normalized Schwarzschild QNM stored-field fixture
 
-The current fixtures still do not claim a QNM normalization, a Kerr horizon
-endpoint value, or an evolved-companion comparison.  Remaining work is:
+`tools/numerical/generate_plus2_qnm_schwarzschild_fixture.py` supplies a
+complex-frequency fixture rather than relabeling the real-frequency tests.
+The frequency
 
-- supply an independently pinned Schwarzschild QNM mode normalization (not
-  merely the frequency already used by the production ringdown regression)
-  and repeat the complex-frequency hatted-mode and sharp-partner checks;
+```text
+M omega = 0.373671684418042 - 0.08896231568893723 i
+```
+
+is the `s=+2, ell=m=2, n=0, a=0` value evaluated with `qnm` 0.4.4.  The
+generated header pins both the package version and downloaded wheel SHA-256.
+The radial normalization is independent of that frequency solver: it is the
+Berens--Gravely--Lupsasca horizon-in confluent-Heun solution with unit local
+Frobenius leading coefficient.  The Schwarzschild spin-weighted angular
+polynomial has unit coefficient.  Ripley's tetrad, hyperboloidal-time, compact
+radius, and Eq. (21b) factors then fix both raw `Psi0_code` and stored
+`Z_plus`; no TSI factor is inferred.
+
+The fixture contains the `(omega,m)` sector and its exact real-background
+sharp partner `(-conj(omega),-m)`, two interior points, and three independent
+Frobenius/ODE controls.  Its maximum changes are `2.74e-6` then `1.15e-8`.
+`tests/test_plus2_qnm_schwarzschild.cpp` checks the raw/stored scaling, sharp
+symmetry, and the production homogeneous `P,Q,Z` point operator with
+`partial_T=-i omega`; the worst point residual is below the recorded
+binary64 relative gate `5e-14`.
+
+This is not a horizon or scri fixture and does not evolve a companion
+waveform.  It also does not establish a moderate-Kerr QNM normalization or
+validate a quadratic source.
+
+### Remaining Kerr-QNM and endpoint gates
+
+The current fixtures still do not claim a Kerr QNM normalization, a Kerr
+horizon endpoint value, or an evolved-companion comparison.  Remaining work
+is:
+
 - repeat that normalized QNM calculation at moderate Kerr spin;
 - add horizon-regular endpoint data and an evolved-companion comparison.
 
