@@ -6,6 +6,40 @@
 
 namespace teuk {
 
+// The compact source primitive Z0 is Psi0/R^5, whereas the evolved regular
+// field is fixed by Ripley Eq. (21b),
+//
+//   Psi0 = R^5 Z_plus/(L^2-i a R cos(theta))^4.
+//
+// Keep this conversion typed and explicit at the composition boundary.  Its
+// denominator is nonzero throughout the compact exterior, including scri, so
+// it never forms the raw-field 0/0 that the curvature regularizer forbids.
+template <class Scalar>
+KOKKOS_INLINE_FUNCTION Scalar plus2_source_z0_from_evolved_zplus(
+    const Scalar& z_plus, const double radius, const double cos_theta,
+    const double kerr_spin, const double compactification_length) {
+  const double length2 =
+      compactification_length * compactification_length;
+  const Complex denominator(length2,
+                            -kerr_spin * radius * cos_theta);
+  const Complex denominator2 = denominator * denominator;
+  const Complex denominator4 = denominator2 * denominator2;
+  return z_plus / denominator4;
+}
+
+template <class Scalar>
+KOKKOS_INLINE_FUNCTION Scalar plus2_evolved_zplus_from_source_z0(
+    const Scalar& z0, const double radius, const double cos_theta,
+    const double kerr_spin, const double compactification_length) {
+  const double length2 =
+      compactification_length * compactification_length;
+  const Complex denominator(length2,
+                            -kerr_spin * radius * cos_theta);
+  const Complex denominator2 = denominator * denominator;
+  const Complex denominator4 = denominator2 * denominator2;
+  return denominator4 * z0;
+}
+
 // Background angular coefficients not currently stored in
 // KerrBackgroundPoint.  Physical alpha=R*alpha0 and beta=R*beta0.  These are
 // the rotated-Kinnersley coefficients in Ripley et al., arXiv:2010.00162,

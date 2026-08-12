@@ -33,4 +33,23 @@ TEST_CASE("plus2 linear and primitive headers compose linear first") {
   CHECK_COMPLEX_NEAR(t0_metric.h_mm, radius * input.Bsharp, 1.0e-15);
 }
 
+TEST_CASE("plus2 evolved and source curvature variables compose exactly") {
+  const teuk::Complex zplus(0.37, -0.21);
+  for (const double radius : {0.0, 0.23, 0.71}) {
+    const auto z0 = teuk::plus2_source_z0_from_evolved_zplus(
+        zplus, radius, -0.34, 0.91, 1.7);
+    const auto recovered = teuk::plus2_evolved_zplus_from_source_z0(
+        z0, radius, -0.34, 0.91, 1.7);
+    CHECK_COMPLEX_NEAR(recovered, zplus, 2.0e-15);
+  }
+  const double length = 1.7;
+  const double length2 = length * length;
+  const double length4 = length2 * length2;
+  const double length8 = length4 * length4;
+  CHECK_COMPLEX_NEAR(
+      teuk::plus2_source_z0_from_evolved_zplus(zplus, 0.0, 0.8, 0.999,
+                                               length),
+      zplus / length8, 2.0e-16);
+}
+
 }  // namespace
