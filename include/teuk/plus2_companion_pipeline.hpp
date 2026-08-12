@@ -158,6 +158,38 @@ class Plus2CompanionPipeline {
     return orchestrator_.initialize_checkpoint(execution);
   }
 
+  // Allocation-free common-stage RHS seam used by a higher-level triangular
+  // coordinator.  The source adapter may bind additional passive state (for
+  // example the same-stage Bianchi adapters), while the primary and companion
+  // stage views remain read-only.
+  template <class PrimaryStageView, class CompanionStageView,
+            class OutputView, class SourceAdapter, class AngularAction>
+  void evaluate_common_stage_rhs(
+      const ExecutionSpace& execution, const double stage_time,
+      const PrimaryStageView& primary_stage,
+      const CompanionStageView& companion_stage_flat,
+      const OutputView& output_flat,
+      const SourceActivationState& activation_snapshot,
+      SourceAdapter&& source_adapter, AngularAction&& angular_action) {
+    if (!orchestrator_.initialized()) {
+      throw std::logic_error("spin +2 companion state is not initialized");
+    }
+    plus2_replay_detail::validate_accepted_activation(activation_snapshot,
+                                                       stage_time);
+    const auto companion_stage = reshape(companion_stage_flat);
+    const auto output = reshape(output_flat);
+    auto& storage = orchestrator_.companion_storage();
+    angular_action(execution, stage_time, companion_stage,
+                   storage.angular_laplacian());
+    source_adapter(execution, stage_time, primary_stage,
+                   Plus2StageSourceTarget{activation_snapshot, forcing_});
+    evaluate_sbp_teukolsky_full_stage_rhs(
+        execution, radial_grid_, parameters_, theta_, modes_, companion_stage,
+        storage.angular_laplacian(), forcing_, reduction_,
+        storage.radial_scratch(), output, dissipation_strength_, {}, {},
+        discretization_);
+  }
+
   template <class PrimaryStateView>
   void initialize_replay_primary(const ExecutionSpace& execution,
                                  const PrimaryStateView& initial_primary) {
@@ -218,18 +250,9 @@ class Plus2CompanionPipeline {
                const double stage_time, const auto& primary_stage,
                const auto& companion_stage_flat, const auto& output_flat,
                const SourceActivationState activation_snapshot) {
-      const auto companion_stage = reshape(companion_stage_flat);
-      const auto output = reshape(output_flat);
-      auto& storage = orchestrator_.companion_storage();
-      angular_action(stage_execution, stage_time, companion_stage,
-                     storage.angular_laplacian());
-      source_adapter(stage_execution, stage_time, primary_stage,
-                     Plus2StageSourceTarget{activation_snapshot, forcing_});
-      evaluate_sbp_teukolsky_full_stage_rhs(
-          stage_execution, radial_grid_, parameters_, theta_, modes_,
-          companion_stage, storage.angular_laplacian(), forcing_, reduction_,
-          storage.radial_scratch(), output, dissipation_strength_, {}, {},
-          discretization_);
+      evaluate_common_stage_rhs(
+          stage_execution, stage_time, primary_stage, companion_stage_flat,
+          output_flat, activation_snapshot, source_adapter, angular_action);
     };
   }
 

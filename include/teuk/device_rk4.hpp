@@ -233,6 +233,149 @@ void device_one_way_coupled_rk4_step(
           companion_k3.data(), companion_k4.data(), step / 6.0});
 }
 
+// Advance a primary state and two successively passive states through one
+// classical RK4 tableau.  The callable signatures encode the triangular
+// dependency and prevent either passive state from feeding back upstream:
+//
+//   primary_rhs(exec, time, primary_in, primary_out)
+//   middle_rhs(exec, time, primary_in, middle_in, middle_out)
+//   passive_rhs(exec, time, primary_in, middle_in, passive_in, passive_out)
+//
+// All three RHS calls at a stage see the identical stage time and the same
+// primary/middle stage views.  Workspaces are caller-owned and preallocated;
+// this routine performs no allocation, deep copy, or fence.
+template <class PrimaryValue, class MiddleValue, class PassiveValue,
+          class ExecutionSpace, class PrimaryStateView, class MiddleStateView,
+          class PassiveStateView, class PrimaryRightHandSide,
+          class MiddleRightHandSide, class PassiveRightHandSide>
+void device_one_way_three_state_rk4_step(
+    const ExecutionSpace& execution_space, const PrimaryStateView& primary,
+    const MiddleStateView& middle, const PassiveStateView& passive,
+    const double time, const double step, PrimaryRightHandSide&& primary_rhs,
+    MiddleRightHandSide&& middle_rhs, PassiveRightHandSide&& passive_rhs,
+    DeviceRK4Workspace<PrimaryValue, ExecutionSpace>& primary_workspace,
+    DeviceRK4Workspace<MiddleValue, ExecutionSpace>& middle_workspace,
+    DeviceRK4Workspace<PassiveValue, ExecutionSpace>& passive_workspace) {
+  static_assert(PrimaryStateView::rank == 1 && MiddleStateView::rank == 1 &&
+                    PassiveStateView::rank == 1,
+                "three-state one-way RK4 states must be rank-one Views");
+  const std::size_t primary_size = primary.extent(0);
+  const std::size_t middle_size = middle.extent(0);
+  const std::size_t passive_size = passive.extent(0);
+  if (primary_workspace.size() != primary_size ||
+      middle_workspace.size() != middle_size ||
+      passive_workspace.size() != passive_size) {
+    throw std::invalid_argument(
+        "three-state one-way RK4 workspace does not match state");
+  }
+
+  using range_policy = Kokkos::RangePolicy<ExecutionSpace>;
+  const auto primary_stage = primary_workspace.stage;
+  const auto primary_k1 = primary_workspace.k1;
+  const auto primary_k2 = primary_workspace.k2;
+  const auto primary_k3 = primary_workspace.k3;
+  const auto primary_k4 = primary_workspace.k4;
+  const auto middle_stage = middle_workspace.stage;
+  const auto middle_k1 = middle_workspace.k1;
+  const auto middle_k2 = middle_workspace.k2;
+  const auto middle_k3 = middle_workspace.k3;
+  const auto middle_k4 = middle_workspace.k4;
+  const auto passive_stage = passive_workspace.stage;
+  const auto passive_k1 = passive_workspace.k1;
+  const auto passive_k2 = passive_workspace.k2;
+  const auto passive_k3 = passive_workspace.k3;
+  const auto passive_k4 = passive_workspace.k4;
+
+  primary_rhs(execution_space, time, primary, primary_k1);
+  middle_rhs(execution_space, time, primary, middle, middle_k1);
+  passive_rhs(execution_space, time, primary, middle, passive, passive_k1);
+  Kokkos::parallel_for(
+      "teuk_three_state_primary_stage_2",
+      range_policy(execution_space, 0, primary_size),
+      device_rk4_detail::StageFunctor<PrimaryValue>{
+          primary.data(), primary_k1.data(), primary_stage.data(),
+          0.5 * step});
+  Kokkos::parallel_for(
+      "teuk_three_state_middle_stage_2",
+      range_policy(execution_space, 0, middle_size),
+      device_rk4_detail::StageFunctor<MiddleValue>{
+          middle.data(), middle_k1.data(), middle_stage.data(), 0.5 * step});
+  Kokkos::parallel_for(
+      "teuk_three_state_passive_stage_2",
+      range_policy(execution_space, 0, passive_size),
+      device_rk4_detail::StageFunctor<PassiveValue>{
+          passive.data(), passive_k1.data(), passive_stage.data(),
+          0.5 * step});
+
+  primary_rhs(execution_space, time + 0.5 * step, primary_stage, primary_k2);
+  middle_rhs(execution_space, time + 0.5 * step, primary_stage, middle_stage,
+             middle_k2);
+  passive_rhs(execution_space, time + 0.5 * step, primary_stage, middle_stage,
+              passive_stage, passive_k2);
+  Kokkos::parallel_for(
+      "teuk_three_state_primary_stage_3",
+      range_policy(execution_space, 0, primary_size),
+      device_rk4_detail::StageFunctor<PrimaryValue>{
+          primary.data(), primary_k2.data(), primary_stage.data(),
+          0.5 * step});
+  Kokkos::parallel_for(
+      "teuk_three_state_middle_stage_3",
+      range_policy(execution_space, 0, middle_size),
+      device_rk4_detail::StageFunctor<MiddleValue>{
+          middle.data(), middle_k2.data(), middle_stage.data(), 0.5 * step});
+  Kokkos::parallel_for(
+      "teuk_three_state_passive_stage_3",
+      range_policy(execution_space, 0, passive_size),
+      device_rk4_detail::StageFunctor<PassiveValue>{
+          passive.data(), passive_k2.data(), passive_stage.data(),
+          0.5 * step});
+
+  primary_rhs(execution_space, time + 0.5 * step, primary_stage, primary_k3);
+  middle_rhs(execution_space, time + 0.5 * step, primary_stage, middle_stage,
+             middle_k3);
+  passive_rhs(execution_space, time + 0.5 * step, primary_stage, middle_stage,
+              passive_stage, passive_k3);
+  Kokkos::parallel_for(
+      "teuk_three_state_primary_stage_4",
+      range_policy(execution_space, 0, primary_size),
+      device_rk4_detail::StageFunctor<PrimaryValue>{
+          primary.data(), primary_k3.data(), primary_stage.data(), step});
+  Kokkos::parallel_for(
+      "teuk_three_state_middle_stage_4",
+      range_policy(execution_space, 0, middle_size),
+      device_rk4_detail::StageFunctor<MiddleValue>{
+          middle.data(), middle_k3.data(), middle_stage.data(), step});
+  Kokkos::parallel_for(
+      "teuk_three_state_passive_stage_4",
+      range_policy(execution_space, 0, passive_size),
+      device_rk4_detail::StageFunctor<PassiveValue>{
+          passive.data(), passive_k3.data(), passive_stage.data(), step});
+
+  primary_rhs(execution_space, time + step, primary_stage, primary_k4);
+  middle_rhs(execution_space, time + step, primary_stage, middle_stage,
+             middle_k4);
+  passive_rhs(execution_space, time + step, primary_stage, middle_stage,
+              passive_stage, passive_k4);
+  Kokkos::parallel_for(
+      "teuk_three_state_primary_accumulate",
+      range_policy(execution_space, 0, primary_size),
+      device_rk4_detail::AccumulateFunctor<PrimaryValue>{
+          primary.data(), primary_k1.data(), primary_k2.data(),
+          primary_k3.data(), primary_k4.data(), step / 6.0});
+  Kokkos::parallel_for(
+      "teuk_three_state_middle_accumulate",
+      range_policy(execution_space, 0, middle_size),
+      device_rk4_detail::AccumulateFunctor<MiddleValue>{
+          middle.data(), middle_k1.data(), middle_k2.data(), middle_k3.data(),
+          middle_k4.data(), step / 6.0});
+  Kokkos::parallel_for(
+      "teuk_three_state_passive_accumulate",
+      range_policy(execution_space, 0, passive_size),
+      device_rk4_detail::AccumulateFunctor<PassiveValue>{
+          passive.data(), passive_k1.data(), passive_k2.data(),
+          passive_k3.data(), passive_k4.data(), step / 6.0});
+}
+
 template <class Value, class StateView, class RightHandSide>
 void device_classical_rk4_step(
     const StateView& state, const double time, const double step,

@@ -7,8 +7,10 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <iostream>
 #include <memory>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include "teuk/angular.hpp"
@@ -156,6 +158,13 @@ struct ZeroBindingPrimaryRhsFunctor {
   }
 };
 
+struct ZeroBindingAngularFunctor {
+  C* output;
+  KOKKOS_INLINE_FUNCTION void operator()(const std::size_t i) const {
+    output[i] = C{};
+  }
+};
+
 struct WriteBindingOuterFunctor {
   const C* sums;
   const C* tangents;
@@ -196,6 +205,7 @@ struct WriteBindingOuterFunctor {
 static_assert(std::is_trivially_copyable_v<InitializeBindingCurvatureFunctor>);
 static_assert(std::is_trivially_copyable_v<WriteBindingCommonStageFunctor>);
 static_assert(std::is_trivially_copyable_v<ZeroBindingPrimaryRhsFunctor>);
+static_assert(std::is_trivially_copyable_v<ZeroBindingAngularFunctor>);
 static_assert(std::is_trivially_copyable_v<WriteBindingOuterFunctor>);
 
 struct BindingFixture {
@@ -228,9 +238,6 @@ struct BindingFixture {
   teuk::Plus2LiveStampView second_stamps{
       "binding_second_stamps", registry.size(), binding_reconstruction_fields,
       binding_radial_count, binding_theta_count};
-  teuk::Plus2CompanionForcingView forcing{
-      "binding_forcing", registry.targets().size(), binding_radial_count,
-      binding_theta_count};
   Kokkos::View<C*> primary{"binding_primary", 1};
   teuk::DeviceRK4Workspace<C, execution_space> primary_workspace{1};
   std::unique_ptr<teuk::Plus2BianchiTransport<execution_space>> transport;
@@ -238,16 +245,19 @@ struct BindingFixture {
       primitive_producer;
   std::unique_ptr<teuk::Plus2LiveSourceComposition<execution_space>>
       composition;
+  std::unique_ptr<teuk::Plus2CompanionPipeline> pipeline;
 
   explicit BindingFixture(const double amplitude) {
     const auto angular_grid = teuk::angular::gauss_legendre(
         static_cast<int>(binding_theta_count));
+    std::vector<double> theta_coordinates(binding_theta_count);
     auto host_cos = Kokkos::create_mirror_view(cos_theta);
     auto host_sin = Kokkos::create_mirror_view(sin_theta);
     for (std::size_t theta = 0; theta < binding_theta_count; ++theta) {
       host_cos(theta) = angular_grid.x[theta];
       host_sin(theta) =
           std::sqrt(1.0 - angular_grid.x[theta] * angular_grid.x[theta]);
+      theta_coordinates[theta] = std::acos(angular_grid.x[theta]);
     }
     Kokkos::deep_copy(execution, cos_theta, host_cos);
     Kokkos::deep_copy(execution, sin_theta, host_sin);
@@ -265,6 +275,29 @@ struct BindingFixture {
             execution, registry, grid, parameters, binding_ell_max,
             static_cast<int>(binding_theta_count), cos_theta, sin_theta,
             "binding_composition", teuk::RadialDiscretization::D105);
+    teuk::Plus2ReplayConfiguration configuration;
+    configuration.mode = teuk::Plus2RunMode::Concurrent;
+    configuration.ell_max_first = binding_ell_max;
+    configuration.ell_max_second = binding_ell_max;
+    configuration.parent_modes = {0};
+    configuration.target_modes = {0};
+    configuration.radial_count = binding_radial_count;
+    configuration.theta_count = binding_theta_count;
+    configuration.radial_discretization = teuk::RadialDiscretization::D105;
+    configuration.git_commit = teuk::plus2_build_git_commit();
+    configuration.runtime_config_schema_version = 1;
+    teuk::TeukolskyParameters companion_parameters;
+    companion_parameters.mass = parameters.mass;
+    companion_parameters.spin = parameters.spin;
+    companion_parameters.compactification_length =
+        parameters.compactification_length;
+    companion_parameters.spin_weight = 2;
+    companion_parameters.reduction_damping = 1.0;
+    pipeline = std::make_unique<teuk::Plus2CompanionPipeline>(
+        configuration, grid, companion_parameters,
+        std::move(theta_coordinates), teuk::ReductionEvolution::FreeDamped,
+        0.0, "binding_pipeline", teuk::RadialDiscretization::D105);
+    pipeline->initialize_zero(execution);
     teuk::Plus2BianchiStateView initial(
         "binding_initial", registry.size(),
         static_cast<std::size_t>(teuk::Plus2BianchiStateComponent::Count),
@@ -292,26 +325,51 @@ struct BindingFixture {
 
 struct BindingResult {
   std::vector<C> forcing;
-  std::array<std::uint64_t, 4> generations{};
-  std::size_t stage_count = 0;
+  std::vector<C> companion;
+  std::vector<std::uint64_t> generations;
+  std::vector<double> stage_times;
   C primary{};
   int allocations = 0;
   int fences = 0;
+  bool pointers_stable = false;
+  bool common_stage_inputs = false;
   teuk::SourceActivationState activation_before{};
   teuk::SourceActivationState activation_after{};
 };
 
-BindingResult run_binding_step(const double amplitude,
-                               const bool stale_reconstruction,
-                               const bool audit_hot_path,
-                               const bool wrong_shape = false) {
+BindingResult run_binding_evolution(const double amplitude, const int steps,
+                                    const double final_time,
+                                    const bool stale_reconstruction,
+                                    const bool audit_hot_path,
+                                    const bool wrong_shape = false) {
   BindingFixture fixture(amplitude);
   const teuk::SourceActivationState activation{true, 0.0, 3, 0.0};
   BindingResult result;
+  result.generations.reserve(4 * static_cast<std::size_t>(steps));
+  result.stage_times.reserve(4 * static_cast<std::size_t>(steps));
+  std::vector<const C*> primary_rhs_stages;
+  std::vector<const C*> producer_primary_stages;
+  std::vector<const C*> companion_primary_stages;
+  std::vector<double> primary_rhs_times;
+  std::vector<double> producer_times;
+  const std::size_t stage_count = 4 * static_cast<std::size_t>(steps);
+  primary_rhs_stages.reserve(stage_count);
+  producer_primary_stages.reserve(stage_count);
+  companion_primary_stages.reserve(stage_count);
+  primary_rhs_times.reserve(stage_count);
+  producer_times.reserve(stage_count);
+  bool bianchi_stage_views_match = true;
+  const C* const bianchi_state_pointer =
+      fixture.transport->flat_state().data();
+  const C* const bianchi_stage_pointer =
+      fixture.transport->rk_workspace().stage.data();
   result.activation_before = activation;
   auto primary_producer =
-      [&](const execution_space& execution, const double, const auto& primary,
+      [&](const execution_space& execution, const double stage_time,
+          const auto& primary,
           const teuk::Plus2BianchiPrimaryWriteTarget target) {
+        producer_primary_stages.push_back(primary.data());
+        producer_times.push_back(stage_time);
         Kokkos::parallel_for(
             "write_binding_common_stage",
             Kokkos::RangePolicy<execution_space>(
@@ -326,8 +384,11 @@ BindingResult run_binding_step(const double amplitude,
                 target.generation, binding_radial_count, binding_theta_count,
                 stale_reconstruction});
       };
-  auto primary_rhs = [](const execution_space& execution, const double,
-                        const auto&, const auto& output) {
+  auto primary_rhs = [&](const execution_space& execution,
+                         const double stage_time, const auto& input,
+                         const auto& output) {
+    primary_rhs_stages.push_back(input.data());
+    primary_rhs_times.push_back(stage_time);
     Kokkos::parallel_for(
         "zero_binding_primary_rhs",
         Kokkos::RangePolicy<execution_space>(execution, 0, output.extent(0)),
@@ -349,11 +410,22 @@ BindingResult run_binding_step(const double amplitude,
             target.outer_derivative_value_stamps.data(), target.generation,
             binding_radial_count, binding_theta_count});
   };
-  auto observer = [&](const execution_space& execution, const double stage_time,
-                      const std::uint64_t generation,
-                      const teuk::Plus2TransportedCurvatureStage& curvature,
-                      const teuk::Plus2BianchiDerivativeStage& derivatives) {
-    result.generations[result.stage_count++] = generation;
+  auto companion_rhs = [&]
+      (const execution_space& execution, const double stage_time,
+       const std::uint64_t generation, const auto& primary_stage,
+       const auto& bianchi_stage,
+       const teuk::Plus2TransportedCurvatureStage& curvature,
+       const teuk::Plus2BianchiDerivativeStage& derivatives,
+       const auto& companion_stage, const auto& output) {
+    const C* const expected_bianchi_stage =
+        result.generations.size() % 4 == 0 ? bianchi_state_pointer
+                                           : bianchi_stage_pointer;
+    bianchi_stage_views_match =
+        bianchi_stage_views_match &&
+        bianchi_stage.data() == expected_bianchi_stage;
+    companion_primary_stages.push_back(primary_stage.data());
+    result.generations.push_back(generation);
+    result.stage_times.push_back(stage_time);
     const teuk::Plus2PrimitiveReconstructionStage reconstruction{
         generation, wrong_shape ? fixture.wrong_value : fixture.value,
         fixture.tangent, fixture.second,
@@ -361,12 +433,35 @@ BindingResult run_binding_step(const double amplitude,
         fixture.second_stamps};
     const teuk::Plus2LiveSourceCapability capability{
         true, true, true, true, teuk::RadialDiscretization::D105, generation};
-    fixture.composition->evaluate_stage(
-        execution, stage_time, reconstruction, curvature, derivatives,
-        capability, activation, {activation, fixture.forcing},
-        *fixture.primitive_producer, outer);
+    auto source = [&](const execution_space& source_execution,
+                      const double source_time, const auto&,
+                      const teuk::Plus2StageSourceTarget target) {
+      fixture.composition->evaluate_stage(
+          source_execution, source_time, reconstruction, curvature,
+          derivatives, capability, activation, target,
+          *fixture.primitive_producer, outer);
+    };
+    auto angular = [](const execution_space& angular_execution, const double,
+                      const auto&, const auto& angular_laplacian) {
+      Kokkos::parallel_for(
+          "zero_binding_angular_laplacian",
+          Kokkos::RangePolicy<execution_space>(angular_execution, 0,
+                                               angular_laplacian.size()),
+          ZeroBindingAngularFunctor{angular_laplacian.data()});
+    };
+    fixture.pipeline->evaluate_common_stage_rhs(
+        execution, stage_time, primary_stage, companion_stage, output,
+        activation, source, angular);
   };
 
+  const std::array<const C*, 7> pointers_before{
+      fixture.primary.data(),
+      fixture.transport->flat_state().data(),
+      fixture.pipeline->companion_state().data(),
+      fixture.primary_workspace.stage.data(),
+      fixture.transport->rk_workspace().stage.data(),
+      fixture.pipeline->companion_storage().rk_workspace().stage.data(),
+      fixture.pipeline->forcing().data()};
   if (audit_hot_path) {
     binding_allocations = 0;
     binding_fences = 0;
@@ -374,10 +469,16 @@ BindingResult run_binding_step(const double amplitude,
         count_binding_allocation);
     Kokkos::Tools::Experimental::set_begin_fence_callback(count_binding_fence);
   }
-  teuk::device_one_way_bianchi_transport_rk4_step(
-      fixture.execution, fixture.primary, 0.0, 0.01, primary_rhs,
-      primary_producer, observer, fixture.primary_workspace,
-      *fixture.transport, fixture.bianchi_capability());
+  const double step = final_time / static_cast<double>(steps);
+  for (int n = 0; n < steps; ++n) {
+    teuk::device_one_way_bianchi_companion_rk4_step(
+        fixture.execution, fixture.primary,
+        fixture.pipeline->companion_state(), static_cast<double>(n) * step,
+        step, primary_rhs, primary_producer, companion_rhs,
+        fixture.primary_workspace, *fixture.transport,
+        fixture.pipeline->companion_storage().rk_workspace(),
+        fixture.bianchi_capability());
+  }
   if (audit_hot_path) {
     Kokkos::Tools::Experimental::set_begin_fence_callback(nullptr);
     Kokkos::Tools::Experimental::set_allocate_data_callback(nullptr);
@@ -386,23 +487,46 @@ BindingResult run_binding_step(const double amplitude,
   }
   fixture.execution.fence("finish concrete binding step");
   const auto host_forcing = Kokkos::create_mirror_view_and_copy(
-      Kokkos::HostSpace{}, fixture.forcing);
+      Kokkos::HostSpace{}, fixture.pipeline->forcing());
   result.forcing.assign(host_forcing.data(),
                         host_forcing.data() + host_forcing.size());
+  const auto host_companion = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, fixture.pipeline->companion_state());
+  result.companion.assign(host_companion.data(),
+                          host_companion.data() + host_companion.size());
   const auto host_primary = Kokkos::create_mirror_view_and_copy(
       Kokkos::HostSpace{}, fixture.primary);
   result.primary = host_primary(0);
+  const std::array<const C*, 7> pointers_after{
+      fixture.primary.data(),
+      fixture.transport->flat_state().data(),
+      fixture.pipeline->companion_state().data(),
+      fixture.primary_workspace.stage.data(),
+      fixture.transport->rk_workspace().stage.data(),
+      fixture.pipeline->companion_storage().rk_workspace().stage.data(),
+      fixture.pipeline->forcing().data()};
+  result.pointers_stable = pointers_before == pointers_after;
+  result.common_stage_inputs = bianchi_stage_views_match &&
+      primary_rhs_stages == producer_primary_stages &&
+      primary_rhs_stages == companion_primary_stages &&
+      primary_rhs_times == producer_times &&
+      primary_rhs_times == result.stage_times;
   result.activation_after = activation;
   return result;
 }
 
-TEST_CASE("plus2 concrete producer binds one common Bianchi RK step") {
-  const auto base = run_binding_step(1.0, false, true);
-  const auto scaled = run_binding_step(-1.7, false, false);
-  const auto stale = run_binding_step(1.0, true, false);
+TEST_CASE("plus2 concrete producer binds one three-state common RK step") {
+  const auto base = run_binding_evolution(1.0, 1, 0.01, false, true);
+  const auto scaled = run_binding_evolution(-1.7, 1, 0.01, false, false);
+  const auto stale = run_binding_evolution(1.0, 1, 0.01, true, false);
   const std::array<std::uint64_t, 4> expected_generations{1, 2, 3, 4};
-  CHECK(base.stage_count == 4);
-  CHECK(base.generations == expected_generations);
+  const std::array<double, 4> expected_times{0.0, 0.005, 0.005, 0.01};
+  CHECK(base.generations.size() == expected_generations.size());
+  CHECK(base.stage_times.size() == expected_times.size());
+  for (std::size_t stage = 0; stage < expected_generations.size(); ++stage) {
+    CHECK(base.generations[stage] == expected_generations[stage]);
+    CHECK_NEAR(base.stage_times[stage], expected_times[stage], 2.0e-16);
+  }
   CHECK_COMPLEX_NEAR(base.primary, C(1.0, 0.0), 0.0);
   CHECK_COMPLEX_NEAR(scaled.primary, C(-1.7, 0.0), 0.0);
   double maximum = 0.0;
@@ -413,8 +537,19 @@ TEST_CASE("plus2 concrete producer binds one common Bianchi RK step") {
     CHECK_COMPLEX_NEAR(stale.forcing[i], C{}, 0.0);
   }
   CHECK(maximum > 1.0e-9);
+  double companion_maximum = 0.0;
+  for (std::size_t i = 0; i < base.companion.size(); ++i) {
+    companion_maximum =
+        std::max(companion_maximum, Kokkos::abs(base.companion[i]));
+    CHECK_COMPLEX_NEAR(scaled.companion[i],
+                       1.7 * 1.7 * base.companion[i], 2.0e-9);
+    CHECK_COMPLEX_NEAR(stale.companion[i], C{}, 0.0);
+  }
+  CHECK(companion_maximum > 1.0e-12);
   CHECK(base.allocations == 0);
   CHECK(base.fences == 0);
+  CHECK(base.pointers_stable);
+  CHECK(base.common_stage_inputs);
   CHECK(base.activation_before.active == base.activation_after.active);
   CHECK(base.activation_before.activation_time ==
         base.activation_after.activation_time);
@@ -425,11 +560,40 @@ TEST_CASE("plus2 concrete producer binds one common Bianchi RK step") {
 
   bool wrong_shape_rejected = false;
   try {
-    (void)run_binding_step(1.0, false, false, true);
+    (void)run_binding_evolution(1.0, 1, 0.01, false, false, true);
   } catch (const std::invalid_argument&) {
     wrong_shape_rejected = true;
   }
   CHECK(wrong_shape_rejected);
+}
+
+double binding_difference_norm(const std::vector<C>& left,
+                               const std::vector<C>& right) {
+  double result = 0.0;
+  for (std::size_t i = 0; i < left.size(); ++i) {
+    result = std::max(result, Kokkos::abs(left[i] - right[i]));
+  }
+  return result;
+}
+
+TEST_CASE("plus2 three-state live seam has fourth-order common-stage time RK4") {
+  const auto coarse =
+      run_binding_evolution(1.0, 2, 0.02, false, false).companion;
+  const auto medium =
+      run_binding_evolution(1.0, 4, 0.02, false, false).companion;
+  const auto fine =
+      run_binding_evolution(1.0, 8, 0.02, false, false).companion;
+  const auto reference =
+      run_binding_evolution(1.0, 32, 0.02, false, false).companion;
+  const double coarse_error = binding_difference_norm(coarse, reference);
+  const double medium_error = binding_difference_norm(medium, reference);
+  const double fine_error = binding_difference_norm(fine, reference);
+  std::cout << "plus2 three-state fixed-space RK4 errors " << coarse_error
+            << ' ' << medium_error << ' ' << fine_error << " ratios "
+            << coarse_error / medium_error << ' '
+            << medium_error / fine_error << '\n';
+  CHECK(coarse_error / medium_error > 12.0);
+  CHECK(medium_error / fine_error > 12.0);
 }
 
 }  // namespace

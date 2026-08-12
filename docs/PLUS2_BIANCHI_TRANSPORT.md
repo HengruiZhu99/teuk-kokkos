@@ -1,8 +1,17 @@
 # Common-stage spin `+2` Bianchi transport
 
-**Status:** standalone, allocation-free Route-A transport and restart gate
-with a typed adapter into the standalone live-source composition; not wired to
-`solver_driver`, and not a physical scri/boundary qualification.
+**Status:** standalone, allocation-free Route-A validation transport and
+restart gate with a typed adapter into the standalone live-source composition;
+blocked from production use by rotating weak hyperbolicity and not wired to
+`solver_driver`.
+
+For nonzero background rotation, the two-field Route-A radial principal symbol
+has a repeated outward characteristic speed but only a Jordan chain: the
+`eth_4 Z1` time coupling makes it weakly hyperbolic. Outward speed alone is not
+a well-posed production evolution argument. The common-stage implementation
+and tests below therefore qualify structural and algebraic validation
+machinery only. Physical initialization or boundary evidence cannot promote
+this Route-A system past the hyperbolicity blocker.
 
 ## Owned state and one-way RK contract
 
@@ -71,6 +80,11 @@ The implementation calls the reviewed point functions in
 This order is triangular and requires only complete primary/reconstruction
 `h[0]`, `h[1]`, and `h[2]`. It never differentiates the metric-curvature
 quotient again and never asks for `h[3]` or `h[4]`.
+
+This convenient closure depth does not cure the rotating principal-symbol
+defect. The planned production alternative is a local Route-B curvature
+provider derived from `h[0..4]`; that provider and its endpoint evidence are
+not implemented here.
 
 In particular, the corrected linear Bianchi-5 curvature term is
 `+3 Sig psi20`, where `psi20` is stationary background curvature. Its exact
@@ -143,9 +157,12 @@ The focused tests cover:
 - checkpoint round trip and validation-before-mutation;
 - repeated-stage and full-RK4 allocation/fence absence.
 
-These tests qualify the standalone transport mechanism, not physical initial
-or boundary data. Production still needs independently derived scri
-coefficients, a documented stable horizon/scri boundary prescription, the
-remaining fourteen-primitive spatial producer, runtime composition with the
-primary and second-order companion, and a full four-field convergence/TSI
-campaign.
+These tests qualify the standalone transport mechanism as validation
+machinery, not a well-posed rotating production evolution or physical initial
+or boundary data. A standalone three-state coordinator also verifies one
+common RK tableau for primary, Route-A validation state, and passive
+Teukolsky companion without operator splitting. It does not remove the Route-A
+Jordan block. Production must pivot to a strongly hyperbolic or algebraic
+curvature provider (currently expected to be local Route B from `h[0..4]`),
+then independently qualify scri/horizon data and the complete four-field
+convergence/TSI campaign before any `solver_driver` wiring.

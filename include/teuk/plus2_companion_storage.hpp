@@ -25,12 +25,13 @@ using Plus2CompanionFlatView = Kokkos::View<
 //
 // The disabled object contains a disengaged std::optional and therefore owns
 // no Kokkos allocation.  It is intentionally not embedded in SpatialPipeline
-// yet: doing so before the reviewed quadratic source and a common-stage
-// coupled RK driver exist would invite operator splitting.  When enabled,
-// this object provides the one (P_plus,Q_plus,Z_plus) state, the reusable
-// radial/angular RHS scratch, and the four-stage RK storage needed by that
-// future driver.  It contains no source formula and calls no evolution
-// kernel; enabled View construction may perform backend initialization.
+// yet: the standalone common-stage coordinator is validation machinery, and
+// the rotating Route-A curvature provider is blocked by weak hyperbolicity.
+// When enabled, this object provides the one (P_plus,Q_plus,Z_plus) state, the
+// reusable radial/angular RHS scratch, and the four-stage RK storage used by
+// either the validation coordinator or a future qualified production driver.
+// It contains no source formula and calls no evolution kernel; enabled View
+// construction may perform backend initialization.
 class Plus2CompanionStorage {
  public:
   Plus2CompanionStorage() = default;

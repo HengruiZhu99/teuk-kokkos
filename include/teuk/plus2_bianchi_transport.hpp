@@ -1129,4 +1129,69 @@ void device_one_way_bianchi_transport_rk4_step(
       primary_workspace, transport.rk_workspace());
 }
 
+// Standalone three-state common-stage validation coordinator.  The companion
+// callback is invoked only after the passive Bianchi RHS has exposed the
+// curvature and derivative adapters for that exact primary/Bianchi RK stage.
+// The rotating Route-A transport is weakly hyperbolic and this wrapper must
+// not be used as a production runtime path.  Its callback signature is
+//
+//   companion_rhs(exec, time, generation, primary_stage, bianchi_stage,
+//                 curvature, derivatives, companion_stage, companion_out)
+//
+// The primary RHS has no Bianchi or companion argument, and the Bianchi RHS
+// has no companion argument, so the one-way dependency is structural.  This
+// wrapper allocates no storage and performs no fence.
+template <class PrimaryValue, class CompanionValue, class ExecutionSpace,
+          class PrimaryStateView, class CompanionStateView,
+          class PrimaryRightHandSide, class PrimaryInputProducer,
+          class CompanionRightHandSide>
+void device_one_way_bianchi_companion_rk4_step(
+    const ExecutionSpace& execution, const PrimaryStateView& primary,
+    const CompanionStateView& companion, const double time, const double step,
+    PrimaryRightHandSide&& primary_rhs,
+    PrimaryInputProducer&& primary_input_producer,
+    CompanionRightHandSide&& companion_rhs,
+    DeviceRK4Workspace<PrimaryValue, ExecutionSpace>& primary_workspace,
+    Plus2BianchiTransport<ExecutionSpace>& transport,
+    DeviceRK4Workspace<CompanionValue, ExecutionSpace>& companion_workspace,
+    const Plus2BianchiStageCapability& capability) {
+  if (!transport.initialized()) {
+    throw std::logic_error("spin +2 Bianchi transport is not initialized");
+  }
+  std::uint64_t stage_generation = 0;
+  Plus2TransportedCurvatureStage curvature;
+  Plus2BianchiDerivativeStage derivatives;
+  auto bianchi_rhs =
+      [&](const ExecutionSpace& stage_execution, const double stage_time,
+          const auto& primary_stage, const auto& bianchi_stage,
+          const auto& output) {
+        using transport_type = Plus2BianchiTransport<ExecutionSpace>;
+        const typename transport_type::const_flat_view state(
+            bianchi_stage.data(), bianchi_stage.extent(0));
+        const typename transport_type::flat_view rhs(output.data(),
+                                                      output.extent(0));
+        stage_generation = transport.next_generation();
+        curvature = transport.evaluate_stage(
+            stage_execution, stage_time, primary_stage, state, rhs,
+            stage_generation, capability, primary_input_producer);
+        derivatives = transport.latest_derivative_stage();
+      };
+  auto passive_rhs =
+      [&](const ExecutionSpace& stage_execution, const double stage_time,
+          const auto& primary_stage, const auto& bianchi_stage,
+          const auto& companion_stage, const auto& output) {
+        using transport_type = Plus2BianchiTransport<ExecutionSpace>;
+        const typename transport_type::const_flat_view read_only_bianchi(
+            bianchi_stage.data(), bianchi_stage.extent(0));
+        companion_rhs(stage_execution, stage_time, stage_generation,
+                      primary_stage, read_only_bianchi, curvature, derivatives,
+                      companion_stage, output);
+      };
+  device_one_way_three_state_rk4_step(
+      execution, primary, transport.flat_state(), companion, time, step,
+      std::forward<PrimaryRightHandSide>(primary_rhs), bianchi_rhs,
+      passive_rhs, primary_workspace, transport.rk_workspace(),
+      companion_workspace);
+}
+
 }  // namespace teuk

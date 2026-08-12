@@ -1,7 +1,8 @@
 # Spin `+2` live-source partial composition gate
 
-**Status:** allocation-free standalone composition boundary; not wired to
-`solver_driver` and not a scientific production qualification.
+**Status:** allocation-free standalone composition boundary and common-stage
+validation seam; not wired to `solver_driver` and blocked from scientific
+production by the rotating Route-A weak-hyperbolicity finding.
 
 ## What is composed
 
@@ -54,12 +55,20 @@ supplies the triangular Route-A `Z0,Z1` transport plus the six-field curvature
 and eight-field derivative adapters, completing the fourteen primitive rows
 and all production inner-derivative slots at a common generation.
 
-The standalone binding is still not `solver_driver` wiring. The outer
-projection/derivative producer remains an explicit reviewed seam, and physical
-Bianchi initialization, horizon/scri boundary data, and peeling coefficients
-remain external evidence requirements. `Z0,Z1` and their four derivative
-pairs must come from the common one-way RK state or exact deterministic replay;
-they cannot be hidden mutable state in a source callback. A grid containing
+The standalone binding is still not `solver_driver` wiring. More decisively,
+the rotating two-field Route-A transport has a Jordan radial principal symbol
+and is only weakly hyperbolic, despite its repeated speed being outward. The
+typed Route-A adapter is therefore validation-only and cannot be promoted by
+adding boundary evidence. The expected production direction is a local
+Route-B curvature provider from `h[0..4]`; it is not implemented or qualified
+here. The composition and companion common-stage RHS keep the provider seam
+external so that an algebraic provider need not own an evolved middle state.
+The outer projection/derivative producer remains an explicit reviewed seam.
+Physical Bianchi initialization, horizon/scri boundary data, and peeling
+coefficients remain external evidence requirements. `Z0,Z1` and their four
+derivative pairs must come from the common one-way RK state or exact
+deterministic replay; they cannot be hidden mutable state in a source callback.
+A grid containing
 scri is rejected unless the caller asserts independently qualified peeling
 coefficients; neither endpoint extrapolation nor a zero coefficient is
 invented here.
@@ -79,10 +88,14 @@ immutable activation behavior, target gather, quadratic common-amplitude
 scaling, and zero stage allocations/fences. The
 ordinary-NP algebra, signed sharp lookup, analytic `J/K` tangents, and compact
 outer source remain independently tested by their existing point and spatial
-test suites. A one-step manufactured seam additionally exercises all four
-common RK stages from the passive Bianchi observer through the concrete
-primitive producer and live composition into companion forcing. It verifies
-generations `1..4`, immutable activation, no primary feedback, nonzero forcing,
-quadratic scaling, global stale-stage fail closure, D10-5, and no per-stage
-allocation or fence. It deliberately supplies only a test outer adapter and
-test-only boundary evidence; it is not runtime or boundary qualification.
+test suites. A one-step manufactured three-state seam additionally exercises
+all four common RK stages from primary through passive Route-A validation,
+concrete primitive production, live composition, and the passive Teukolsky
+companion RHS and advance. It verifies exact stage times and generations
+`1..4`, immutable activation, no primary feedback, nonzero forcing and
+companion advance, quadratic scaling, global stale-stage fail closure, D10-5,
+stable pointers, and no per-stage allocation or fence. A fixed-space
+manufactured refinement separately verifies fourth-order RK time convergence.
+It deliberately supplies only a test outer adapter and test-only boundary
+evidence; it is neither runtime/boundary qualification nor evidence that the
+Route-A system is well posed for rotating production.
