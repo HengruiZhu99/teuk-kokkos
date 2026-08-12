@@ -11,8 +11,10 @@ namespace teuk {
 // annihilate powers 0,1,3,4,5 and extract the R^2 coefficient; the q1 moments
 // annihilate powers 0,2,3,4 and extract the R coefficient.  Therefore neither
 // stencil uses or overwrites the separately measured R=0 peeling residuals.
+// The promoted q0 stencil additionally annihilates power 6.
 inline constexpr std::size_t plus2_q0_endpoint_nodes = 6;
 inline constexpr std::size_t plus2_q1_endpoint_nodes = 5;
+inline constexpr std::size_t plus2_q0_promoted_endpoint_nodes = 7;
 inline constexpr Kokkos::Array<double, plus2_q0_endpoint_nodes>
     plus2_q0_endpoint_weights{{
     29.0 / 6.0,
@@ -28,6 +30,15 @@ inline constexpr Kokkos::Array<double, plus2_q1_endpoint_nodes>
     -39.0 / 2.0,
     61.0 / 6.0,
     -25.0 / 12.0}};
+inline constexpr Kokkos::Array<double, plus2_q0_promoted_endpoint_nodes>
+    plus2_q0_promoted_endpoint_weights{{
+    319.0 / 45.0,
+    -3929.0 / 120.0,
+    389.0 / 6.0,
+    -2545.0 / 36.0,
+    134.0 / 3.0,
+    -1849.0 / 120.0,
+    203.0 / 90.0}};
 
 inline constexpr double plus2_q0_endpoint_l1 = 280.0 / 3.0;
 inline constexpr double plus2_q0_endpoint_l2_squared =
@@ -37,5 +48,10 @@ inline constexpr double plus2_q1_endpoint_l1 = 56.0 / 1.0;
 inline constexpr double plus2_q1_endpoint_l2_squared =
     60995.0 / 72.0;
 inline constexpr double plus2_q1_endpoint_linf = 39.0 / 2.0;
+inline constexpr double plus2_q0_promoted_endpoint_l1 =
+    10696.0 / 45.0;
+inline constexpr double plus2_q0_promoted_endpoint_l2_squared =
+    271316521.0 / 21600.0;
+inline constexpr double plus2_q0_promoted_endpoint_linf = 2545.0 / 36.0;
 
 }  // namespace teuk

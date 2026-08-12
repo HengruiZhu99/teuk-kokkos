@@ -580,9 +580,22 @@ def validate_geometry(name: str, geometry: KerrGeometry) -> None:
                   max(map(abs, residual)), 2.0e-11)
 
 
-def reconstruct_org_metric(
-    geometry: KerrGeometry, h_ll: Jet2, h_lm: Jet2, h_mm: Jet2
+def reconstruct_complex_org_metric(
+    geometry: KerrGeometry,
+    h_ll: Jet2,
+    h_lm: Jet2,
+    h_lbar: Jet2,
+    h_mm: Jet2,
+    h_barbar: Jet2,
 ) -> JetMatrix:
+    """Reconstruct one complex Fourier sector of an ORG perturbation.
+
+    A real perturbation pairs this sector with its complex conjugate.  Keeping
+    the five tetrad components independent here permits a coordinate-Weyl
+    oracle for one signed mode without mixing it with the opposite mode at a
+    particular azimuth.  No NP connection or curvature identity enters this
+    reconstruction.
+    """
     n_covector = matrix_vector(geometry.metric, geometry.n)
     m_covector = matrix_vector(geometry.metric, geometry.m)
     mbar_covector = matrix_vector(geometry.metric, geometry.mbar)
@@ -592,12 +605,20 @@ def reconstruct_org_metric(
             outer(n_covector, mbar_covector),
             outer(mbar_covector, n_covector),
         )),
-        matrix_scale(-h_lm.conjugate(), matrix_add(
+        matrix_scale(-h_lbar, matrix_add(
             outer(n_covector, m_covector),
             outer(m_covector, n_covector),
         )),
         matrix_scale(h_mm, outer(mbar_covector, mbar_covector)),
-        matrix_scale(h_mm.conjugate(), outer(m_covector, m_covector)),
+        matrix_scale(h_barbar, outer(m_covector, m_covector)),
+    )
+
+
+def reconstruct_org_metric(
+    geometry: KerrGeometry, h_ll: Jet2, h_lm: Jet2, h_mm: Jet2
+) -> JetMatrix:
+    return reconstruct_complex_org_metric(
+        geometry, h_ll, h_lm, h_lm.conjugate(), h_mm, h_mm.conjugate()
     )
 
 

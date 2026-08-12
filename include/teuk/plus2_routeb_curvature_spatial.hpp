@@ -366,8 +366,8 @@ struct ComputeCurvatureFunctor {
       const Complex* f1 = profiles + f1_index;
       const Complex q0 =
           radius == 0.0
-              ? plus2_extract_q0_at_scri(f0, radial_count,
-                                         1.0 / grid.spacing(), theta_count)
+              ? plus2_extract_q0_promoted_at_scri(
+                    f0, radial_count, 1.0 / grid.spacing(), theta_count)
               : profiles[flat4(mode, profile_offset, radial, theta,
                                profile_count, radial_count, theta_count)] /
                     (radius * radius);
@@ -907,6 +907,14 @@ class Plus2RouteBCurvatureSpatialProvider {
                 const Plus2RouteBCurvatureOffsets& offsets) const {
     const std::size_t largest =
         std::max({offsets.H, offsets.B, offsets.Pi, offsets.C, offsets.U});
+    const std::size_t selected[5]{offsets.H, offsets.B, offsets.Pi,
+                                  offsets.C, offsets.U};
+    bool unique_offsets = true;
+    for (std::size_t left = 0; left < 5; ++left) {
+      for (std::size_t right = left + 1; right < 5; ++right) {
+        unique_offsets = unique_offsets && selected[left] != selected[right];
+      }
+    }
     const bool shapes =
         tower.fields.extent(0) == 5 &&
         tower.fields.extent(1) == registry_.size() &&
@@ -919,12 +927,31 @@ class Plus2RouteBCurvatureSpatialProvider {
         tower.stamps.extent(3) == sin_theta_.extent(0);
     const bool aliases =
         overlaps(tower.fields, primitive_scratch_) ||
-        overlaps(tower.fields, profiles_) || overlaps(tower.fields, curvature_) ||
+        overlaps(tower.fields, primitive_value_) ||
+        overlaps(tower.fields, primitive_tangent_) ||
+        overlaps(tower.fields, jk_value_) ||
+        overlaps(tower.fields, jk_tangent_) ||
+        overlaps(tower.fields, profiles_) ||
+        overlaps(tower.fields, curvature_) ||
         overlaps(tower.fields, derivatives_) ||
+        overlaps(tower.fields, curvature_radial_) ||
+        overlaps(tower.fields, endpoint_audit_) ||
+        overlaps(tower.fields, endpoint_audit_stamps_) ||
+        overlaps(tower.fields, ready_) || overlaps(tower.fields, sharp_) ||
+        overlaps(tower.fields, modes_) || overlaps(tower.fields, radius_) ||
+        overlaps(tower.fields, cos_theta_) ||
+        overlaps(tower.fields, sin_theta_) ||
+        overlaps(tower.stamps, tower.fields) ||
         overlaps(tower.stamps, curvature_stamps_) ||
-        overlaps(tower.stamps, derivative_stamps_);
+        overlaps(tower.stamps, derivative_stamps_) ||
+        overlaps(tower.stamps, endpoint_audit_stamps_) ||
+        overlaps(tower.stamps, endpoint_audit_) ||
+        overlaps(tower.stamps, ready_) || overlaps(tower.stamps, sharp_) ||
+        overlaps(tower.stamps, modes_) || overlaps(tower.stamps, radius_) ||
+        overlaps(tower.stamps, cos_theta_) ||
+        overlaps(tower.stamps, sin_theta_);
     if (tower.generation == 0 || tower.generation <= last_generation_ ||
-        !shapes || aliases) {
+        !shapes || !unique_offsets || aliases) {
       throw std::invalid_argument(
           "Route-B curvature tower contract is incomplete");
     }

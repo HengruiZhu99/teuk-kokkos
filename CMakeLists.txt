@@ -144,6 +144,12 @@ if(BUILD_TESTING)
         --check
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/routeb_angular_jet_fixture.hpp)
     add_test(
+      NAME teuk.plus2_routeb_curvature_coordinate_fixture_generation
+      COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/numerical/generate_plus2_routeb_curvature_coordinate_fixture.py
+        --check
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/plus2_routeb_curvature_coordinate_fixture.hpp)
+    add_test(
       NAME teuk.plus2_tsi_schwarzschild_radial
       COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/numerical/verify_plus2_tsi_schwarzschild_radial_fixture.py)

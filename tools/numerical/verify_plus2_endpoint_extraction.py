@@ -23,12 +23,21 @@ def main() -> int:
                  Fraction(-307, 12), Fraction(65, 6), Fraction(-15, 8)]
     expected1 = [Fraction(-77, 12), Fraction(107, 6), Fraction(-39, 2),
                  Fraction(61, 6), Fraction(-25, 12)]
+    expected0_promoted = [
+        Fraction(319, 45), Fraction(-3929, 120), Fraction(389, 6),
+        Fraction(-2545, 36), Fraction(134, 3), Fraction(-1849, 120),
+        Fraction(203, 90),
+    ]
     weights0 = solve(list(range(1, 7)), 2)
     weights1 = solve(list(range(1, 6)), 1)
+    weights0_promoted = solve(list(range(1, 8)), 2)
     for actual, exact in zip(weights0, expected0):
         expected = mp.mpf(exact.numerator) / exact.denominator
         assert abs(actual - expected) < mp.mpf("1e-90")
     for actual, exact in zip(weights1, expected1):
+        expected = mp.mpf(exact.numerator) / exact.denominator
+        assert abs(actual - expected) < mp.mpf("1e-90")
+    for actual, exact in zip(weights0_promoted, expected0_promoted):
         expected = mp.mpf(exact.numerator) / exact.denominator
         assert abs(actual - expected) < mp.mpf("1e-90")
 
@@ -55,8 +64,11 @@ def main() -> int:
                           for j, w in enumerate(weights0)) / h**2
             actual1 = sum(w * f1((j + 1) * h)
                           for j, w in enumerate(weights1)) / h
+            promoted0 = sum(w * f0((j + 1) * h)
+                            for j, w in enumerate(weights0_promoted)) / h**2
             error = max(abs(actual0 - q0(mp.mpf("0"))),
                         abs(actual1 - q1(mp.mpf("0"))))
+            assert abs(promoted0 - q0(mp.mpf("0"))) < error
             errors.append(error)
             if previous is not None:
                 assert previous / error > 15

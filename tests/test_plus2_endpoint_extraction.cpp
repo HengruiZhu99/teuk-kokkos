@@ -91,12 +91,31 @@ TEST_CASE("plus2 constrained endpoint weights have exact defining moments") {
     CHECK(std::abs(moment - expected) <=
           8.0 * std::numeric_limits<double>::epsilon() * absolute_sum);
   }
+  for (std::size_t power = 0; power < 7; ++power) {
+    double moment = 0.0;
+    double absolute_sum = 0.0;
+    for (std::size_t node = 0;
+         node < teuk::plus2_q0_promoted_endpoint_nodes; ++node) {
+      const double term =
+          teuk::plus2_q0_promoted_endpoint_weights[node] *
+          std::pow(static_cast<double>(node + 1), static_cast<int>(power));
+      moment += term;
+      absolute_sum += std::abs(term);
+    }
+    const double expected = power == 2 ? 1.0 : 0.0;
+    CHECK(std::abs(moment - expected) <=
+          8.0 * std::numeric_limits<double>::epsilon() * absolute_sum);
+  }
   CHECK_NEAR(teuk::plus2_q0_endpoint_l1, 280.0 / 3.0, 0.0);
   CHECK_NEAR(teuk::plus2_q0_endpoint_l2_squared, 613067.0 / 288.0, 0.0);
   CHECK_NEAR(teuk::plus2_q0_endpoint_linf, 31.0, 0.0);
   CHECK_NEAR(teuk::plus2_q1_endpoint_l1, 56.0, 0.0);
   CHECK_NEAR(teuk::plus2_q1_endpoint_l2_squared, 60995.0 / 72.0, 0.0);
   CHECK_NEAR(teuk::plus2_q1_endpoint_linf, 19.5, 0.0);
+  CHECK_NEAR(teuk::plus2_q0_promoted_endpoint_l1, 10696.0 / 45.0, 0.0);
+  CHECK_NEAR(teuk::plus2_q0_promoted_endpoint_l2_squared,
+             271316521.0 / 21600.0, 0.0);
+  CHECK_NEAR(teuk::plus2_q0_promoted_endpoint_linf, 2545.0 / 36.0, 0.0);
 }
 
 TEST_CASE("plus2 constrained endpoint extraction is fourth order without hiding peeling") {
@@ -124,7 +143,7 @@ TEST_CASE("plus2 constrained endpoint extraction has host device parity") {
   constexpr std::size_t points = 9;
   Kokkos::View<C*> f0("endpoint_f0", points);
   Kokkos::View<C*> f1("endpoint_f1", points);
-  Kokkos::View<C*> result("endpoint_result", 2);
+  Kokkos::View<C*> result("endpoint_result", 3);
   auto h0 = Kokkos::create_mirror_view(f0);
   auto h1 = Kokkos::create_mirror_view(f1);
   for (std::size_t i = 0; i < points; ++i) {
@@ -142,6 +161,8 @@ TEST_CASE("plus2 constrained endpoint extraction has host device parity") {
             teuk::plus2_extract_q0_at_scri(f0.data(), points, 20.0);
         result(1) =
             teuk::plus2_extract_q1_at_scri(f1.data(), points, 20.0);
+        result(2) = teuk::plus2_extract_q0_promoted_at_scri(
+            f0.data(), points, 20.0);
       });
   const auto host = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{},
                                                         result);
@@ -151,4 +172,7 @@ TEST_CASE("plus2 constrained endpoint extraction has host device parity") {
   CHECK_COMPLEX_NEAR(host(1),
                      teuk::plus2_extract_q1_at_scri(h1.data(), points, 20.0),
                      0.0);
+  CHECK_COMPLEX_NEAR(
+      host(2),
+      teuk::plus2_extract_q0_promoted_at_scri(h0.data(), points, 20.0), 0.0);
 }

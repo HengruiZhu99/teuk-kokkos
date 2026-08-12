@@ -3,16 +3,47 @@
 #include <Kokkos_Core.hpp>
 
 #include <cmath>
+#include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
+#include <stdexcept>
 #include <vector>
 
 #include "teuk/angular.hpp"
 #include "teuk/plus2_routeb_curvature_spatial.hpp"
+#include "plus2_routeb_curvature_coordinate_fixture.hpp"
 
 namespace {
 
 using C = teuk::Complex;
+
+int routeb_allocations = 0;
+int routeb_copies = 0;
+int routeb_fences = 0;
+
+void count_routeb_allocation(Kokkos::Tools::SpaceHandle, const char*,
+                             const void*, std::uint64_t) {
+  ++routeb_allocations;
+}
+void count_routeb_copy(Kokkos::Tools::SpaceHandle, const char*, const void*,
+                       Kokkos::Tools::SpaceHandle, const char*, const void*,
+                       std::uint64_t) {
+  ++routeb_copies;
+}
+void count_routeb_fence(const char*, std::uint32_t, std::uint64_t*) {
+  ++routeb_fences;
+}
+
+template <class Callable>
+bool throws_invalid_argument(Callable&& callable) {
+  try {
+    callable();
+  } catch (const std::invalid_argument&) {
+    return true;
+  }
+  return false;
+}
 
 struct CurvatureRun {
   std::vector<C> scri;
@@ -20,7 +51,9 @@ struct CurvatureRun {
 };
 
 CurvatureRun run_analytic_tower(const std::size_t radial_count,
-                                const double spin) {
+                                const double spin,
+                                const double common_amplitude = 1.0,
+                                const double negative_mode_amplitude = 1.0) {
   teuk::ExecutionSpace execution;
   const teuk::ModeRegistry registry({-2, 2});
   constexpr std::size_t theta_count = 10;
@@ -69,13 +102,15 @@ CurvatureRun run_analytic_tower(const std::size_t radial_count,
                   (mode > 0 ? 1.0 : 0.73),
               0.05 * static_cast<double>(field + 2) *
                   (mode > 0 ? -0.61 : 0.44));
+          const double scale =
+              common_amplitude * (mode < 0 ? negative_mode_amplitude : 1.0);
           for (std::size_t theta = 0; theta < theta_count; ++theta) {
             const double harmonic =
                 teuk::angular::spin_weighted_harmonic_theta(
                     ell, mode, field_spins[field],
                     angular_grid.theta(theta));
             host_tower(level, mode_index, field, radial, theta) =
-                (field < 2 ? C{} : time_factor * amplitude * radial_profile *
+                (field < 2 ? C{} : scale * time_factor * amplitude * radial_profile *
                                              harmonic);
           }
         }
@@ -130,6 +165,190 @@ double max_magnitude(const std::vector<C>& values) {
   double result = 0.0;
   for (const C value : values) result = std::max(result, Kokkos::abs(value));
   return result;
+}
+
+void gate_disaggregated_scri(const CurvatureRun& coarse,
+                             const CurvatureRun& medium,
+                             const CurvatureRun& fine,
+                             const double spin) {
+  CHECK(coarse.scri.size() == medium.scri.size());
+  CHECK(medium.scri.size() == fine.scri.size());
+  double minimum_resolved_ratio = std::numeric_limits<double>::infinity();
+  double maximum_floor_error = 0.0;
+  bool resolved_green = true;
+  for (std::size_t index = 0; index < fine.scri.size(); ++index) {
+    const double coarse_medium =
+        Kokkos::abs(coarse.scri[index] - medium.scri[index]);
+    const double medium_fine =
+        Kokkos::abs(medium.scri[index] - fine.scri[index]);
+    CHECK(std::isfinite(coarse_medium));
+    CHECK(std::isfinite(medium_fine));
+    if (medium_fine > 2.0e-13) {
+      if (!(coarse_medium > 15.0 * medium_fine)) {
+        const std::size_t theta = index % 10;
+        const std::size_t mode_field = index / 10;
+        const std::size_t field = mode_field % 6;
+        const std::size_t mode = mode_field / 6;
+        std::cout << "Route-B red scri spin/mode/field/theta " << spin << ' '
+                  << mode << ' ' << field << ' ' << theta << " errors "
+                  << coarse_medium << ' ' << medium_fine << " ratio "
+                  << coarse_medium / medium_fine << '\n';
+      }
+      minimum_resolved_ratio =
+          std::min(minimum_resolved_ratio, coarse_medium / medium_fine);
+      resolved_green =
+          resolved_green && coarse_medium > 15.0 * medium_fine;
+    } else {
+      maximum_floor_error = std::max(maximum_floor_error, medium_fine);
+      CHECK(coarse_medium < 2.0e-11);
+    }
+  }
+  std::cout << "Route-B disaggregated scri spin " << spin
+            << " minimum resolved ratio " << minimum_resolved_ratio
+            << " maximum floor error " << maximum_floor_error << '\n';
+  CHECK(resolved_green);
+}
+
+void gate_disaggregated_peeling(const CurvatureRun& coarse,
+                                const CurvatureRun& medium,
+                                const CurvatureRun& fine,
+                                const double spin) {
+  CHECK(coarse.audit.size() == medium.audit.size());
+  CHECK(medium.audit.size() == fine.audit.size());
+  double minimum_ratio = std::numeric_limits<double>::infinity();
+  double maximum_fine = 0.0;
+  bool residual_green = true;
+  for (std::size_t index = 0; index < fine.audit.size(); ++index) {
+    const double coarse_value = Kokkos::abs(coarse.audit[index]);
+    const double medium_value = Kokkos::abs(medium.audit[index]);
+    const double fine_value = Kokkos::abs(fine.audit[index]);
+    CHECK(std::isfinite(coarse_value));
+    CHECK(std::isfinite(medium_value));
+    CHECK(std::isfinite(fine_value));
+    maximum_fine = std::max(maximum_fine, fine_value);
+    if (medium_value > 2.0e-14) {
+      if (!(coarse_value > 15.0 * medium_value) ||
+          !(medium_value > 15.0 * fine_value)) {
+        const std::size_t theta = index % 10;
+        const std::size_t mode_field = index / 10;
+        const std::size_t field = mode_field % 9;
+        const std::size_t mode = mode_field / 9;
+        std::cout << "Route-B red peeling spin/mode/field/theta " << spin
+                  << ' ' << mode << ' ' << field << ' ' << theta
+                  << " residuals " << coarse_value << ' ' << medium_value
+                  << ' ' << fine_value << " ratios "
+                  << coarse_value / medium_value << ' '
+                  << medium_value / fine_value << '\n';
+      }
+      minimum_ratio = std::min(minimum_ratio, coarse_value / medium_value);
+      residual_green = residual_green &&
+                       coarse_value > 15.0 * medium_value &&
+                       medium_value > 15.0 * fine_value;
+    } else {
+      CHECK(fine_value < 2.0e-13);
+    }
+  }
+  CHECK(maximum_fine < 1.0e-10);
+  CHECK(residual_green);
+  std::cout << "Route-B disaggregated peeling spin " << spin
+            << " minimum ratio " << minimum_ratio << " maximum fine "
+            << maximum_fine << '\n';
+}
+
+struct CoordinateRun {
+  Kokkos::View<const C****, Kokkos::LayoutRight, Kokkos::HostSpace>
+      curvature;
+};
+
+CoordinateRun run_coordinate_tower(const int spin_index,
+                                   const int case_index) {
+  namespace fixture = plus2_routeb_curvature_coordinate_fixture;
+  teuk::ExecutionSpace execution;
+  const teuk::ModeRegistry registry({-2, 2});
+  const teuk::UniformRadialGrid grid(fixture::radial_count, 0.0,
+                                     fixture::radial_max);
+  const teuk::KerrParameters parameters{1.0, fixture::spins[spin_index], 2.0};
+  const auto angular_grid = teuk::angular::gauss_legendre(fixture::theta_count);
+  teuk::Plus2SpatialThetaView cos_theta("routeb_coordinate_cos",
+                                        fixture::theta_count);
+  teuk::Plus2SpatialThetaView sin_theta("routeb_coordinate_sin",
+                                        fixture::theta_count);
+  auto host_cos = Kokkos::create_mirror_view(cos_theta);
+  auto host_sin = Kokkos::create_mirror_view(sin_theta);
+  for (int theta = 0; theta < fixture::theta_count; ++theta) {
+    host_cos(theta) = std::cos(angular_grid.theta(theta));
+    host_sin(theta) = std::sin(angular_grid.theta(theta));
+  }
+  Kokkos::deep_copy(execution, cos_theta, host_cos);
+  Kokkos::deep_copy(execution, sin_theta, host_sin);
+
+  constexpr std::size_t field_count = 7;
+  teuk::Plus2RouteBTowerView tower(
+      "routeb_coordinate_tower", 5, registry.size(), field_count,
+      fixture::radial_count, fixture::theta_count);
+  teuk::Plus2RouteBTowerStampView stamps(
+      "routeb_coordinate_stamps", 5, registry.size(), fixture::radial_count,
+      fixture::theta_count);
+  auto host_tower = Kokkos::create_mirror_view(tower);
+  auto host_stamps = Kokkos::create_mirror_view(stamps);
+  for (std::size_t level = 0; level < 5; ++level) {
+    for (std::size_t mode_index = 0; mode_index < registry.size();
+         ++mode_index) {
+      const int mode = registry.modes()[mode_index];
+      for (int radial = 0; radial < fixture::radial_count; ++radial) {
+        const double radius = grid.coordinate(radial);
+        for (int theta = 0; theta < fixture::theta_count; ++theta) {
+          for (std::size_t field = 0; field < field_count; ++field) {
+            host_tower(level, mode_index, field, radial, theta) = C{};
+          }
+          for (std::size_t kind = 0; kind < 3; ++kind) {
+            if (case_index != 3 && case_index != static_cast<int>(kind)) {
+              continue;
+            }
+            const std::complex<double> amplitude(
+                fixture::amplitudes[kind][mode_index].real(),
+                fixture::amplitudes[kind][mode_index].imag());
+            const std::complex<double> lambda(
+                fixture::lambdas[kind][mode_index].real(),
+                fixture::lambdas[kind][mode_index].imag());
+            const double radial_profile =
+                radius * radius * std::exp(fixture::alphas[kind] * radius) *
+                (1.0 + fixture::linear[kind] * radius +
+                 fixture::quadratic[kind] * radius * radius);
+            const double harmonic =
+                teuk::angular::spin_weighted_harmonic_theta(
+                    fixture::ell, mode, fixture::field_spins[kind],
+                    angular_grid.theta(theta));
+            const std::complex<double> value =
+                amplitude * std::exp(lambda * fixture::time) *
+                std::pow(lambda, static_cast<int>(level)) * radial_profile *
+                harmonic;
+            const C coefficient(value.real(), value.imag());
+            if (kind == 0) {
+              const auto background = teuk::kerr_background_point(
+                  parameters, radius, host_cos(theta), host_sin(theta));
+              host_tower(level, mode_index, 6, radial, theta) =
+                  background.mu0 * coefficient;
+            } else if (kind == 1) {
+              host_tower(level, mode_index, 5, radial, theta) = coefficient;
+            } else {
+              host_tower(level, mode_index, 3, radial, theta) = coefficient;
+            }
+          }
+          host_stamps(level, mode_index, radial, theta) = 47;
+        }
+      }
+    }
+  }
+  Kokkos::deep_copy(execution, tower, host_tower);
+  Kokkos::deep_copy(execution, stamps, host_stamps);
+  teuk::Plus2RouteBCurvatureSpatialProvider provider(
+      execution, registry, grid, parameters, fixture::provider_ell_max, cos_theta,
+      sin_theta, "routeb_coordinate_provider");
+  provider.evaluate(execution, {47, tower, stamps});
+  execution.fence();
+  return {Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, provider.curvature_stage().fields)};
 }
 
 }  // namespace
@@ -206,6 +425,8 @@ TEST_CASE("Route-B constrained curvature provider closes all six scri fields") {
     CHECK(error_cm > 15.0 * error_mf);
     CHECK(error_mf > 0.0);
     CHECK(max_magnitude(fine.scri) > 1.0e-8);
+    gate_disaggregated_scri(coarse, medium, fine, spin);
+    gate_disaggregated_peeling(coarse, medium, fine, spin);
     // N=65 is recorded only as a conditioning probe, never used to promote
     // the provider or to select a friendlier window.
     std::cout << "Route-B constrained curvature spin " << spin
@@ -221,4 +442,210 @@ TEST_CASE("Route-B constrained curvature provider closes all six scri fields") {
               << residual_fine << '\n';
     CHECK(std::isfinite(residual_fine));
   }
+}
+
+TEST_CASE("Route-B curvature provider matches independent coordinate Weyl") {
+  namespace fixture = plus2_routeb_curvature_coordinate_fixture;
+  double maximum_z0_error = 0.0;
+  double maximum_z1_error = 0.0;
+  const fixture::Expected* worst_z0 = nullptr;
+  const fixture::Expected* worst_z1 = nullptr;
+  C worst_z0_actual{};
+  C worst_z1_actual{};
+  std::array<double, 4> case_z0_error{};
+  std::array<double, 4> case_z1_error{};
+  for (int case_index = 0; case_index < 4; ++case_index) {
+    for (int spin_index = 0; spin_index < 3; ++spin_index) {
+      const auto run = run_coordinate_tower(spin_index, case_index);
+      for (const auto& expected : fixture::expected) {
+        if (expected.case_index != case_index ||
+            expected.spin_index != spin_index) {
+          continue;
+        }
+      const std::size_t z0_field = 2 * expected.level;
+      const std::size_t z1_field = z0_field + 1;
+      const C actual_z0 = run.curvature(
+          expected.mode_index, z0_field, expected.radial_index,
+          expected.theta_index);
+      const C actual_z1 = run.curvature(
+          expected.mode_index, z1_field, expected.radial_index,
+          expected.theta_index);
+      const double z0_error = Kokkos::abs(actual_z0 - expected.z0);
+      const double z1_error = Kokkos::abs(actual_z1 - expected.z1);
+      case_z0_error[case_index] =
+          std::max(case_z0_error[case_index], z0_error);
+      case_z1_error[case_index] =
+          std::max(case_z1_error[case_index], z1_error);
+      if (z0_error > maximum_z0_error) {
+        maximum_z0_error = z0_error;
+        worst_z0 = &expected;
+        worst_z0_actual = actual_z0;
+      }
+      if (z1_error > maximum_z1_error) {
+        maximum_z1_error = z1_error;
+        worst_z1 = &expected;
+        worst_z1_actual = actual_z1;
+      }
+    }
+    }
+  }
+  std::cout << "Route-B coordinate-Weyl maximum Z0/Z1 errors "
+            << maximum_z0_error << ' ' << maximum_z1_error << '\n';
+  for (int case_index = 0; case_index < 4; ++case_index) {
+    std::cout << "Route-B coordinate-Weyl case " << case_index
+              << " Z0/Z1 errors " << case_z0_error[case_index] << ' '
+              << case_z1_error[case_index] << '\n';
+  }
+  if (worst_z0 != nullptr) {
+    std::cout << "Route-B worst Z0 fixture spin/r/theta/mode/level "
+              << worst_z0->spin_index << ' ' << worst_z0->radial_index << ' '
+              << worst_z0->theta_index << ' ' << worst_z0->mode_index << ' '
+              << worst_z0->level << " actual " << worst_z0_actual
+              << " expected " << worst_z0->z0 << '\n';
+  }
+  if (worst_z1 != nullptr) {
+    std::cout << "Route-B worst Z1 fixture spin/r/theta/mode/level "
+              << worst_z1->spin_index << ' ' << worst_z1->radial_index << ' '
+              << worst_z1->theta_index << ' ' << worst_z1->mode_index << ' '
+              << worst_z1->level << " actual " << worst_z1_actual
+              << " expected " << worst_z1->z1 << '\n';
+  }
+  CHECK(maximum_z0_error < 5.0e-11);
+  CHECK(maximum_z1_error < 5.0e-11);
+}
+
+TEST_CASE("Route-B curvature provider fails closed and stays hot") {
+  teuk::ExecutionSpace execution;
+  const teuk::ModeRegistry registry({-2, 2});
+  constexpr std::size_t radial_count = 25;
+  constexpr std::size_t theta_count = 8;
+  const teuk::UniformRadialGrid grid(radial_count, 0.0, 0.8);
+  const teuk::KerrParameters parameters{1.0, 0.63, 2.0};
+  const auto angular_grid = teuk::angular::gauss_legendre(theta_count);
+  teuk::Plus2SpatialThetaView cos_theta("routeb_contract_cos", theta_count);
+  teuk::Plus2SpatialThetaView sin_theta("routeb_contract_sin", theta_count);
+  auto host_cos = Kokkos::create_mirror_view(cos_theta);
+  auto host_sin = Kokkos::create_mirror_view(sin_theta);
+  for (std::size_t theta = 0; theta < theta_count; ++theta) {
+    host_cos(theta) = std::cos(angular_grid.theta(theta));
+    host_sin(theta) = std::sin(angular_grid.theta(theta));
+  }
+  Kokkos::deep_copy(execution, cos_theta, host_cos);
+  Kokkos::deep_copy(execution, sin_theta, host_sin);
+  teuk::Plus2RouteBTowerView tower("routeb_contract_tower", 5,
+                                   registry.size(), 7, radial_count,
+                                   theta_count);
+  teuk::Plus2RouteBTowerStampView stamps("routeb_contract_stamps", 5,
+                                         registry.size(), radial_count,
+                                         theta_count);
+  Kokkos::deep_copy(execution, tower, C{});
+  Kokkos::deep_copy(execution, stamps, std::uint64_t{1});
+  teuk::Plus2RouteBCurvatureSpatialProvider provider(
+      execution, registry, grid, parameters, 4, cos_theta, sin_theta,
+      "routeb_contract_provider");
+  provider.evaluate(execution, {1, tower, stamps});
+  execution.fence("finish Route-B valid contract stage");
+
+  const auto check_zero_invalid = [&]() {
+    const auto curvature = Kokkos::create_mirror_view_and_copy(
+        Kokkos::HostSpace{}, provider.curvature_stage().fields);
+    const auto curvature_stamps = Kokkos::create_mirror_view_and_copy(
+        Kokkos::HostSpace{}, provider.curvature_stage().stamps);
+    const auto derivatives = Kokkos::create_mirror_view_and_copy(
+        Kokkos::HostSpace{}, provider.derivative_stage().fields);
+    const auto derivative_stamps = Kokkos::create_mirror_view_and_copy(
+        Kokkos::HostSpace{}, provider.derivative_stage().stamps);
+    const auto audit = Kokkos::create_mirror_view_and_copy(
+        Kokkos::HostSpace{}, provider.endpoint_audit());
+    const auto audit_stamps = Kokkos::create_mirror_view_and_copy(
+        Kokkos::HostSpace{}, provider.endpoint_audit_stamps());
+    const auto ready = Kokkos::create_mirror_view_and_copy(
+        Kokkos::HostSpace{}, provider.readiness());
+    CHECK(ready(0) == 0);
+    for (std::size_t i = 0; i < curvature.size(); ++i) {
+      CHECK(Kokkos::abs(curvature.data()[i]) == 0.0);
+      CHECK(curvature_stamps.data()[i] == 0);
+    }
+    for (std::size_t i = 0; i < derivatives.size(); ++i) {
+      CHECK(Kokkos::abs(derivatives.data()[i]) == 0.0);
+      CHECK(derivative_stamps.data()[i] == 0);
+    }
+    for (std::size_t i = 0; i < audit.size(); ++i) {
+      CHECK(Kokkos::abs(audit.data()[i]) == 0.0);
+      CHECK(audit_stamps.data()[i] == 0);
+    }
+  };
+
+  Kokkos::deep_copy(execution, stamps, std::uint64_t{2});
+  auto stale = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{},
+                                                    stamps);
+  stale(4, 1, radial_count - 1, theta_count - 1) = 1;
+  Kokkos::deep_copy(execution, stamps, stale);
+  provider.evaluate(execution, {2, tower, stamps});
+  execution.fence("finish Route-B stale contract stage");
+  check_zero_invalid();
+
+  Kokkos::deep_copy(execution, stamps, std::uint64_t{3});
+  Kokkos::deep_copy(execution, tower, C{});
+  auto nonfinite = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{},
+                                                       tower);
+  nonfinite(2, 0, 3, 7, 4) = C(std::numeric_limits<double>::quiet_NaN(), 0.0);
+  Kokkos::deep_copy(execution, tower, nonfinite);
+  provider.evaluate(execution, {3, tower, stamps});
+  execution.fence("finish Route-B nonfinite contract stage");
+  check_zero_invalid();
+
+  CHECK(throws_invalid_argument(
+      [&] { provider.evaluate(execution, {3, tower, stamps}); }));
+  CHECK(throws_invalid_argument([&] {
+    provider.evaluate(execution, {4, tower, stamps}, {2, 3, 3, 5, 6});
+  }));
+  teuk::Plus2RouteBTowerView wrong_shape(
+      "routeb_wrong_shape", 4, registry.size(), 7, radial_count, theta_count);
+  CHECK(throws_invalid_argument(
+      [&] { provider.evaluate(execution, {4, wrong_shape, stamps}); }));
+
+  Kokkos::deep_copy(execution, tower, C{});
+  Kokkos::deep_copy(execution, stamps, std::uint64_t{4});
+  execution.fence("begin Route-B hot-stage instrumentation");
+  routeb_allocations = 0;
+  routeb_copies = 0;
+  routeb_fences = 0;
+  Kokkos::Tools::Experimental::set_allocate_data_callback(
+      count_routeb_allocation);
+  Kokkos::Tools::Experimental::set_begin_deep_copy_callback(count_routeb_copy);
+  Kokkos::Tools::Experimental::set_begin_fence_callback(count_routeb_fence);
+  provider.evaluate(execution, {4, tower, stamps});
+  Kokkos::Tools::Experimental::set_begin_fence_callback(nullptr);
+  Kokkos::Tools::Experimental::set_begin_deep_copy_callback(nullptr);
+  Kokkos::Tools::Experimental::set_allocate_data_callback(nullptr);
+  execution.fence("finish Route-B hot-stage instrumentation");
+  CHECK(routeb_allocations == 0);
+  CHECK(routeb_copies == 0);
+  CHECK(routeb_fences == 0);
+}
+
+TEST_CASE("Route-B curvature provider is linear and sharp paired") {
+  const auto base = run_analytic_tower(33, 0.63);
+  // The complete provider is linear.  This is checked pointwise over all six
+  // fields, both signed modes, and all theta nodes at scri.
+  const double amplitude = -1.7;
+  const auto scaled = run_analytic_tower(33, 0.63, amplitude);
+  for (std::size_t index = 0; index < base.scri.size(); ++index) {
+    CHECK(Kokkos::abs(scaled.scri[index] - amplitude * base.scri[index]) <
+          3.0e-12);
+  }
+  // Alter only the negative-mode tower.  Positive-mode curvature must change
+  // because Bsharp/Csharp/Usharp are conjugate values from the negative mode;
+  // same-m conjugation would make this hostile perturbation invisible.
+  const auto changed_negative = run_analytic_tower(33, 0.63, 1.0, 1.41);
+  const std::size_t one_mode = 6 * 10;
+  double positive_mode_change = 0.0;
+  for (std::size_t index = 0; index < one_mode; ++index) {
+    positive_mode_change =
+        std::max(positive_mode_change,
+                 Kokkos::abs(base.scri[one_mode + index] -
+                             changed_negative.scri[one_mode + index]));
+  }
+  CHECK(positive_mode_change > 1.0e-5);
 }

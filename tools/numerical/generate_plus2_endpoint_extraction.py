@@ -40,6 +40,12 @@ def fraction_literal(value: Fraction) -> str:
 def render() -> str:
     q0 = solve(list(range(1, 7)), 2)
     q1 = solve(list(range(1, 6)), 1)
+    # The six-node candidate is the minimum fourth-order construction and
+    # remains the independent review authority.  A seven-node promoted q0
+    # cancels the next moment as well; the complete curvature graph uses it
+    # because the fixed N=9/17/33 disaggregated Z0 gate is pre-asymptotic for
+    # the minimum stencil.  This is an operator repair, not window selection.
+    q0_promoted = solve(list(range(1, 8)), 2)
     assert q0 == [Fraction(29, 6), Fraction(-461, 24), Fraction(31),
                   Fraction(-307, 12), Fraction(65, 6), Fraction(-15, 8)]
     assert q1 == [Fraction(-77, 12), Fraction(107, 6), Fraction(-39, 2),
@@ -48,6 +54,8 @@ def render() -> str:
     l2_q0 = sum(value * value for value in q0)
     l1_q1 = sum(map(abs, q1))
     l2_q1 = sum(value * value for value in q1)
+    l1_q0_promoted = sum(map(abs, q0_promoted))
+    l2_q0_promoted = sum(value * value for value in q0_promoted)
     rows = lambda values: ",\n    ".join(fraction_literal(v) for v in values)
     return f'''#pragma once
 
@@ -62,14 +70,19 @@ namespace teuk {{
 // annihilate powers 0,1,3,4,5 and extract the R^2 coefficient; the q1 moments
 // annihilate powers 0,2,3,4 and extract the R coefficient.  Therefore neither
 // stencil uses or overwrites the separately measured R=0 peeling residuals.
+// The promoted q0 stencil additionally annihilates power 6.
 inline constexpr std::size_t plus2_q0_endpoint_nodes = 6;
 inline constexpr std::size_t plus2_q1_endpoint_nodes = 5;
+inline constexpr std::size_t plus2_q0_promoted_endpoint_nodes = 7;
 inline constexpr Kokkos::Array<double, plus2_q0_endpoint_nodes>
     plus2_q0_endpoint_weights{{{{
     {rows(q0)}}}}};
 inline constexpr Kokkos::Array<double, plus2_q1_endpoint_nodes>
     plus2_q1_endpoint_weights{{{{
     {rows(q1)}}}}};
+inline constexpr Kokkos::Array<double, plus2_q0_promoted_endpoint_nodes>
+    plus2_q0_promoted_endpoint_weights{{{{
+    {rows(q0_promoted)}}}}};
 
 inline constexpr double plus2_q0_endpoint_l1 = {fraction_literal(l1_q0)};
 inline constexpr double plus2_q0_endpoint_l2_squared =
@@ -79,6 +92,11 @@ inline constexpr double plus2_q1_endpoint_l1 = {fraction_literal(l1_q1)};
 inline constexpr double plus2_q1_endpoint_l2_squared =
     {fraction_literal(l2_q1)};
 inline constexpr double plus2_q1_endpoint_linf = 39.0 / 2.0;
+inline constexpr double plus2_q0_promoted_endpoint_l1 =
+    {fraction_literal(l1_q0_promoted)};
+inline constexpr double plus2_q0_promoted_endpoint_l2_squared =
+    {fraction_literal(l2_q0_promoted)};
+inline constexpr double plus2_q0_promoted_endpoint_linf = 2545.0 / 36.0;
 
 }}  // namespace teuk
 '''
