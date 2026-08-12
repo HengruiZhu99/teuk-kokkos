@@ -1,7 +1,8 @@
 # Spin `+2` homogeneous validation and normalized-TSI audit
 
-Status: normalized Schwarzschild radial and field fixture passed; the
-moderate-Kerr extension remains open
+Status: normalized Schwarzschild radial and field fixture passed; a
+moderate-Kerr normalized separated fixture passed; Kerr field-level and QNM
+extensions remain open
 
 Original homogeneous-validation base: `a31e286`
 
@@ -209,20 +210,77 @@ Ripley arXiv source numerics_description.tex:
 Regeneration is fail-closed through the `--check` command and a CTest entry
 under `TEUK_ENABLE_SYMBOLIC_AUDIT`.
 
-### Remaining Kerr gate
+### Normalized moderate-Kerr separated fixture
 
-This result closes the normalized radial and field-level TSI blocker only for
-the specified Schwarzschild real-frequency horizon-in mode.  It does not
-claim a general or moderate-spin Kerr fixture, a horizon endpoint value, a
-QNM normalization, or an evolved-companion comparison.
+`tools/numerical/generate_plus2_tsi_kerr_separated_fixture.py` adds a second,
+independent fixture at
 
-The moderate-Kerr extension still requires an independent implementation of
-the regular spin-weighted spheroidal eigenvalue and the hatted angular Heun
-normalization at nonzero `a omega`, followed by the same signed-partner and
-radial checks.  Guessing an eigenvalue from production coefficients would
-make the oracle circular.  A future extension must:
+```text
+M=1, a=0.6, omega=1/5, ell=m=2, horizon-in.
+```
 
-- solve and converge the `s=+/-2` spheroidal eigenpairs independently;
-- reproduce both hatted angular factors and both radial first forms;
-- include the `(-omega,-m)` sharp sector with the complex Kerr phases;
-- repeat the full Kinnersley-to-code and hyperboloidal chain at `a != 0`.
+It uses only the pinned Berens source and supplemental normalization above.
+In particular, it does not ask the production coefficient code for an
+eigenvalue.  For each spin sign it integrates the canonical class-I Heun
+solution from both angular endpoints and solves the Eq. (B.21) midpoint
+Wronskian.  The independently obtained fine eigenvalues are
+
+```text
+lambda_(+2) = -0.796291369986029
+lambda_(-2) =  3.203708630013962,
+```
+
+which satisfy the paper's independently predicted difference of four to
+`3e-14`.  The modes retain the exact Eq. (2.6) `H(0)=1` normalization rather
+than being rescaled after the solve.
+
+Local Taylor jets generated from the independent angular and radial ODEs
+apply both first-form ATSIs and RTSIs.  The fine maximum angular residual is
+`5.52e-13`.  The four radial residuals (both first forms and both composed
+second forms) are respectively
+
+```text
+4.95e-13, 4.78e-13, 7.92e-11, 2.07e-12.
+```
+
+The individual factors are retained: `Dhat=D/24`, `DhatPrime=24`,
+`Cin=Gamma`, and `CinPrime=C/Gamma`, with the Kerr horizon frequency
+`k=omega-m Omega_+` in `w=4 M k r_+`.  Their products reproduce `D` and `C`.
+The real-frequency signed partner is solved separately at
+`(-omega,-m)`; radial conjugation is exact at serialized precision and the
+angular spin-flip/conjugation residual is `3.79e-15`.
+The Eq. (2.44) sharp-to-same amplitude ratio is
+`-0.0550458715596330-0.0834862385321101 i`; it is checked against
+`(i omega M/2) CinPrime/conjugate(CinPrime)` and explicitly rejected if its
+complex Kerr phase is replaced by the phase-free `i omega M/2` shortcut.
+
+Tightening the endpoint seed, Heun series order, and ODE tolerances reduces
+the normalized angular mode change from `5.82e-10` to `1.04e-11` and the
+normalized radial mode change from `1.33e-9` to `9.65e-12`.  The generated
+header stores all three levels and the SHA-256 of its generator and pinned
+primary sources.  CTest regenerates it byte-for-byte under
+`TEUK_ENABLE_SYMBOLIC_AUDIT`; the ordinary C++ suite also checks the factor
+products, residual bounds, signed symmetry, and convergence metadata.
+
+This closes the moderate-spin, real-frequency, normalized **separated-mode**
+TSI gate.  It does not use or modify any production evolution path.
+
+### Remaining Kerr and QNM gates
+
+The two current fixtures still do not claim a QNM normalization, a Kerr
+horizon endpoint value, or an evolved-companion comparison.  The
+moderate-Kerr fixture stops before metric reconstruction and therefore does
+not close the field-level `T0[h]` gate at nonzero spin.  Remaining work is:
+
+- supply an independently pinned Schwarzschild QNM mode normalization (not
+  merely the frequency already used by the production ringdown regression)
+  and repeat the complex-frequency hatted-mode and sharp-partner checks;
+- repeat that normalized QNM calculation at moderate Kerr spin;
+- extend the ORG metric construction and the full Kinnersley-to-code and
+  Boyer--Lindquist-to-hyperboloidal chain to `a != 0`, then compare against
+  `evaluate_plus2_linear_psi0`;
+- add horizon-regular endpoint data and an evolved-companion comparison.
+
+These are separate gates.  In particular, the real-frequency fixture must
+not be relabeled as a QNM test, and its separated identities must not be
+relabeled as a nonzero-spin `T0[h]` comparison.
