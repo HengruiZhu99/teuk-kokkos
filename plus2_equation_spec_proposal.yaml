@@ -83,6 +83,9 @@ required_inputs:
 
 compact_raw_source:
   status: symbolically_verified_conditional_on_regular_Z0_Z1
+  implementation: include/teuk/plus2_source.hpp
+  integration_status: standalone_not_wired_to_runtime
+  implementation_test: tests/test_plus2_source.cpp
   ledger: PLUS2_SOURCE_TERM_LEDGER.csv
   derivation: docs/PLUS2_SOURCE_COMPACTIFICATION.md
   stored_fields:
@@ -121,4 +124,5 @@ production_gate:
   source_compactification_gate: passed
   blockers:
     - cancellation_safe_Psi0_Psi1_oracle
-    - cpu_gpu_and_convergence_validation
+    - runtime_pipeline_common_stage_integration
+    - gpu_and_convergence_validation

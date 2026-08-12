@@ -1,8 +1,9 @@
 # Compactification of the raw ORG spin `+2` source
 
 **Status:** quadratic source compactification gate passed, conditional on the
-separate linear `Z0/Z1` peeling gate; no production kernel is authorized by
-this document alone.
+separate linear `Z0/Z1` peeling gate.  The reviewed expression now has a
+standalone device-callable implementation, but it is not connected to the
+runtime pipeline.
 
 This document continues the convention/source gate in
 `docs/PLUS2_FORMALISM_GATE.md`.  It starts from the raw, ungauge-fixed
@@ -310,5 +311,24 @@ copy a production expression.
 
 The compact quadratic-source subgate is passed.  The proposal as a whole may
 be promoted to production authority only after the linear `Z0/Z1` gate
-independently demonstrates its peeling cancellations; CPU/GPU implementation
-and convergence qualification are subsequent gates, not symbolic authority.
+independently demonstrates its peeling cancellations; common-stage runtime
+integration, GPU execution, and convergence qualification are subsequent
+gates, not symbolic authority.
+
+## 7. Standalone implementation boundary
+
+`include/teuk/plus2_source.hpp` transcribes every one of the 51 rows in
+`PLUS2_SOURCE_TERM_LEDGER.csv` into named family members.  It accepts explicit
+regular primitives and derivative values rather than constructing `Z0` or
+`Z1`, supports both `Complex` and `Jet1<Complex>`, and performs no allocation
+or mode lookup in its point functions.  `make_plus2_pair_lookup` is a
+setup-time helper that records both signed parent indices and the distinct
+negative-mode indices required by sharp.
+
+`tests/test_plus2_source.cpp` reflects the CSV IDs and family counts, compares
+every named term with an independent `std::complex` host transcription at 16
+deterministic Kerr/random-field points, checks family closure, signed ordered
+pairs, sharp lookup, common-amplitude quadratic scaling, every Jet directional
+derivative, allocation freedom, regular coordinate normalization, and Kokkos
+device parity.  This module deliberately remains absent from
+`SpatialPipeline`; its existence does not enable a sourced companion run.

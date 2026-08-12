@@ -61,6 +61,8 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_qnm.cpp")
   add_executable(teuk_tests ${TEUK_TEST_SOURCES})
   target_include_directories(teuk_tests PRIVATE tests)
+  target_compile_definitions(teuk_tests PRIVATE
+    TEUK_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   target_link_libraries(teuk_tests PRIVATE teuk)
   add_test(NAME teuk.unit COMMAND teuk_tests)
 
@@ -84,5 +86,13 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/verify_second_order_teukolsky.py
         --json-out
         ${CMAKE_CURRENT_BINARY_DIR}/verify_second_order_teukolsky_output.local.json)
+    add_test(
+      NAME teuk.plus2_formalism_gate
+      COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/symbolic/verify_plus2_formalism_gate.py)
+    add_test(
+      NAME teuk.plus2_compact_source_gate
+      COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/symbolic/verify_plus2_compact_source.py)
   endif()
 endif()
