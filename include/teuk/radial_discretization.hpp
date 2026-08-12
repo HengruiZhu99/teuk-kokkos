@@ -81,4 +81,58 @@ KOKKOS_INLINE_FUNCTION Value radial_compatible_dissipation_at(
                                              spacing, strength);
 }
 
+// Strided counterpart for LayoutRight (mode,field,radial,theta) storage.
+// The algebra is the same negative-semidefinite A^T A form as the contiguous
+// operators above; only the radial memory stride differs.
+template <class Value>
+KOKKOS_INLINE_FUNCTION Value radial_compatible_dissipation_at(
+    const RadialDiscretization discretization, const Value* const values,
+    const std::size_t point_count, const std::size_t index,
+    const double spacing, const double strength, const std::size_t stride) {
+  const std::size_t difference_order =
+      discretization == RadialDiscretization::D84 ? 5 : 3;
+  const std::size_t first_row =
+      index > difference_order ? index - difference_order : 0;
+  const std::size_t last_row =
+      index < point_count - difference_order
+          ? index
+          : point_count - difference_order - 1;
+  Value normal_product = 0.0;
+  for (std::size_t row = first_row; row <= last_row; ++row) {
+    Value difference = 0.0;
+    if (discretization == RadialDiscretization::D84) {
+      difference = -values[row * stride] +
+                   5.0 * values[(row + 1) * stride] -
+                   10.0 * values[(row + 2) * stride] +
+                   10.0 * values[(row + 3) * stride] -
+                   5.0 * values[(row + 4) * stride] +
+                   values[(row + 5) * stride];
+    } else {
+      difference = -values[row * stride] +
+                   3.0 * values[(row + 1) * stride] -
+                   3.0 * values[(row + 2) * stride] +
+                   values[(row + 3) * stride];
+    }
+    const std::size_t position = index - row;
+    double transpose = 0.0;
+    if (discretization == RadialDiscretization::D84) {
+      transpose = position == 0   ? -1.0
+                  : position == 1 ? 5.0
+                  : position == 2 ? -10.0
+                  : position == 3 ? 10.0
+                  : position == 4 ? -5.0
+                                  : 1.0;
+    } else {
+      transpose = position == 0
+                      ? -1.0
+                      : (position == 1
+                             ? 3.0
+                             : (position == 2 ? -3.0 : 1.0));
+    }
+    normal_product += transpose * difference;
+  }
+  return -strength * normal_product /
+         (spacing * radial_norm_weight(discretization, point_count, index));
+}
+
 }  // namespace teuk

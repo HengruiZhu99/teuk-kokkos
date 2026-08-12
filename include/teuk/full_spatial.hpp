@@ -4,11 +4,13 @@
 
 #include <cstddef>
 #include <stdexcept>
+#include <type_traits>
 
 #include "teuk/background.hpp"
 #include "teuk/fields.hpp"
 #include "teuk/grid.hpp"
 #include "teuk/linear_spatial.hpp"
+#include "teuk/radial_discretization.hpp"
 #include "teuk/reconstruction.hpp"
 #include "teuk/reconstruction_spatial.hpp"
 #include "teuk/sbp.hpp"
@@ -54,6 +56,237 @@ std::size_t maximum_field_offset(const ReconstructionFullFieldOffsets& o) {
   return maximum(maximum(maximum(o.G, o.Lambda), maximum(o.H, o.B)),
                  maximum(maximum(o.Pi, o.C), o.U));
 }
+
+namespace full_spatial_detail {
+
+struct ViewStride4 {
+  std::size_t mode;
+  std::size_t field;
+  std::size_t radial;
+  std::size_t theta;
+};
+
+struct ViewStride3 {
+  std::size_t mode;
+  std::size_t radial;
+  std::size_t theta;
+};
+
+template <class View>
+ViewStride4 view_stride4(const View& view) {
+  return {view.stride(0), view.stride(1), view.stride(2), view.stride(3)};
+}
+
+template <class View>
+ViewStride3 view_stride3(const View& view) {
+  return {view.stride(0), view.stride(1), view.stride(2)};
+}
+
+KOKKOS_INLINE_FUNCTION
+std::size_t rank4_index(const std::size_t mode, const std::size_t field,
+                        const std::size_t radial, const std::size_t theta,
+                        const ViewStride4 stride) {
+  return mode * stride.mode + field * stride.field +
+         radial * stride.radial + theta * stride.theta;
+}
+
+KOKKOS_INLINE_FUNCTION
+std::size_t rank3_index(const std::size_t mode, const std::size_t radial,
+                        const std::size_t theta, const ViewStride3 stride) {
+  return mode * stride.mode + radial * stride.radial + theta * stride.theta;
+}
+
+struct TeukolskyPrepareReductionFunctor {
+  const Complex* state;
+  Complex* scratch;
+  ViewStride4 state_stride;
+  ViewStride4 scratch_stride;
+  std::size_t point_count;
+  std::size_t theta_count;
+  std::size_t psi_field;
+  std::size_t q_field;
+  double inverse_spacing;
+  ReductionEvolution reduction;
+  RadialDiscretization discretization;
+
+  KOKKOS_INLINE_FUNCTION
+  void operator()(const std::size_t flat) const {
+    constexpr std::size_t dr_psi = static_cast<std::size_t>(
+        TeukolskyRadialScratch::RadialDerivativePsi);
+    constexpr std::size_t effective_q =
+        static_cast<std::size_t>(TeukolskyRadialScratch::EffectiveQ);
+    const std::size_t mode_radial = flat / theta_count;
+    const std::size_t theta = flat - mode_radial * theta_count;
+    const std::size_t mode = mode_radial / point_count;
+    const std::size_t radial = mode_radial - mode * point_count;
+    const std::size_t psi_line =
+        rank4_index(mode, psi_field, 0, theta, state_stride);
+    const Complex derivative_psi = radial_first_derivative_strided_at(
+        discretization, state + psi_line, point_count, radial,
+        inverse_spacing, state_stride.radial);
+    scratch[rank4_index(mode, dr_psi, radial, theta, scratch_stride)] =
+        derivative_psi;
+    scratch[rank4_index(mode, effective_q, radial, theta, scratch_stride)] =
+        reduction == ReductionEvolution::StageConstrained
+            ? derivative_psi
+            : state[rank4_index(mode, q_field, radial, theta, state_stride)];
+  }
+};
+
+struct TeukolskySpatialPrimitivesFunctor {
+  const Complex* state;
+  Complex* scratch;
+  const int* signed_modes;
+  const Real* theta_coordinates;
+  UniformRadialGrid grid;
+  TeukolskyParameters parameters;
+  ViewStride4 state_stride;
+  ViewStride4 scratch_stride;
+  std::size_t point_count;
+  std::size_t theta_count;
+  TeukolskyFullFieldOffsets fields;
+  double inverse_spacing;
+  RadialDiscretization discretization;
+
+  KOKKOS_INLINE_FUNCTION
+  void operator()(const std::size_t flat) const {
+    constexpr std::size_t effective_q =
+        static_cast<std::size_t>(TeukolskyRadialScratch::EffectiveQ);
+    constexpr std::size_t dr_q =
+        static_cast<std::size_t>(TeukolskyRadialScratch::RadialDerivativeQ);
+    constexpr std::size_t psi_velocity =
+        static_cast<std::size_t>(TeukolskyRadialScratch::PsiVelocity);
+    const std::size_t mode_radial = flat / theta_count;
+    const std::size_t theta = flat - mode_radial * theta_count;
+    const std::size_t mode = mode_radial / point_count;
+    const std::size_t radial = mode_radial - mode * point_count;
+    const std::size_t q_line =
+        rank4_index(mode, effective_q, 0, theta, scratch_stride);
+    const Complex derivative_q = radial_first_derivative_strided_at(
+        discretization, scratch + q_line, point_count, radial,
+        inverse_spacing, scratch_stride.radial);
+    scratch[rank4_index(mode, dr_q, radial, theta, scratch_stride)] =
+        derivative_q;
+    TeukolskyParameters point_parameters = parameters;
+    point_parameters.azimuthal_mode = signed_modes[mode];
+    const auto coefficients = teukolsky_coefficients(
+        point_parameters, grid.coordinate(radial), theta_coordinates[theta]);
+    const TeukolskyState point{
+        state[rank4_index(mode, fields.P, radial, theta, state_stride)],
+        scratch[
+            rank4_index(mode, effective_q, radial, theta, scratch_stride)],
+        state[rank4_index(mode, fields.Psi, radial, theta, state_stride)]};
+    scratch[rank4_index(mode, psi_velocity, radial, theta, scratch_stride)] =
+        teukolsky_psi_rhs(coefficients, point);
+  }
+};
+
+struct TeukolskyRhsFunctor {
+  const Complex* state;
+  Complex* scratch;
+  const Complex* angular_laplacian;
+  const Complex* forcing;
+  Complex* output;
+  const int* signed_modes;
+  const Real* theta_coordinates;
+  UniformRadialGrid grid;
+  TeukolskyParameters parameters;
+  ViewStride4 state_stride;
+  ViewStride4 scratch_stride;
+  ViewStride3 angular_stride;
+  ViewStride3 forcing_stride;
+  ViewStride4 output_stride;
+  std::size_t point_count;
+  std::size_t theta_count;
+  TeukolskyFullFieldOffsets stage_fields;
+  TeukolskyFullFieldOffsets output_fields;
+  ReductionEvolution reduction;
+  double inverse_spacing;
+  double dissipation_strength;
+  RadialDiscretization discretization;
+
+  KOKKOS_INLINE_FUNCTION
+  void operator()(const std::size_t flat) const {
+    constexpr std::size_t dr_psi = static_cast<std::size_t>(
+        TeukolskyRadialScratch::RadialDerivativePsi);
+    constexpr std::size_t effective_q =
+        static_cast<std::size_t>(TeukolskyRadialScratch::EffectiveQ);
+    constexpr std::size_t dr_q =
+        static_cast<std::size_t>(TeukolskyRadialScratch::RadialDerivativeQ);
+    constexpr std::size_t psi_velocity =
+        static_cast<std::size_t>(TeukolskyRadialScratch::PsiVelocity);
+    constexpr std::size_t dr_psi_velocity = static_cast<std::size_t>(
+        TeukolskyRadialScratch::RadialDerivativePsiVelocity);
+    const std::size_t mode_radial = flat / theta_count;
+    const std::size_t theta = flat - mode_radial * theta_count;
+    const std::size_t mode = mode_radial / point_count;
+    const std::size_t radial = mode_radial - mode * point_count;
+    const std::size_t velocity_line =
+        rank4_index(mode, psi_velocity, 0, theta, scratch_stride);
+    const Complex derivative_velocity = radial_first_derivative_strided_at(
+        discretization, scratch + velocity_line, point_count, radial,
+        inverse_spacing, scratch_stride.radial);
+    scratch[
+        rank4_index(mode, dr_psi_velocity, radial, theta, scratch_stride)] =
+        derivative_velocity;
+    TeukolskyParameters point_parameters = parameters;
+    point_parameters.azimuthal_mode = signed_modes[mode];
+    const auto coefficients = teukolsky_coefficients(
+        point_parameters, grid.coordinate(radial), theta_coordinates[theta]);
+    const TeukolskyState point{
+        state[rank4_index(mode, stage_fields.P, radial, theta, state_stride)],
+        scratch[
+            rank4_index(mode, effective_q, radial, theta, scratch_stride)],
+        state[
+            rank4_index(mode, stage_fields.Psi, radial, theta, state_stride)]};
+    const Complex constraint =
+        state[rank4_index(mode, stage_fields.Q, radial, theta, state_stride)] -
+        scratch[rank4_index(mode, dr_psi, radial, theta, scratch_stride)];
+    const double damping = reduction == ReductionEvolution::FreeDamped
+                               ? parameters.reduction_damping
+                               : 0.0;
+    const std::size_t angular_index =
+        rank3_index(mode, radial, theta, angular_stride);
+    const std::size_t forcing_index =
+        rank3_index(mode, radial, theta, forcing_stride);
+    const std::size_t p_output =
+        rank4_index(mode, output_fields.P, radial, theta, output_stride);
+    const std::size_t q_output =
+        rank4_index(mode, output_fields.Q, radial, theta, output_stride);
+    const std::size_t psi_output =
+        rank4_index(mode, output_fields.Psi, radial, theta, output_stride);
+    output[p_output] = teukolsky_p_rhs(
+        coefficients, point,
+        scratch[rank4_index(mode, dr_q, radial, theta, scratch_stride)],
+        angular_laplacian[angular_index], forcing[forcing_index]);
+    output[q_output] =
+        teukolsky_q_rhs(derivative_velocity, constraint, damping);
+    output[psi_output] =
+        scratch[
+            rank4_index(mode, psi_velocity, radial, theta, scratch_stride)];
+    if (dissipation_strength > 0.0) {
+      const auto dissipation = [&](const std::size_t field) {
+        const std::size_t line =
+            rank4_index(mode, field, 0, theta, state_stride);
+        return radial_compatible_dissipation_at(
+            discretization, state + line, point_count, radial,
+            grid.spacing(), dissipation_strength, state_stride.radial);
+      };
+      output[p_output] += dissipation(stage_fields.P);
+      output[q_output] += dissipation(stage_fields.Q);
+      output[psi_output] += dissipation(stage_fields.Psi);
+    }
+  }
+};
+
+static_assert(std::is_trivially_copyable_v<TeukolskyPrepareReductionFunctor>);
+static_assert(std::is_trivially_copyable_v<TeukolskySpatialPrimitivesFunctor>);
+static_assert(std::is_trivially_copyable_v<TeukolskyRhsFunctor>);
+static_assert(sizeof(TeukolskyPrepareReductionFunctor) < 1800);
+static_assert(sizeof(TeukolskySpatialPrimitivesFunctor) < 1800);
+static_assert(sizeof(TeukolskyRhsFunctor) < 1800);
+
+}  // namespace full_spatial_detail
 
 template <class View4D>
 KOKKOS_INLINE_FUNCTION Complex full_strided_radial_derivative_at(
@@ -102,7 +335,8 @@ inline void evaluate_sbp_teukolsky_full_stage_rhs(
     const ScratchView& scratch, const OutputView& output_rhs,
     const double dissipation_strength = 0.0,
     const TeukolskyFullFieldOffsets stage_fields = {},
-    const TeukolskyFullFieldOffsets output_fields = {}) {
+    const TeukolskyFullFieldOffsets output_fields = {},
+    const RadialDiscretization discretization = RadialDiscretization::D42) {
   static_assert(StageView::rank == 4 && ScratchView::rank == 4 &&
                     OutputView::rank == 4 && AngularView::rank == 3 &&
                     ForcingView::rank == 3,
@@ -110,7 +344,7 @@ inline void evaluate_sbp_teukolsky_full_stage_rhs(
   const std::size_t mode_count = stage_state.extent(0);
   const std::size_t point_count = grid.size();
   const std::size_t theta_count = stage_state.extent(3);
-  if (point_count < d42_minimum_points ||
+  if (point_count < radial_minimum_points(discretization) ||
       stage_state.extent(1) <= maximum_field_offset(stage_fields) ||
       stage_state.extent(2) != point_count || signed_modes.extent(0) != mode_count ||
       theta_coordinates.extent(0) != theta_count ||
@@ -134,16 +368,6 @@ inline void evaluate_sbp_teukolsky_full_stage_rhs(
     throw std::invalid_argument("dissipation strength must be nonnegative");
   }
 
-  constexpr std::size_t DrPsi = static_cast<std::size_t>(
-      TeukolskyRadialScratch::RadialDerivativePsi);
-  constexpr std::size_t EffectiveQ =
-      static_cast<std::size_t>(TeukolskyRadialScratch::EffectiveQ);
-  constexpr std::size_t DrQ =
-      static_cast<std::size_t>(TeukolskyRadialScratch::RadialDerivativeQ);
-  constexpr std::size_t PsiVelocity =
-      static_cast<std::size_t>(TeukolskyRadialScratch::PsiVelocity);
-  constexpr std::size_t DrPsiVelocity = static_cast<std::size_t>(
-      TeukolskyRadialScratch::RadialDerivativePsiVelocity);
   const double inverse_spacing = 1.0 / grid.spacing();
   const std::size_t total_points = mode_count * point_count * theta_count;
   const Kokkos::RangePolicy<CallerExecutionSpace> policy(
@@ -152,91 +376,48 @@ inline void evaluate_sbp_teukolsky_full_stage_rhs(
 
   Kokkos::parallel_for(
       "teuk_full_prepare_reduction", policy,
-      KOKKOS_LAMBDA(const std::size_t flat) {
-        const std::size_t mode_radial = flat / theta_count;
-        const std::size_t theta = flat - mode_radial * theta_count;
-        const std::size_t mode = mode_radial / point_count;
-        const std::size_t radial = mode_radial - mode * point_count;
-        const Complex derivative_psi = full_strided_radial_derivative_at(
-            stage_state, mode, stage_fields.Psi, point_count, radial, theta,
-            inverse_spacing);
-        scratch(mode, DrPsi, radial, theta) = derivative_psi;
-        scratch(mode, EffectiveQ, radial, theta) =
-            reduction == ReductionEvolution::StageConstrained
-                ? derivative_psi
-                : stage_state(mode, stage_fields.Q, radial, theta);
-      });
+      full_spatial_detail::TeukolskyPrepareReductionFunctor{
+          stage_state.data(), scratch.data(),
+          full_spatial_detail::view_stride4(stage_state),
+          full_spatial_detail::view_stride4(scratch),
+          point_count, theta_count, stage_fields.Psi, stage_fields.Q,
+          inverse_spacing, reduction, discretization});
 
   Kokkos::parallel_for(
       "teuk_full_spatial_primitives", policy,
-      KOKKOS_LAMBDA(const std::size_t flat) {
-        const std::size_t mode_radial = flat / theta_count;
-        const std::size_t theta = flat - mode_radial * theta_count;
-        const std::size_t mode = mode_radial / point_count;
-        const std::size_t radial = mode_radial - mode * point_count;
-        scratch(mode, DrQ, radial, theta) =
-            full_strided_radial_derivative_at(
-                scratch, mode, EffectiveQ, point_count, radial, theta,
-                inverse_spacing);
-        TeukolskyParameters parameters = base_parameters;
-        parameters.azimuthal_mode = signed_modes(mode);
-        const auto coefficients = teukolsky_coefficients(
-            parameters, grid.coordinate(radial), theta_coordinates(theta));
-        const TeukolskyState point{
-            stage_state(mode, stage_fields.P, radial, theta),
-            scratch(mode, EffectiveQ, radial, theta),
-            stage_state(mode, stage_fields.Psi, radial, theta)};
-        scratch(mode, PsiVelocity, radial, theta) =
-            teukolsky_psi_rhs(coefficients, point);
-      });
+      full_spatial_detail::TeukolskySpatialPrimitivesFunctor{
+          stage_state.data(), scratch.data(), signed_modes.data(),
+          theta_coordinates.data(), grid, base_parameters,
+          full_spatial_detail::view_stride4(stage_state),
+          full_spatial_detail::view_stride4(scratch), point_count, theta_count,
+          stage_fields, inverse_spacing, discretization});
 
   Kokkos::parallel_for(
-      "teuk_full_rhs", policy, KOKKOS_LAMBDA(const std::size_t flat) {
-        const std::size_t mode_radial = flat / theta_count;
-        const std::size_t theta = flat - mode_radial * theta_count;
-        const std::size_t mode = mode_radial / point_count;
-        const std::size_t radial = mode_radial - mode * point_count;
-        const Complex derivative_velocity = full_strided_radial_derivative_at(
-            scratch, mode, PsiVelocity, point_count, radial, theta,
-            inverse_spacing);
-        scratch(mode, DrPsiVelocity, radial, theta) = derivative_velocity;
-        TeukolskyParameters parameters = base_parameters;
-        parameters.azimuthal_mode = signed_modes(mode);
-        const auto coefficients = teukolsky_coefficients(
-            parameters, grid.coordinate(radial), theta_coordinates(theta));
-        const TeukolskyState point{
-            stage_state(mode, stage_fields.P, radial, theta),
-            scratch(mode, EffectiveQ, radial, theta),
-            stage_state(mode, stage_fields.Psi, radial, theta)};
-        const Complex constraint = stage_state(mode, stage_fields.Q, radial, theta) -
-                                   scratch(mode, DrPsi, radial, theta);
-        const double damping =
-            reduction == ReductionEvolution::FreeDamped
-                ? parameters.reduction_damping
-                : 0.0;
-        output_rhs(mode, output_fields.P, radial, theta) = teukolsky_p_rhs(
-            coefficients, point, scratch(mode, DrQ, radial, theta),
-            angular_laplacian(mode, radial, theta),
-            forcing(mode, radial, theta));
-        output_rhs(mode, output_fields.Q, radial, theta) =
-            teukolsky_q_rhs(derivative_velocity, constraint, damping);
-        output_rhs(mode, output_fields.Psi, radial, theta) =
-            scratch(mode, PsiVelocity, radial, theta);
-        if (dissipation_strength > 0.0) {
-          output_rhs(mode, output_fields.P, radial, theta) +=
-              full_strided_dissipation_at(
-                  stage_state, mode, stage_fields.P, point_count, radial, theta,
-                  grid.spacing(), dissipation_strength);
-          output_rhs(mode, output_fields.Q, radial, theta) +=
-              full_strided_dissipation_at(
-                  stage_state, mode, stage_fields.Q, point_count, radial, theta,
-                  grid.spacing(), dissipation_strength);
-          output_rhs(mode, output_fields.Psi, radial, theta) +=
-              full_strided_dissipation_at(
-                  stage_state, mode, stage_fields.Psi, point_count, radial,
-                  theta, grid.spacing(), dissipation_strength);
-        }
-      });
+      "teuk_full_rhs", policy, full_spatial_detail::TeukolskyRhsFunctor{
+                                   stage_state.data(),
+                                   scratch.data(),
+                                   angular_laplacian.data(),
+                                   forcing.data(),
+                                   output_rhs.data(),
+                                   signed_modes.data(),
+                                   theta_coordinates.data(),
+                                   grid,
+                                   base_parameters,
+                                   full_spatial_detail::view_stride4(
+                                       stage_state),
+                                   full_spatial_detail::view_stride4(scratch),
+                                   full_spatial_detail::view_stride3(
+                                       angular_laplacian),
+                                   full_spatial_detail::view_stride3(forcing),
+                                   full_spatial_detail::view_stride4(output_rhs),
+                                   point_count,
+                                   theta_count,
+                                   stage_fields,
+                                   output_fields,
+                                   reduction,
+                                   inverse_spacing,
+                                   dissipation_strength,
+                                   discretization});
 }
 
 template <class CallerExecutionSpace, class StageView, class DerivativeView>

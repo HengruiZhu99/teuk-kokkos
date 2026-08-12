@@ -4,9 +4,50 @@
 
 #include <cstddef>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 
 namespace teuk {
+
+namespace device_rk4_detail {
+
+template <class Value>
+struct StageFunctor {
+  const Value* state;
+  const Value* tangent;
+  Value* stage;
+  double scale;
+
+  KOKKOS_INLINE_FUNCTION
+  void operator()(const std::size_t i) const {
+    stage[i] = state[i] + scale * tangent[i];
+  }
+};
+
+template <class Value>
+struct AccumulateFunctor {
+  Value* state;
+  const Value* k1;
+  const Value* k2;
+  const Value* k3;
+  const Value* k4;
+  double scale;
+
+  KOKKOS_INLINE_FUNCTION
+  void operator()(const std::size_t i) const {
+    state[i] += scale *
+                (k1[i] + 2.0 * k2[i] + 2.0 * k3[i] + k4[i]);
+  }
+};
+
+static_assert(
+    std::is_trivially_copyable_v<StageFunctor<Kokkos::complex<double>>>);
+static_assert(
+    std::is_trivially_copyable_v<AccumulateFunctor<Kokkos::complex<double>>>);
+static_assert(sizeof(StageFunctor<Kokkos::complex<double>>) < 1800);
+static_assert(sizeof(AccumulateFunctor<Kokkos::complex<double>>) < 1800);
+
+}  // namespace device_rk4_detail
 
 // Preallocated flat device storage for classical RK4. A Value is normally a
 // small state struct (for example TeukolskyState), so all coupled components at
@@ -63,31 +104,27 @@ void device_classical_rk4_step(
   rhs(execution_space, time, state, k1);
   Kokkos::parallel_for(
       "teuk_rk4_stage_2", range_policy(execution_space, 0, size),
-      KOKKOS_LAMBDA(const std::size_t i) {
-        stage(i) = state(i) + (0.5 * step) * k1(i);
-      });
+      device_rk4_detail::StageFunctor<Value>{state.data(), k1.data(),
+                                             stage.data(), 0.5 * step});
 
   rhs(execution_space, time + 0.5 * step, stage, k2);
   Kokkos::parallel_for(
       "teuk_rk4_stage_3", range_policy(execution_space, 0, size),
-      KOKKOS_LAMBDA(const std::size_t i) {
-        stage(i) = state(i) + (0.5 * step) * k2(i);
-      });
+      device_rk4_detail::StageFunctor<Value>{state.data(), k2.data(),
+                                             stage.data(), 0.5 * step});
 
   rhs(execution_space, time + 0.5 * step, stage, k3);
   Kokkos::parallel_for(
       "teuk_rk4_stage_4", range_policy(execution_space, 0, size),
-      KOKKOS_LAMBDA(const std::size_t i) {
-        stage(i) = state(i) + step * k3(i);
-      });
+      device_rk4_detail::StageFunctor<Value>{state.data(), k3.data(),
+                                             stage.data(), step});
 
   rhs(execution_space, time + step, stage, k4);
   Kokkos::parallel_for(
       "teuk_rk4_accumulate", range_policy(execution_space, 0, size),
-      KOKKOS_LAMBDA(const std::size_t i) {
-        state(i) += (step / 6.0) *
-                    (k1(i) + 2.0 * k2(i) + 2.0 * k3(i) + k4(i));
-      });
+      device_rk4_detail::AccumulateFunctor<Value>{
+          state.data(), k1.data(), k2.data(), k3.data(), k4.data(),
+          step / 6.0});
 }
 
 // Advance a primary state and a passive companion through the same classical
@@ -138,16 +175,15 @@ void device_one_way_coupled_rk4_step(
   Kokkos::parallel_for(
       "teuk_one_way_primary_stage_2",
       range_policy(execution_space, 0, primary_size),
-      KOKKOS_LAMBDA(const std::size_t i) {
-        primary_stage(i) = primary(i) + (0.5 * step) * primary_k1(i);
-      });
+      device_rk4_detail::StageFunctor<PrimaryValue>{
+          primary.data(), primary_k1.data(), primary_stage.data(),
+          0.5 * step});
   Kokkos::parallel_for(
       "teuk_one_way_companion_stage_2",
       range_policy(execution_space, 0, companion_size),
-      KOKKOS_LAMBDA(const std::size_t i) {
-        companion_stage(i) =
-            companion(i) + (0.5 * step) * companion_k1(i);
-      });
+      device_rk4_detail::StageFunctor<CompanionValue>{
+          companion.data(), companion_k1.data(), companion_stage.data(),
+          0.5 * step});
 
   primary_rhs(execution_space, time + 0.5 * step, primary_stage, primary_k2);
   companion_rhs(execution_space, time + 0.5 * step, primary_stage,
@@ -155,16 +191,15 @@ void device_one_way_coupled_rk4_step(
   Kokkos::parallel_for(
       "teuk_one_way_primary_stage_3",
       range_policy(execution_space, 0, primary_size),
-      KOKKOS_LAMBDA(const std::size_t i) {
-        primary_stage(i) = primary(i) + (0.5 * step) * primary_k2(i);
-      });
+      device_rk4_detail::StageFunctor<PrimaryValue>{
+          primary.data(), primary_k2.data(), primary_stage.data(),
+          0.5 * step});
   Kokkos::parallel_for(
       "teuk_one_way_companion_stage_3",
       range_policy(execution_space, 0, companion_size),
-      KOKKOS_LAMBDA(const std::size_t i) {
-        companion_stage(i) =
-            companion(i) + (0.5 * step) * companion_k2(i);
-      });
+      device_rk4_detail::StageFunctor<CompanionValue>{
+          companion.data(), companion_k2.data(), companion_stage.data(),
+          0.5 * step});
 
   primary_rhs(execution_space, time + 0.5 * step, primary_stage, primary_k3);
   companion_rhs(execution_space, time + 0.5 * step, primary_stage,
@@ -172,15 +207,14 @@ void device_one_way_coupled_rk4_step(
   Kokkos::parallel_for(
       "teuk_one_way_primary_stage_4",
       range_policy(execution_space, 0, primary_size),
-      KOKKOS_LAMBDA(const std::size_t i) {
-        primary_stage(i) = primary(i) + step * primary_k3(i);
-      });
+      device_rk4_detail::StageFunctor<PrimaryValue>{
+          primary.data(), primary_k3.data(), primary_stage.data(), step});
   Kokkos::parallel_for(
       "teuk_one_way_companion_stage_4",
       range_policy(execution_space, 0, companion_size),
-      KOKKOS_LAMBDA(const std::size_t i) {
-        companion_stage(i) = companion(i) + step * companion_k3(i);
-      });
+      device_rk4_detail::StageFunctor<CompanionValue>{
+          companion.data(), companion_k3.data(), companion_stage.data(),
+          step});
 
   primary_rhs(execution_space, time + step, primary_stage, primary_k4);
   companion_rhs(execution_space, time + step, primary_stage, companion_stage,
@@ -188,19 +222,15 @@ void device_one_way_coupled_rk4_step(
   Kokkos::parallel_for(
       "teuk_one_way_primary_accumulate",
       range_policy(execution_space, 0, primary_size),
-      KOKKOS_LAMBDA(const std::size_t i) {
-        primary(i) += (step / 6.0) *
-                      (primary_k1(i) + 2.0 * primary_k2(i) +
-                       2.0 * primary_k3(i) + primary_k4(i));
-      });
+      device_rk4_detail::AccumulateFunctor<PrimaryValue>{
+          primary.data(), primary_k1.data(), primary_k2.data(),
+          primary_k3.data(), primary_k4.data(), step / 6.0});
   Kokkos::parallel_for(
       "teuk_one_way_companion_accumulate",
       range_policy(execution_space, 0, companion_size),
-      KOKKOS_LAMBDA(const std::size_t i) {
-        companion(i) += (step / 6.0) *
-                        (companion_k1(i) + 2.0 * companion_k2(i) +
-                         2.0 * companion_k3(i) + companion_k4(i));
-      });
+      device_rk4_detail::AccumulateFunctor<CompanionValue>{
+          companion.data(), companion_k1.data(), companion_k2.data(),
+          companion_k3.data(), companion_k4.data(), step / 6.0});
 }
 
 template <class Value, class StateView, class RightHandSide>
