@@ -29,11 +29,11 @@ components.  Background quantities are stationary.
 The authority is Loutrel--Ripley--Giorgi--Pretorius,
 arXiv:2008.11770:
 
-- Appendix A, Bianchi identities (A12e,A12f), labels `bianchi-5` and
+- Appendix A, Bianchi identities (A10e,A10f), labels `bianchi-5` and
   `bianchi-6` in the primary TeX;
-- their first-order vacuum expansions (C20a,C20b), labels `psi_1-recon` and
+- their first-order vacuum expansions (D4,D5), labels `psi_1-recon` and
   `psi_0-recon`;
-- the perturbed derivative (B8c), label `delta-1`.
+- the perturbed derivative display labelled `delta-1`.
 
 The coordinate tetrad, stationary coefficients, and GHP definitions are from
 Ripley--Loutrel--Giorgi--Pretorius, arXiv:2010.00162, Eqs. (5), (8), and the
@@ -85,7 +85,7 @@ After substituting the regular fields, the exact compact closure is
 
 ```text
 F0 := Delta_5 Z0
-   = eth_4 Z1 - R mu0 Z0 - 4 R tau0 Z1 + 3 Sig H.          (B0)
+   = eth_4 Z1 - R mu0 Z0 - 4 R tau0 Z1 + 3 Sig psi20.      (B0)
 ```
 
 Linearizing `bianchi-6` gives
@@ -173,7 +173,7 @@ F1_T = eth_3 H_T
          - 3 Ta_T psi20],                                  (B1T)
 
 F0_T = eth_4 Z1_T - R mu0 Z0_T - 4 R tau0 Z1_T
-       + 3 Sig_T H + 3 Sig H_T.                            (B0T)
+       + 3 Sig_T psi20.                                    (B0T)
 ```
 
 Apply the time derivative of (I), equivalently apply (I) to

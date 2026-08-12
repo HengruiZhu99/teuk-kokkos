@@ -35,10 +35,17 @@ b5_compact = (
     R**5 * eth4_Z1
     - (R * mu0) * (R**5 * Z0)
     - 4 * (R**2 * tau0) * (R**4 * Z1)
-    + 3 * (R**2 * Sig) * (R**3 * H)
+    + 3 * (R**2 * Sig) * (R**3 * psi20)
 ) / R**5
-F0 = eth4_Z1 - R * mu0 * Z0 - 4 * R * tau0 * Z1 + 3 * Sig * H
+F0 = eth4_Z1 - R * mu0 * Z0 - 4 * R * tau0 * Z1 + 3 * Sig * psi20
 check_equal("compact bianchi-5", b5_compact, F0)
+
+# Regression against the incorrect perturbation-perturbation substitution.
+# Bianchi-5 is a linear closure, so sigma^(1) multiplies background Psi2.
+wrong_F0 = eth4_Z1 - R * mu0 * Z0 - 4 * R * tau0 * Z1 + 3 * Sig * H
+if sp.expand(F0 - wrong_F0) == 0:
+    raise AssertionError("bianchi-5 background-curvature regression did not separate")
+print("PASS bianchi-5 rejects perturbed curvature")
 
 # Linear ordinary-NP bianchi-6.  The ORG perturbation is exactly
 # delta1=-h_lm Delta+(1/2)h_mm bardelta.
@@ -72,8 +79,7 @@ F0t_expected = (
     eth4_Z1t
     - R * mu0 * Z0t
     - 4 * R * tau0 * Z1t
-    + 3 * Sigt * H
-    + 3 * Sig * Ht
+    + 3 * Sigt * psi20
 )
 F1t_expected = eth3_Ht + R * (
     -2 * mu0 * Z1t

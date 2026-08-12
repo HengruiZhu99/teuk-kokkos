@@ -10,8 +10,9 @@ namespace teuk {
 // rotated-Kinnersley tetrad.  Scalar may be Complex or Jet1<Complex>; the
 // latter gives F and F_T without a separate hand-written tangent formula.
 //
-// Loutrel et al. arXiv:2008.11770, bianchi-5/6 and delta-1:
-//   Delta_5 Z0 = eth_4 Z1 - R mu0 Z0 - 4 R tau0 Z1 + 3 Sig H,
+// Loutrel et al. arXiv:2008.11770, Appendix A Eqs. (A10e,A10f),
+// Appendix D Eqs. (D5,D4), and the display labelled delta-1:
+//   Delta_5 Z0 = eth_4 Z1 - R mu0 Z0 - 4 R tau0 Z1 + 3 Sig psi20,
 //   Delta_4 Z1 = eth_3 H + R[-2 mu0 Z1 - 3 tau0 H
 //                    - Csharp Delta_3 psi20
 //                    + 1/2 Bsharp ethprime_3 psi20 - 3 Ta psi20].
@@ -36,9 +37,10 @@ template <class Scalar>
 KOKKOS_INLINE_FUNCTION Scalar plus2_bianchi_delta5_z0(
     const double radius, const KerrBackgroundPoint& background,
     const Scalar& z0, const Scalar& z1, const Scalar& sigma1,
-    const Scalar& h, const Scalar& eth4_z1) {
+    const Scalar& eth4_z1) {
   return eth4_z1 - radius * background.mu0 * z0 -
-         4.0 * radius * background.tau0 * z1 + 3.0 * sigma1 * h;
+         4.0 * radius * background.tau0 * z1 +
+         3.0 * sigma1 * background.psi20;
 }
 
 // Invert the exact repository Delta_n point formula.  This is regular at

@@ -41,14 +41,23 @@ TEST_CASE("plus2 Bianchi closures match ordinary-NP rescaling and signs") {
   const C ethprime3_psi20(-0.32, 0.19);
 
   const C f0 = teuk::plus2_bianchi_delta5_z0(
-      radius, background, z0, z1, sig, h, eth4_z1);
+      radius, background, z0, z1, sig, eth4_z1);
   const C physical_f0 =
       scaled(eth4_z1, radius, 5) -
       scaled(background.mu0, radius, 1) * scaled(z0, radius, 5) -
       4.0 * scaled(background.tau0, radius, 2) *
           scaled(z1, radius, 4) +
-      3.0 * scaled(sig, radius, 2) * scaled(h, radius, 3);
+      3.0 * scaled(sig, radius, 2) *
+          scaled(background.psi20, radius, 3);
   CHECK_COMPLEX_NEAR(f0, physical_f0 / std::pow(radius, 5), 3.0e-14);
+
+  // Regression against the former, nonlinear substitution
+  // sigma^(1) Psi2^(1).  Bianchi-5 is a linear closure and therefore uses
+  // the background type-D curvature Psi2^(0).
+  const C wrong_perturbed_curvature =
+      eth4_z1 - radius * background.mu0 * z0 -
+      4.0 * radius * background.tau0 * z1 + 3.0 * sig * h;
+  CHECK(Kokkos::abs(f0 - wrong_perturbed_curvature) > 1.0e-3);
 
   const C f1 = teuk::plus2_bianchi_delta4_z1(
       radius, background, z1, h, c_sharp, b_sharp, tau1, eth3_h,
@@ -93,9 +102,10 @@ TEST_CASE("plus2 Bianchi closures have the exact Schwarzschild reduction") {
   const C eth4_z1(0.22, 0.11), eth3_h(-0.09, 0.14);
   const C delta3_psi20(0.17, -0.03), ethprime3_psi20{};
   CHECK_COMPLEX_NEAR(
-      teuk::plus2_bianchi_delta5_z0(radius, background, z0, z1, sig, h,
+      teuk::plus2_bianchi_delta5_z0(radius, background, z0, z1, sig,
                                     eth4_z1),
-      eth4_z1 - radius * background.mu0 * z0 + 3.0 * sig * h,
+      eth4_z1 - radius * background.mu0 * z0 +
+          3.0 * sig * background.psi20,
       2.0e-15);
   CHECK_COMPLEX_NEAR(
       teuk::plus2_bianchi_delta4_z1(
@@ -157,13 +167,19 @@ TEST_CASE("plus2 Bianchi Jet tangents and triangular inversion are exact") {
   const C sig(-0.1, 0.13), sigt(0.04, 0.02);
   const C ethz1(0.2, -0.06), ethz1t(-0.03, 0.09);
   const C f0 = teuk::plus2_bianchi_delta5_z0(
-      radius, background, z0, z1, sig, h, ethz1);
+      radius, background, z0, z1, sig, ethz1);
   const C z0t = teuk::plus2_invert_capital_delta_n(
       f0, z0, z0r, 5, radius, parameters.mass,
       parameters.compactification_length);
   const J f0_jet = teuk::plus2_bianchi_delta5_z0(
-      radius, background, J{z0, z0t}, J{z1, z1t}, J{sig, sigt}, J{h, ht},
+      radius, background, J{z0, z0t}, J{z1, z1t}, J{sig, sigt},
       J{ethz1, ethz1t});
+  CHECK_COMPLEX_NEAR(
+      f0_jet.dt,
+      ethz1t - radius * background.mu0 * z0t -
+          4.0 * radius * background.tau0 * z1t +
+          3.0 * sigt * background.psi20,
+      2.0e-15);
   const C z0tt = teuk::plus2_invert_capital_delta_n(
       f0_jet.dt, z0t, z0tr, 5, radius, parameters.mass,
       parameters.compactification_length);
@@ -230,7 +246,7 @@ TEST_CASE("plus2 Bianchi helpers have device parity on rotating Kerr") {
             C(-0.1, 0.12), C(0.08, -0.09));
         output(0, 1) = teuk::plus2_bianchi_delta5_z0(
             radius, background, C(0.4, -0.1), C(-0.2, 0.1),
-            C(0.07, 0.03), C(0.3, -0.4), C(-0.05, 0.2));
+            C(0.07, 0.03), C(-0.05, 0.2));
         output(0, 2) = teuk::plus2_invert_capital_delta_n(
             output(0, 0), C(-0.2, 0.1), C(0.11, -0.07), 4, radius,
             parameters.mass, parameters.compactification_length);
@@ -253,7 +269,7 @@ TEST_CASE("plus2 Bianchi helpers have device parity on rotating Kerr") {
       host(0, 1),
       teuk::plus2_bianchi_delta5_z0(
           radius, background, C(0.4, -0.1), C(-0.2, 0.1),
-          C(0.07, 0.03), C(0.3, -0.4), C(-0.05, 0.2)),
+          C(0.07, 0.03), C(-0.05, 0.2)),
       3.0e-14);
   CHECK_COMPLEX_NEAR(
       host(0, 2),
