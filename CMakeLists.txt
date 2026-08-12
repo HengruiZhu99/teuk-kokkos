@@ -181,5 +181,11 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/numerical/generate_plus2_qnm_schwarzschild_fixture.py
         --check
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/plus2_qnm_schwarzschild_fixtures.hpp)
+    add_test(
+      NAME teuk.plus2_qnm_kerr_generation
+      COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/numerical/generate_plus2_qnm_kerr_fixture.py
+        --check
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/plus2_qnm_kerr_fixtures.hpp)
   endif()
 endif()

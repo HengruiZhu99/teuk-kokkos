@@ -34,12 +34,14 @@ tolerance. The corrected two-axis horizon test subsequently passed its focused
 `5/5` executable, and the concrete live-source seam passed its focused `1/1`
 executable. The subsequent sourced-replay and coordinate-authority development
 tree passed the direct Serial unit suite `387/387` and audit-enabled CTest
-`23/23`; the coordinate fixture freshness check also passed. These runs were
-completed before the final documentation-only wrap-up. At the owner's explicit
-request, no test was rerun after that wrap-up or after the final commit. These
-are development-tree results, not exact-final-commit qualification. A
-repository-only reviewer must run the commands requested in
-`docs/EXTERNAL_REVIEW_PROMPT_2026-08-12.md` before making any promotion claim.
+`23/23`; the coordinate fixture freshness check also passed.  The later
+moderate-Kerr QNM development tree passed `390/390` direct Serial tests and
+audit-enabled CTest `24/24` in `310.49 s`, including byte-for-byte generation
+of the new fixture. These runs were completed before the final
+documentation-only wrap-up. They are development-tree results, not
+exact-final-commit qualification. A repository-only reviewer must run the
+commands requested in `docs/EXTERNAL_REVIEW_PROMPT_2026-08-12.md` before
+making any promotion claim.
 
 The root `SHA256SUMS`, `MANIFEST.md`, and `AUDIT_MANIFEST.md` belong to an older
 spin-minus2 audit bundle and do not describe this current plus2 checkout. They
@@ -357,10 +359,12 @@ normalization and include dated errata rather than silently rewriting old
 claims. Bianchi-5 remains the already corrected
 `+3 Sig psi20`, not the erroneous nonlinear `+3 Sig H` substitution.
 
-Validation status is intentionally unchanged: Schwarzschild normalized QNM
-is qualified; moderate-Kerr real-frequency TSI is qualified; moderate-Kerr
-complex-frequency QNM and endpoint qualification remain open. No fixture was
-invented to close them.
+Validation now includes normalized interior QNM fixtures in Schwarzschild and
+at moderate Kerr spin, plus the moderate-Kerr real-frequency TSI fixture.  The
+Kerr QNM fixture independently solves the complex angular Wronskian and
+horizon-in radial Heun problem at `a/M=0.6`; it is not relabeled real-frequency
+evidence.  Horizon/scri QNM endpoints and an evolved-companion comparison
+remain open.
 
 ## 6. `T=200M` symptom, diagnostics, and relevance
 
@@ -437,7 +441,8 @@ pipeline, or solver enable gate was changed.
 | Production four-field replay | Not met | no production `Psi4^(2)`, campaign checkpoint, common four-field packing, runtime wiring, residual campaign, or backend parity |
 | Schwarzschild QNM | Met fixture | checked-in normalized interior fixture |
 | Moderate-Kerr real-frequency TSI | Met fixture | checked-in radial/angular/field fixture |
-| Moderate-Kerr complex QNM and endpoints | Open | no claim |
+| Moderate-Kerr complex QNM | Met interior fixture | pinned qnm 0.4.4 frequency/A, independent complex Heun angular/radial solution, raw/stored/operator and wrong-convention regressions |
+| Moderate-Kerr QNM endpoints | Open | no horizon/scri limit or evolved comparison |
 | Current exact-head B580 qualification | Not met | Serial only; local device previously wedged/device-lost |
 | Spin `-2` production equations unchanged | Met by diff scope | no production equation/source/pipeline files changed; exact-final-tree suite still needs rerun |
 | Spin `+2` production enabled | No | solver remains fail-closed by design |
@@ -456,7 +461,8 @@ pipeline, or solver enable gate was changed.
    four-Weyl output, sourced residual convergence, and backend qualification.
 4. Complete sourced four-field time/radial/angular residual convergence and
    current exact-head accelerator qualification.
-5. Add moderate-spin complex-frequency QNM and horizon/scri endpoint fixtures.
+5. Add moderate-spin QNM horizon/scri endpoint fixtures and an evolved
+   comparison.
 6. Perform the independent `T=200M` spin-minus2 resolution matrix before any
    stability or waveform claim.
 

@@ -49,6 +49,8 @@ Read these files first and completely:
 - `tests/test_plus2_routeb_live_source.cpp`
 - `tests/test_plus2_routeb_physical_replay.cpp`
 - `tools/numerical/generate_plus2_routeb_curvature_coordinate_fixture.py`
+- `tests/test_plus2_qnm_kerr.cpp`
+- `tools/numerical/generate_plus2_qnm_kerr_fixture.py`
 
 The YAML is explicitly a fail-closed proposal, not a production specification.
 Historical documents may contain commit-scoped test counts; do not reinterpret
@@ -254,7 +256,17 @@ Confirm the honest validation matrix:
 
 - Schwarzschild normalized QNM: qualified fixture;
 - moderate-Kerr real-frequency TSI: qualified fixture;
-- moderate-Kerr complex-frequency QNM and horizon/scri endpoints: open.
+- moderate-Kerr complex-frequency QNM: qualified at interior points;
+- moderate-Kerr QNM horizon/scri endpoints and evolved comparison: open.
+
+For the Kerr QNM fixture, independently check the pinned `qnm==0.4.4`
+frequency and angular constant, the conversion
+`lambda_plus=A-2 a m omega+(a omega)^2`, and the complex angular Wronskian.
+Confirm the generator does not import the frequency solver, that direct use of
+`A` as `lambda_plus` fails its negative control, and that the independent
+horizon-in Heun plus Kerr coordinate/tetrad chain satisfies the stored-field
+operator for both signed sectors.  Do not broaden its two interior points into
+an endpoint or evolved-waveform claim.
 
 Do not infer missing generated fixture data from prose.
 

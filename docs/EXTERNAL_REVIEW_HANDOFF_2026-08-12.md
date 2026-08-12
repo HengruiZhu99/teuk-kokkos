@@ -593,7 +593,7 @@ no current VRAM peak measurement is available.
 | Gate | Status | Evidence / missing item |
 |---|---|---|
 | Exact linear `Psi0^(1)` | Met standalone | Production point/spatial operator plus Schwarzschild and rotating full-coordinate oracles |
-| Independent linear TSI | Partial | Schwarzschild and moderate-Kerr real-frequency normalized radial/angular/field fixtures pass, as does a Schwarzschild QNM interior fixture; moderate-spin Kerr QNM and endpoint extensions remain open |
+| Independent linear TSI | Partial | Schwarzschild and moderate-Kerr real-frequency normalized radial/angular/field fixtures pass, as do normalized Schwarzschild and moderate-Kerr complex-frequency QNM interior fixtures; horizon/scri and evolved-companion extensions remain open |
 | Regular `Z_plus` scaling | Met | Exact scri/horizon scaling and inverse contracts |
 | Homogeneous equation symbolic/characteristic/QNM/convergence | Met standalone | Eq. 21b/22 audits, full-exterior convergence, Schwarzschild normalized QNM |
 | Ungauge-fixed then ORG compact source | Met | Formalism gate, 51-row ledger, independent high-precision oracle |

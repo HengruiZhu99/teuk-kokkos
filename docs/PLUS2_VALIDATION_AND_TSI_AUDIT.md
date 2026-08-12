@@ -1,8 +1,8 @@
 # Spin `+2` homogeneous validation and normalized-TSI audit
 
 Status: normalized Schwarzschild and moderate-Kerr radial, angular, and
-field-level fixtures passed; a normalized Schwarzschild QNM interior fixture
-passed; Kerr-QNM and endpoint extensions remain open
+field-level fixtures passed; normalized Schwarzschild and moderate-Kerr QNM
+interior fixtures passed; QNM endpoint extensions remain open
 
 Original homogeneous-validation base: `a31e286`
 
@@ -367,16 +367,53 @@ symmetry, and the production homogeneous `P,Q,Z` point operator with
 binary64 relative gate `5e-14`.
 
 This is not a horizon or scri fixture and does not evolve a companion
-waveform.  It also does not establish a moderate-Kerr QNM normalization or
-validate a quadratic source.
+waveform or validate a quadratic source.
+
+### Normalized moderate-Kerr QNM stored-field fixture
+
+`tools/numerical/generate_plus2_qnm_kerr_fixture.py` repeats the independent
+calculation at `a/M=0.6`.  The pinned `qnm` 0.4.4 reference for
+`s=+2, ell=m=2, n=0` is
+
+```text
+M omega = 0.4940447817813845 - 0.0837652021610416 i,
+A_qnm   = -0.8546134005662634 + 0.15669038538845606 i.
+```
+
+The generator does not import `qnm`; it records the same package and wheel
+hash as the Schwarzschild fixture.  It independently solves the complex
+Berens angular Wronskian after converting conventions by
+
+```text
+lambda_plus = A_qnm - 2 a m omega + (a omega)^2.
+```
+
+At the fine controls the solved eigenvalue agrees with that converted
+reference to `4.30e-14`.  Directly using `A_qnm` as `lambda_plus` is an
+explicit negative control and leaves a complex Wronskian residual `11.28565`.
+The horizon-in radial and angular Heun functions retain unit local Frobenius
+leading coefficients.  Ripley's full Kerr height, azimuth, tetrad boost, spin
+phase, compact radius, and stored-field factor then determine raw
+`Psi0_code`, `Z_plus`, its first two radial derivatives, and the independent
+unit-sphere lower-after-raise angular action.
+
+Both `(omega,m)` and `(-conj(omega),-m)` sectors are present at
+`(r,theta)=(3,1.1),(4.5,1.8)` and at three fixed numerical controls.  The
+maximum normalized changes fall from `2.411062e-7` to `8.617746e-9`.
+`tests/test_plus2_qnm_kerr.cpp` checks the compact homogeneous `P,Q,Z` point
+operator, exact raw/stored scaling, complex angular convention, signed-sector
+frequency/eigenvalue relation, provenance, and a negative control omitting the
+Kerr angular action.
+
+This closes the moderate-spin complex-frequency QNM normalization only at
+interior points.  It does not supply a horizon/scri limit or an evolved
+companion waveform.
 
 ### Remaining Kerr-QNM and endpoint gates
 
-The current fixtures still do not claim a Kerr QNM normalization, a Kerr
-horizon endpoint value, or an evolved-companion comparison.  Remaining work
-is:
+The current fixtures still do not claim a Kerr horizon/scri endpoint value or
+an evolved-companion comparison.  Remaining work is:
 
-- repeat that normalized QNM calculation at moderate Kerr spin;
 - add horizon-regular endpoint data and an evolved-companion comparison.
 
 These are separate gates.  In particular, the real-frequency fixture must
