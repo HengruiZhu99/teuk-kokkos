@@ -60,7 +60,9 @@ def main() -> None:
     d_product = (lambda_plus + 4) ** 2 * (lambda_plus + 6) ** 2
     d_hat = sp.factorial(m - 2) / sp.factorial(m + 2) * d_product
     d_hat_prime = sp.factorial(m + 2) / sp.factorial(m - 2)
-    require_equal("hatted angular constants multiply to D", d_hat * d_hat_prime, d_product)
+    require_equal(
+        "hatted angular constants multiply to D", d_hat * d_hat_prime, d_product
+    )
     require_equal("ell2 m2 Dhat is normalization-pinned", d_hat, 24)
     require_equal("ell2 m2 DhatPrime is normalization-pinned", d_hat_prime, 24)
 
@@ -91,9 +93,7 @@ def main() -> None:
     r_minus = sp.Integer(0)
     sigma = r_plus - r_minus
     w = 4 * mass * omega * r_plus
-    gamma = (w + 2 * sp.I * sigma) * (w + sp.I * sigma) * w * (
-        w - sp.I * sigma
-    )
+    gamma = (w + 2 * sp.I * sigma) * (w + sp.I * sigma) * w * (w - sp.I * sigma)
     c_product = d_product + (12 * mass * omega) ** 2
     c_hat_in = gamma
     c_hat_in_prime = c_product / gamma
@@ -104,15 +104,21 @@ def main() -> None:
     )
 
     same_mode_amplitude = 4 * d_hat_prime / c_hat_in_prime
-    sharp_mode_amplitude = 48 * sp.I * omega * mass / c_hat_in_prime
+    # Eq. (2.44) conjugates the hatted radial factor in the sharp sector.
+    sharp_mode_amplitude = 48 * sp.I * omega * mass / sp.conjugate(c_hat_in_prime)
     require_equal(
-        "Eq2.44 sharp-to-same amplitude ratio is pinned",
+        "Eq2.44 signed sharp-to-same phase ratio is pinned",
         sharp_mode_amplitude / same_mode_amplitude,
-        sp.I / 10,
+        sp.I / 10 * c_hat_in_prime / sp.conjugate(c_hat_in_prime),
     )
+    if sp.simplify(sharp_mode_amplitude / same_mode_amplitude - sp.I / 10) == 0:
+        raise AssertionError("complex radial phase was accidentally discarded")
+    print("PASS Eq2.44 ratio is not the phase-free i/10 shortcut")
 
     print("Completed normalization-pinned angular TSI fixture checks")
-    print("BLOCKED full radial fixture: normalized HeunC modes were not evaluated")
+    print(
+        "PASS angular subfixture; normalized radial modes are checked by the numerical gate"
+    )
 
 
 if __name__ == "__main__":

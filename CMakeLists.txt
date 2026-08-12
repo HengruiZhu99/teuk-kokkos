@@ -98,5 +98,19 @@ if(BUILD_TESTING)
       NAME teuk.plus2_bianchi_closure_gate
       COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/symbolic/verify_plus2_bianchi_closure.py)
+    add_test(
+      NAME teuk.plus2_tsi_schwarzschild_radial
+      COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/numerical/verify_plus2_tsi_schwarzschild_radial_fixture.py)
+    add_test(
+      NAME teuk.plus2_tsi_schwarzschild_angular
+      COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/symbolic/verify_plus2_tsi_angular_fixture.py)
+    add_test(
+      NAME teuk.plus2_tsi_schwarzschild_t0_generation
+      COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/numerical/generate_plus2_tsi_schwarzschild_t0_fixture.py
+        --check
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/plus2_tsi_schwarzschild_t0_fixtures.hpp)
   endif()
 endif()

@@ -1,9 +1,11 @@
 # Spin `+2` homogeneous validation and normalized-TSI audit
 
-Status: homogeneous validation only; full separated TSI fixture remains
-blocked at normalized radial-mode evaluation
+Status: normalized Schwarzschild radial and field fixture passed; the
+moderate-Kerr extension remains open
 
-Base: `a31e286`
+Original homogeneous-validation base: `a31e286`
+
+Normalized radial/field fixture base: `3a7d48f`
 
 ## Independent audit of the homogeneous slice
 
@@ -88,9 +90,10 @@ checks both identities with `Dhat=DhatPrime=24`, including their product
 `D=24^2`.  It also pins a candidate full fixture to
 `M=1`, `a=0`, real `omega=1/5`, `ell=m=2`, horizon-in modes.  For that choice
 it verifies the individual radial-factor product from Eqs. (2.27)--(2.29)
-and the Eq. (2.44) sharp-to-same amplitude ratio `i/10`.
+and the Eq. (2.44) sharp-to-same amplitude ratio including the phase
+`(i/10) C_in_prime/conjugate(C_in_prime)`.
 
-The nine named checks prove exactly the following:
+The ten named checks prove exactly the following:
 
 1. both closed-form angular modes have the Eq. (2.6) endpoint
    normalization;
@@ -101,36 +104,125 @@ The nine named checks prove exactly the following:
 4. for the pinned candidate radial metadata, the separately defined
    `Cin=Gamma` and `CinPrime=C/Gamma` multiply algebraically to `C`;
 5. inserting those primary factors into Eq. (2.44) fixes the relative
-   sharp-partner amplitude to `i/10`.
+   sharp-partner amplitude including its complex radial-factor phase.
 
-They do **not** prove the radial differential identities (2.38), evaluate a
-radial mode, verify the absolute amplitude or phase of either Weyl scalar,
-apply the Kinnersley-to-code-tetrad conversion, exercise the hyperboloidal
-radial chain rule, or compare `T0[h]` with an evolved `Z_plus`.  The algebraic
-`Cin*CinPrime=C` check ensures that no radial hatted factor was guessed; it is
-not a substitute for applying the fourth-order radial operators to the
-normalized modes.
+These angular checks by themselves do **not** prove the radial differential
+identities, but the Schwarzschild numerical fixture described below now does
+so independently and continues through the field-level `T0[h]` comparison.
 
-### Remaining hard blocker
+### Normalized Schwarzschild radial fixture
 
-The full radial/field fixture is not claimed.  It still requires numerical
-values and derivatives of the specifically normalized Eq. (2.17) HeunC
-radial modes for both spins and the `(-omega,-m)` partner.  The local Wolfram
-installation reports that the product is not activated, and the repository
-has no independent confluent-Heun/eigenvalue implementation.  The
-supplemental repository contains symbolic definitions and notebook examples,
-not a portable exported table of normalized radial values.
+`tools/numerical/verify_plus2_tsi_schwarzschild_radial_fixture.py` removes the
+Mathematica dependency for the pinned Schwarzschild case
 
-Closing this blocker requires one of:
+```text
+M=1, a=0, omega=1/5, ell=m=2, horizon-in.
+```
 
-- an activated Mathematica run of the supplemental notebook that exports a
-  versioned numerical fixture with parameters, normalization, values, and
-  derivatives; or
-- an independently validated confluent-Heun solver that implements Eq. (2.17)
-  and reproduces the hatted first-form radial factors in Eq. (2.38).
+It implements the canonical confluent-Heun ODE in arXiv:2403.20311 Eq. (A.1),
+the `H(0)=1` Frobenius recurrence in Eq. (A.2a), and the full hatted radial
+prefactor in Eqs. (2.17)--(2.18).  SciPy `DOP853` integrates both `s=+2` and
+`s=-2`; no production Teukolsky coefficient or radial-mode code is called.
+Local Taylor jets obtain derivatives through order eight from the independent
+second-order radial ODE.  They apply both first forms and both composed second
+forms of Eq. (2.38) without finite-differencing a fourth derivative.
 
-After that export, the fixture must still be transformed from the
-Boyer--Lindquist Kinnersley tetrad to the repository's rotated regular tetrad
-and through the full hyperboloidal radial chain rule.  Until those steps are
-present, neither a phase-sensitive full TSI result nor a `T0[h]` production
-normalization is authorized.
+At `r={2.5,3,4,7,10}`, the finest run has a maximum relative residual
+`1.56e-9`; this maximum is the eighth-order `s=+2` composition at `r=2.5`,
+where singular Kinnersley factors amplify binary64 cancellation.  The other
+fine residuals are between `3.3e-13` and `9.4e-12`.  Tightening the Frobenius
+seed, series order, and ODE tolerances changes the normalized mode values by
+`7.10e-10` from coarse to medium and `1.45e-11` from medium to fine.  The
+operator residual is therefore bounded by floating cancellation rather than
+used as a false monotone-convergence claim.
+
+The script also verifies the real-frequency signed normalization
+
+```text
+R_hat(+2,-omega,ell,-m) = conjugate(R_hat(+2,omega,ell,m))
+```
+
+and retains the individual hatted factors `C_in=Gamma` and
+`C_in_prime=C/Gamma`.
+
+### Field-level normalized `T0[h]` fixture
+
+`tools/numerical/generate_plus2_tsi_schwarzschild_t0_fixture.py` starts from
+one normalized mode of `zeta^4 psi4` and constructs its ORG metric using
+arXiv:2403.20311 Eqs. (2.50) and (2.52), with `epsilon_g=-1` and
+
+```text
+A_ORG=0, B_ORG=64/conjugate(C_in_prime).
+```
+
+It explicitly retains both Eq. (2.44) sectors:
+
+```text
+same:  (4 Dhat_prime/C_in_prime) exp(-i omega t+i m phi),
+sharp: (48 i omega M/conjugate(C_in_prime)) exp(+i omega t-i m phi).
+```
+
+The phase regression checks their ratio as
+`(i omega/2) C_in_prime/conjugate(C_in_prime)`; replacing either denominator
+by its conjugate fails this check.  This corrects the earlier angular-only
+script's informal `i/10` statement, which omitted the phase of the complex
+radial hatted factor.
+
+Before serialization, the generator independently checks the Ripley
+coordinate/tetrad chain.  For Schwarzschild,
+
+```text
+T=t+H(r), H=-r+2M log((r-2M)/(2M))-4M log(r), R=1/r,
+l_code=A_b l_Kin, n_code=A_b^-1 n_Kin, m_code=-m_Kin,
+A_b=Delta/(2r^2).
+```
+
+Transforming the Boyer--Lindquist Kinnersley vectors with this Jacobian
+reproduces every nonzero component of the repository tetrad.  Metric
+projections consequently transform by `(A_b^2,-A_b,1)` for
+`(h_ll,h_lm,h_mm)`.  The modal factor becomes
+`exp(-i omega T) exp(+i omega H(r))`; the sharp sector gets the opposite
+phase.  These checks are separate from the production `T0` implementation.
+
+The committed generated fixture covers `r=4, theta=1.1` and
+`r=6, theta=0.8`, both signed sectors, and all three numerical levels.  Its
+coarse-to-medium and medium-to-fine changes are `4.21e-10` and `7.93e-12`.
+All twelve cases pass through `evaluate_plus2_linear_psi0`; the observed
+maximum absolute difference is `1.42e-15`.  The C++ gate is `2e-14`, a factor
+fourteen allowance for decimal binary64 serialization and compiler
+reassociation, not a weakening to the ODE error.
+
+The generated header records the SHA-256 of both generator scripts and the
+following primary provenance:
+
+```text
+Berens arXiv source BGL1.tex:
+  f5af07f8692e4f8d49f271e41056eadb0bf180e78a6c8574f238930f2298b3cf
+Berens supplement commit:
+  cf924707593a58ec889c70ea501d764e99d1d4aa
+Berens ExampleUsage.nb:
+  d2c69c27f34c4da852c355a3240a1f351c05340182ee740bdf8fa56e5c05c974
+Ripley arXiv source numerics_description.tex:
+  2518ef1168e552db4ca4fd07ee421fca33f0939ecfc2031d272842b61cbf955e
+```
+
+Regeneration is fail-closed through the `--check` command and a CTest entry
+under `TEUK_ENABLE_SYMBOLIC_AUDIT`.
+
+### Remaining Kerr gate
+
+This result closes the normalized radial and field-level TSI blocker only for
+the specified Schwarzschild real-frequency horizon-in mode.  It does not
+claim a general or moderate-spin Kerr fixture, a horizon endpoint value, a
+QNM normalization, or an evolved-companion comparison.
+
+The moderate-Kerr extension still requires an independent implementation of
+the regular spin-weighted spheroidal eigenvalue and the hatted angular Heun
+normalization at nonzero `a omega`, followed by the same signed-partner and
+radial checks.  Guessing an eigenvalue from production coefficients would
+make the oracle circular.  A future extension must:
+
+- solve and converge the `s=+/-2` spheroidal eigenpairs independently;
+- reproduce both hatted angular factors and both radial first forms;
+- include the `(-omega,-m)` sharp sector with the complex Kerr phases;
+- repeat the full Kinnersley-to-code and hyperboloidal chain at `a != 0`.
