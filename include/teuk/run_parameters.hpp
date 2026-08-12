@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-#include "teuk/plus2_replay.hpp"
+#include "teuk/plus2_runtime_types.hpp"
 #include "teuk/spatial_pipeline.hpp"
 #include "teuk/types.hpp"
 
@@ -67,9 +67,6 @@ struct SecondOrderRunParameters {
   int required_consecutive_passes = 1;
   bool allow_truncated_daughter_modes = false;
 };
-
-enum class Plus2LinearMethod { MetricCurvature, Tsi, Both };
-enum class Plus2SecondMethod { SourcedCompanion };
 
 struct Plus2OutputRunParameters {
   bool regularized = true;

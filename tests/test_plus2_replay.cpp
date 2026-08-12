@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <stdexcept>
 #include <string>
@@ -38,6 +39,8 @@ teuk::Plus2ReplayConfiguration concurrent_configuration() {
   config.target_modes = {-2, 0, 2};
   config.radial_count = 1;
   config.theta_count = 1;
+  config.git_commit = teuk::plus2_build_git_commit();
+  config.runtime_config_schema_version = 1;
   return config;
 }
 
@@ -285,18 +288,32 @@ teuk::Plus2CheckpointMetadata checkpoint_metadata() {
   teuk::Plus2CheckpointMetadata metadata;
   metadata.parent_modes = {-1, 1};
   metadata.target_modes = {-2, 0, 2};
+  metadata.ell_max_first = 2;
+  metadata.ell_max_second = 2;
+  metadata.linear_method = teuk::Plus2LinearMethod::MetricCurvature;
+  metadata.second_method = teuk::Plus2SecondMethod::SourcedCompanion;
+  metadata.initial_policy = teuk::Plus2InitialPolicy::Zero;
+  metadata.git_commit = teuk::plus2_build_git_commit();
+  metadata.runtime_config_schema_version = 1;
   metadata.progress = {0.5, 5};
   metadata.source_activation = {true, 0.1, 2, 0.4};
   return metadata;
 }
 
 teuk::Plus2CheckpointExpectations checkpoint_expectations() {
-  return {teuk::plus2_fixed_tetrad_raw_scaling,
-          teuk::plus2_signed_mode_registry,
-          {-1, 1},
-          {-2, 0, 2},
-          2,
-          2};
+  teuk::Plus2CheckpointExpectations expected;
+  expected.parent_modes = {-1, 1};
+  expected.target_modes = {-2, 0, 2};
+  expected.ell_max_first = 2;
+  expected.ell_max_second = 2;
+  expected.linear_method = teuk::Plus2LinearMethod::MetricCurvature;
+  expected.second_method = teuk::Plus2SecondMethod::SourcedCompanion;
+  expected.initial_policy = teuk::Plus2InitialPolicy::Zero;
+  expected.git_commit = teuk::plus2_build_git_commit();
+  expected.runtime_config_schema_version = 1;
+  expected.radial_count = 2;
+  expected.theta_count = 2;
+  return expected;
 }
 
 }  // namespace
@@ -343,6 +360,17 @@ TEST_CASE("plus2 modes and initial policies are strict and typed") {
   diagnostic.parent_modes = {-1, 1};
   const teuk::Plus2ReplayOrchestrator diagnostic_orchestrator(diagnostic);
   CHECK(!diagnostic_orchestrator.has_companion());
+
+  const auto replay = replay_configuration();
+  const auto expected = teuk::plus2_checkpoint_expectations(replay);
+  CHECK(expected.ell_max_first == replay.ell_max_first);
+  CHECK(expected.ell_max_second == replay.ell_max_second);
+  CHECK(expected.linear_method == replay.linear_method);
+  CHECK(expected.second_method == replay.second_method);
+  CHECK(expected.initial_policy == replay.initial_policy);
+  CHECK(expected.git_commit == replay.git_commit);
+  CHECK(expected.runtime_config_schema_version ==
+        replay.runtime_config_schema_version);
 }
 
 TEST_CASE("plus2 concurrent and deterministic replay are bitwise identical") {
@@ -401,7 +429,16 @@ TEST_CASE("plus2 checkpoint round trip validates before device mutation") {
         teuk::plus2_complex_component_order);
   CHECK(saved.state_storage_order == teuk::plus2_state_storage_order);
   CHECK(saved.scaling == teuk::plus2_fixed_tetrad_raw_scaling);
+  CHECK(saved.scaling.find("Z0_source=Psi0_raw_fixed_tetrad/R^5") !=
+        std::string::npos);
   CHECK(saved.registry_schema == teuk::plus2_signed_mode_registry);
+  CHECK(saved.ell_max_first == 2);
+  CHECK(saved.ell_max_second == 2);
+  CHECK(saved.linear_method == teuk::Plus2LinearMethod::MetricCurvature);
+  CHECK(saved.second_method == teuk::Plus2SecondMethod::SourcedCompanion);
+  CHECK(saved.initial_policy == teuk::Plus2InitialPolicy::Zero);
+  CHECK(saved.git_commit == teuk::plus2_build_git_commit());
+  CHECK(saved.runtime_config_schema_version == 1);
   CHECK(saved.state_checksum != 0);
 
   Kokkos::deep_copy(execution, storage.flat_state(), teuk::Complex(0.0, 0.0));
@@ -457,6 +494,58 @@ TEST_CASE("plus2 checkpoint round trip validates before device mutation") {
       Kokkos::HostSpace{}, storage.flat_state());
   for (std::size_t i = 0; i < unchanged.extent(0); ++i) {
     CHECK(unchanged(i) == teuk::Complex(9.0, -4.0));
+  }
+}
+
+TEST_CASE("plus2 checkpoint rejects every scientific metadata mismatch") {
+  const teuk::ExecutionSpace execution;
+  auto storage = teuk::Plus2CompanionStorage::enabled(
+      3, 2, 2, "plus2_scientific_checkpoint_test");
+  Kokkos::deep_copy(execution, storage.flat_state(), teuk::Complex(1.0, -2.0));
+  TemporaryCheckpoint checkpoint;
+  static_cast<void>(teuk::save_plus2_checkpoint(
+      execution, checkpoint.path(), storage, checkpoint_metadata()));
+  const auto baseline = checkpoint_expectations();
+
+  using Modifier =
+      std::function<void(teuk::Plus2CheckpointExpectations&)>;
+  const std::vector<Modifier> mismatches{
+      [](auto& expected) { expected.ell_max_first = 3; },
+      [](auto& expected) { expected.ell_max_second = 3; },
+      [](auto& expected) {
+        expected.linear_method = teuk::Plus2LinearMethod::Tsi;
+      },
+      [](auto& expected) {
+        expected.second_method = static_cast<teuk::Plus2SecondMethod>(99);
+      },
+      [](auto& expected) {
+        expected.initial_policy = teuk::Plus2InitialPolicy::Checkpoint;
+      },
+      [](auto& expected) {
+        expected.git_commit[0] =
+            expected.git_commit[0] == '0' ? '1' : '0';
+      },
+      [](auto& expected) { ++expected.runtime_config_schema_version; }};
+
+  for (const auto& modify : mismatches) {
+    auto expected = baseline;
+    modify(expected);
+    Kokkos::deep_copy(execution, storage.flat_state(),
+                      teuk::Complex(-6.0, 4.0));
+    execution.fence("set scientific-mismatch mutation sentinel");
+    bool rejected = false;
+    try {
+      static_cast<void>(teuk::load_plus2_checkpoint(
+          execution, checkpoint.path(), storage, expected));
+    } catch (const std::exception&) {
+      rejected = true;
+    }
+    CHECK(rejected);
+    const auto unchanged = Kokkos::create_mirror_view_and_copy(
+        Kokkos::HostSpace{}, storage.flat_state());
+    for (std::size_t i = 0; i < unchanged.extent(0); ++i) {
+      CHECK(unchanged(i) == teuk::Complex(-6.0, 4.0));
+    }
   }
 }
 

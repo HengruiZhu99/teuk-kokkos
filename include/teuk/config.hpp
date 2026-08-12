@@ -188,22 +188,6 @@ inline std::string initial_data_name(const InitialDataType type) {
   throw std::invalid_argument("unsupported initial-data type");
 }
 
-inline std::string plus2_linear_method_name(const Plus2LinearMethod method) {
-  switch (method) {
-    case Plus2LinearMethod::MetricCurvature: return "metric_curvature";
-    case Plus2LinearMethod::Tsi: return "tsi";
-    case Plus2LinearMethod::Both: return "both";
-  }
-  throw std::invalid_argument("unsupported plus2 linear method");
-}
-
-inline std::string plus2_second_method_name(const Plus2SecondMethod method) {
-  switch (method) {
-    case Plus2SecondMethod::SourcedCompanion: return "sourced_companion";
-  }
-  throw std::invalid_argument("unsupported plus2 second method");
-}
-
 }  // namespace config_detail
 
 inline RunParameters resolve_run_parameters(
@@ -380,26 +364,12 @@ inline RunParameters resolve_run_parameters(
     parameters.plus2.mode = parse_plus2_run_mode(*text);
   }
   if (const auto* text = value("plus2.linear.method")) {
-    if (*text == "metric_curvature") {
-      parameters.plus2.linear_method = Plus2LinearMethod::MetricCurvature;
-    } else if (*text == "tsi") {
-      parameters.plus2.linear_method = Plus2LinearMethod::Tsi;
-    } else if (*text == "both") {
-      parameters.plus2.linear_method = Plus2LinearMethod::Both;
-    } else {
-      throw std::invalid_argument(
-          "key 'plus2.linear.method' requires metric_curvature, tsi, or both");
-    }
+    parameters.plus2.linear_method = parse_plus2_linear_method(*text);
   }
   set_bool("plus2.linear.evolve_validation",
            parameters.plus2.linear_evolve_validation);
   if (const auto* text = value("plus2.second.method")) {
-    if (*text == "sourced_companion") {
-      parameters.plus2.second_method = Plus2SecondMethod::SourcedCompanion;
-    } else {
-      throw std::invalid_argument(
-          "key 'plus2.second.method' requires sourced_companion");
-    }
+    parameters.plus2.second_method = parse_plus2_second_method(*text);
   }
   if (const auto* text = value("plus2.second.initial_policy")) {
     parameters.plus2.second_initial_policy =
@@ -584,10 +554,8 @@ inline void validate_run_parameters(const RunParameters& parameters) {
   const bool plus2_mode_enabled =
       parameters.plus2.mode != Plus2RunMode::Disabled;
   (void)plus2_run_mode_name(parameters.plus2.mode);
-  (void)config_detail::plus2_linear_method_name(
-      parameters.plus2.linear_method);
-  (void)config_detail::plus2_second_method_name(
-      parameters.plus2.second_method);
+  (void)plus2_linear_method_name(parameters.plus2.linear_method);
+  (void)plus2_second_method_name(parameters.plus2.second_method);
   (void)plus2_initial_policy_name(
       parameters.plus2.second_initial_policy);
   if (parameters.plus2.enabled != plus2_mode_enabled) {
@@ -777,14 +745,12 @@ inline std::string resolved_configuration_text(
          << "plus2.mode = " << plus2_run_mode_name(parameters.plus2.mode)
          << '\n'
          << "plus2.linear.method = "
-         << config_detail::plus2_linear_method_name(
-                parameters.plus2.linear_method)
+         << plus2_linear_method_name(parameters.plus2.linear_method)
          << '\n'
          << "plus2.linear.evolve_validation = "
          << parameters.plus2.linear_evolve_validation << '\n'
          << "plus2.second.method = "
-         << config_detail::plus2_second_method_name(
-                parameters.plus2.second_method)
+         << plus2_second_method_name(parameters.plus2.second_method)
          << '\n'
          << "plus2.second.initial_policy = "
          << plus2_initial_policy_name(

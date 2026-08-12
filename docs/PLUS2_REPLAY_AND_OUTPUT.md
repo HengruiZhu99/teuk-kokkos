@@ -45,8 +45,14 @@ The independent companion checkpoint schema is
 `teuk.plus2-companion-checkpoint`, version 1. Every payload records:
 
 - the exact raw fixed-tetrad scaling
-  `Psi0_raw_fixed_tetrad=(R^5/(L^2-i*a*R*cos(theta))^4)*Z_plus`;
+  `Psi0_raw_fixed_tetrad=(R^5/(L^2-i*a*R*cos(theta))^4)*Z_plus`, composed
+  explicitly with the typed compact-source primitive
+  `Z0_source=Psi0_raw_fixed_tetrad/R^5=Z_plus/(L^2-i*a*R*cos(theta))^4`;
 - the signed-m registry schema and explicit parent/target registries;
+- independent first- and second-order angular bandlimits;
+- the typed linear-curvature, sourced-companion, and companion initial-policy
+  choices;
+- the exact Git commit and runtime configuration schema version;
 - native byte order and the required IEEE-754 binary64 representation;
 - complex serialization order `real-then-imag`;
 - companion radial/angular extents and the exact
@@ -58,10 +64,14 @@ The independent companion checkpoint schema is
 
 Loading reads and validates the magic, schema, version, scaling, registries,
 native byte order, floating-point format, component/storage order, shape, byte
-count, activation history, trailing-data condition, and checksum against
-host-owned temporary data. Only after all checks pass is the companion device
-state mutated. Checkpoint targets must be new paths, preventing an implicit
-overwrite.
+count, angular bands, methods, initial policy, Git/config provenance,
+activation history, trailing-data condition, and checksum against host-owned
+temporary data. Only after all checks pass is the companion device state
+mutated. Checkpoint targets must be new paths, preventing an implicit
+overwrite. Same-shaped states from a different scientific configuration are
+therefore rejected. Exact Git matching is intentionally conservative; a
+future migration across commits requires an explicit reviewed conversion, not
+an implicit load.
 
 The companion checkpoint does not currently store the resolved timestep.
 Consequently, the loader can require a finite nonnegative progress time and
@@ -86,3 +96,6 @@ write four-field waveform products. Backend-dependent reduction order in a
 future production source can limit bitwise replay across different backends;
 same-backend runs should use the exact resolved configuration, build
 provenance, initial primary state, and companion checkpoint metadata.
+
+The serialization additions remain checkpoint format version 1 because this
+standalone format is still unreleased and has no supported external consumer.

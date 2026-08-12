@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "teuk/plus2_companion_storage.hpp"
+#include "teuk/plus2_runtime_types.hpp"
 #include "teuk/source_activation.hpp"
 #include "teuk/types.hpp"
 
@@ -27,7 +28,9 @@ inline constexpr std::uint32_t plus2_checkpoint_format_version = 1;
 inline constexpr const char* plus2_checkpoint_schema =
     "teuk.plus2-companion-checkpoint";
 inline constexpr const char* plus2_fixed_tetrad_raw_scaling =
-    "Psi0_raw_fixed_tetrad=(R^5/(L^2-i*a*R*cos(theta))^4)*Z_plus";
+    "Psi0_raw_fixed_tetrad=(R^5/(L^2-i*a*R*cos(theta))^4)*Z_plus;"
+    "Z0_source=Psi0_raw_fixed_tetrad/R^5="
+    "Z_plus/(L^2-i*a*R*cos(theta))^4";
 inline constexpr const char* plus2_signed_mode_registry =
     "signed-m-sharp-registry-v1";
 inline constexpr const char* plus2_binary64_format = "IEEE-754-binary64";
@@ -35,6 +38,12 @@ inline constexpr const char* plus2_complex_component_order =
     "real-then-imag";
 inline constexpr const char* plus2_state_storage_order =
     "LayoutRight(mode,field,radial,theta);field-order=(P,Q,Z)";
+
+#ifndef TEUK_GIT_COMMIT
+#define TEUK_GIT_COMMIT "unknown"
+#endif
+
+inline const char* plus2_build_git_commit() { return TEUK_GIT_COMMIT; }
 
 inline const char* plus2_native_byte_order() {
   if constexpr (std::endian::native == std::endian::little) return "little";
@@ -59,6 +68,13 @@ struct Plus2CheckpointMetadata {
   std::string registry_schema = plus2_signed_mode_registry;
   std::vector<int> parent_modes;
   std::vector<int> target_modes;
+  int ell_max_first = 0;
+  int ell_max_second = 0;
+  Plus2LinearMethod linear_method = Plus2LinearMethod::MetricCurvature;
+  Plus2SecondMethod second_method = Plus2SecondMethod::SourcedCompanion;
+  Plus2InitialPolicy initial_policy = Plus2InitialPolicy::Zero;
+  std::string git_commit;
+  int runtime_config_schema_version = 0;
   std::size_t radial_count = 0;
   std::size_t theta_count = 0;
   Plus2CheckpointProgress progress;
@@ -71,6 +87,13 @@ struct Plus2CheckpointExpectations {
   std::string registry_schema = plus2_signed_mode_registry;
   std::vector<int> parent_modes;
   std::vector<int> target_modes;
+  int ell_max_first = 0;
+  int ell_max_second = 0;
+  Plus2LinearMethod linear_method = Plus2LinearMethod::MetricCurvature;
+  Plus2SecondMethod second_method = Plus2SecondMethod::SourcedCompanion;
+  Plus2InitialPolicy initial_policy = Plus2InitialPolicy::Zero;
+  std::string git_commit;
+  int runtime_config_schema_version = 0;
   std::size_t radial_count = 0;
   std::size_t theta_count = 0;
 };
@@ -92,6 +115,53 @@ inline void require_sorted_sharp_registry(const std::vector<int>& modes,
       throw std::invalid_argument(std::string(label) +
                                   " must be closed under sharp");
     }
+  }
+}
+
+inline void require_registry_band(const std::vector<int>& modes,
+                                  const int ell_max, const char* label) {
+  if (ell_max < 2) {
+    throw std::invalid_argument(std::string(label) +
+                                " ell_max must be at least 2");
+  }
+  for (const int mode : modes) {
+    if (std::abs(mode) > ell_max) {
+      throw std::invalid_argument(std::string(label) +
+                                  " contains a mode above ell_max");
+    }
+  }
+}
+
+inline void require_git_commit(const std::string& commit) {
+  const bool hexadecimal =
+      !commit.empty() &&
+      std::all_of(commit.begin(), commit.end(), [](const unsigned char value) {
+        return (value >= '0' && value <= '9') ||
+               (value >= 'a' && value <= 'f') ||
+               (value >= 'A' && value <= 'F');
+      });
+  if (!hexadecimal || commit.size() < 7) {
+    throw std::invalid_argument(
+        "plus2 checkpoint requires an explicit Git commit identifier");
+  }
+}
+
+inline void validate_scientific_configuration(
+    const std::vector<int>& parent_modes,
+    const std::vector<int>& target_modes, const int ell_max_first,
+    const int ell_max_second, const Plus2LinearMethod linear_method,
+    const Plus2SecondMethod second_method,
+    const Plus2InitialPolicy initial_policy, const std::string& git_commit,
+    const int runtime_schema_version) {
+  require_registry_band(parent_modes, ell_max_first, "parent registry");
+  require_registry_band(target_modes, ell_max_second, "target registry");
+  (void)plus2_linear_method_name(linear_method);
+  (void)plus2_second_method_name(second_method);
+  (void)plus2_initial_policy_name(initial_policy);
+  require_git_commit(git_commit);
+  if (runtime_schema_version <= 0) {
+    throw std::invalid_argument(
+        "plus2 checkpoint runtime config schema version must be positive");
   }
 }
 
@@ -118,6 +188,11 @@ inline void validate_expectations(const Plus2CheckpointExpectations& expected) {
   }
   require_sorted_sharp_registry(expected.parent_modes, "parent registry");
   require_sorted_sharp_registry(expected.target_modes, "target registry");
+  validate_scientific_configuration(
+      expected.parent_modes, expected.target_modes, expected.ell_max_first,
+      expected.ell_max_second, expected.linear_method, expected.second_method,
+      expected.initial_policy, expected.git_commit,
+      expected.runtime_config_schema_version);
 }
 
 inline void validate_metadata(const Plus2CheckpointMetadata& metadata) {
@@ -140,6 +215,11 @@ inline void validate_metadata(const Plus2CheckpointMetadata& metadata) {
   }
   require_sorted_sharp_registry(metadata.parent_modes, "parent registry");
   require_sorted_sharp_registry(metadata.target_modes, "target registry");
+  validate_scientific_configuration(
+      metadata.parent_modes, metadata.target_modes, metadata.ell_max_first,
+      metadata.ell_max_second, metadata.linear_method, metadata.second_method,
+      metadata.initial_policy, metadata.git_commit,
+      metadata.runtime_config_schema_version);
   validate_activation(metadata.source_activation, metadata.progress.time);
 }
 
@@ -248,6 +328,14 @@ inline void write_payload(std::ostream& output,
   write_string(output, metadata.registry_schema);
   write_modes(output, metadata.parent_modes);
   write_modes(output, metadata.target_modes);
+  write_scalar(output, static_cast<std::int32_t>(metadata.ell_max_first));
+  write_scalar(output, static_cast<std::int32_t>(metadata.ell_max_second));
+  write_string(output, plus2_linear_method_name(metadata.linear_method));
+  write_string(output, plus2_second_method_name(metadata.second_method));
+  write_string(output, plus2_initial_policy_name(metadata.initial_policy));
+  write_string(output, metadata.git_commit);
+  write_scalar(output, static_cast<std::int32_t>(
+                           metadata.runtime_config_schema_version));
   write_scalar(output, static_cast<std::uint64_t>(metadata.radial_count));
   write_scalar(output, static_cast<std::uint64_t>(metadata.theta_count));
   write_scalar(output, metadata.progress.time);
@@ -284,6 +372,19 @@ inline std::pair<Plus2CheckpointMetadata, std::vector<Complex>> read_payload(
   metadata.registry_schema = read_string(input, "registry schema");
   metadata.parent_modes = read_modes(input, "parent modes");
   metadata.target_modes = read_modes(input, "target modes");
+  metadata.ell_max_first =
+      static_cast<int>(read_scalar<std::int32_t>(input, "ell max first"));
+  metadata.ell_max_second =
+      static_cast<int>(read_scalar<std::int32_t>(input, "ell max second"));
+  metadata.linear_method =
+      parse_plus2_linear_method(read_string(input, "linear method"));
+  metadata.second_method =
+      parse_plus2_second_method(read_string(input, "second method"));
+  metadata.initial_policy =
+      parse_plus2_initial_policy(read_string(input, "initial policy"));
+  metadata.git_commit = read_string(input, "git commit");
+  metadata.runtime_config_schema_version = static_cast<int>(
+      read_scalar<std::int32_t>(input, "runtime config schema version"));
   metadata.radial_count = static_cast<std::size_t>(
       read_scalar<std::uint64_t>(input, "radial count"));
   metadata.theta_count = static_cast<std::size_t>(
@@ -325,10 +426,18 @@ inline void require_metadata_match(
       metadata.registry_schema != expected.registry_schema ||
       metadata.parent_modes != expected.parent_modes ||
       metadata.target_modes != expected.target_modes ||
+      metadata.ell_max_first != expected.ell_max_first ||
+      metadata.ell_max_second != expected.ell_max_second ||
+      metadata.linear_method != expected.linear_method ||
+      metadata.second_method != expected.second_method ||
+      metadata.initial_policy != expected.initial_policy ||
+      metadata.git_commit != expected.git_commit ||
+      metadata.runtime_config_schema_version !=
+          expected.runtime_config_schema_version ||
       metadata.radial_count != expected.radial_count ||
       metadata.theta_count != expected.theta_count) {
     throw std::runtime_error(
-        "plus2 checkpoint does not match scaling, registry, or shape");
+        "plus2 checkpoint does not match scaling, registry, methods, provenance, or shape");
   }
 }
 

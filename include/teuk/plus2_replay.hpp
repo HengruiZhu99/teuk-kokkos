@@ -15,49 +15,17 @@
 #include "teuk/device_rk4.hpp"
 #include "teuk/plus2_checkpoint.hpp"
 #include "teuk/plus2_companion_storage.hpp"
+#include "teuk/plus2_runtime_types.hpp"
 #include "teuk/source_activation.hpp"
 #include "teuk/types.hpp"
 
 namespace teuk {
 
-enum class Plus2RunMode { Disabled, DiagnosticOnly, Concurrent, Replay };
-enum class Plus2InitialPolicy { Zero, Checkpoint };
-
-inline const char* plus2_run_mode_name(const Plus2RunMode mode) {
-  switch (mode) {
-    case Plus2RunMode::Disabled: return "disabled";
-    case Plus2RunMode::DiagnosticOnly: return "diagnostic_only";
-    case Plus2RunMode::Concurrent: return "concurrent";
-    case Plus2RunMode::Replay: return "replay";
-  }
-  throw std::invalid_argument("unsupported plus2 run mode");
-}
-
-inline Plus2RunMode parse_plus2_run_mode(const std::string& text) {
-  if (text == "disabled") return Plus2RunMode::Disabled;
-  if (text == "diagnostic_only") return Plus2RunMode::DiagnosticOnly;
-  if (text == "concurrent") return Plus2RunMode::Concurrent;
-  if (text == "replay") return Plus2RunMode::Replay;
-  throw std::invalid_argument("unknown plus2 run mode: " + text);
-}
-
-inline const char* plus2_initial_policy_name(const Plus2InitialPolicy policy) {
-  switch (policy) {
-    case Plus2InitialPolicy::Zero: return "zero";
-    case Plus2InitialPolicy::Checkpoint: return "checkpoint";
-  }
-  throw std::invalid_argument("unsupported plus2 initial policy");
-}
-
-inline Plus2InitialPolicy parse_plus2_initial_policy(const std::string& text) {
-  if (text == "zero") return Plus2InitialPolicy::Zero;
-  if (text == "checkpoint") return Plus2InitialPolicy::Checkpoint;
-  throw std::invalid_argument("unknown plus2 initial policy: " + text);
-}
-
 struct Plus2ReplayConfiguration {
   Plus2RunMode mode = Plus2RunMode::Disabled;
   Plus2InitialPolicy initial_policy = Plus2InitialPolicy::Zero;
+  Plus2LinearMethod linear_method = Plus2LinearMethod::MetricCurvature;
+  Plus2SecondMethod second_method = Plus2SecondMethod::SourcedCompanion;
   std::filesystem::path checkpoint;
   int ell_max_first = 0;
   int ell_max_second = 0;
@@ -66,6 +34,8 @@ struct Plus2ReplayConfiguration {
   std::size_t primary_value_count = 0;
   std::size_t radial_count = 0;
   std::size_t theta_count = 0;
+  std::string git_commit;
+  int runtime_config_schema_version = 0;
 };
 
 namespace plus2_replay_detail {
@@ -92,6 +62,10 @@ inline bool evolves_companion(const Plus2RunMode mode) {
 }
 
 inline void validate_configuration(const Plus2ReplayConfiguration& config) {
+  (void)plus2_run_mode_name(config.mode);
+  (void)plus2_initial_policy_name(config.initial_policy);
+  (void)plus2_linear_method_name(config.linear_method);
+  (void)plus2_second_method_name(config.second_method);
   if (config.mode == Plus2RunMode::Disabled) {
     if (config.initial_policy != Plus2InitialPolicy::Zero ||
         !config.checkpoint.empty() || config.ell_max_first != 0 ||
@@ -131,6 +105,11 @@ inline void validate_configuration(const Plus2ReplayConfiguration& config) {
     throw std::invalid_argument(
         "plus2 checkpoint policy and path must be specified together");
   }
+  plus2_checkpoint_detail::require_git_commit(config.git_commit);
+  if (config.runtime_config_schema_version <= 0) {
+    throw std::invalid_argument(
+        "plus2 evolving mode requires a runtime config schema version");
+  }
 }
 
 inline void validate_accepted_activation(const SourceActivationState& state,
@@ -149,6 +128,29 @@ inline void validate_accepted_activation(const SourceActivationState& state,
 }
 
 }  // namespace plus2_replay_detail
+
+inline Plus2CheckpointExpectations plus2_checkpoint_expectations(
+    const Plus2ReplayConfiguration& configuration) {
+  plus2_replay_detail::validate_configuration(configuration);
+  if (!plus2_replay_detail::evolves_companion(configuration.mode)) {
+    throw std::invalid_argument(
+        "only an evolving plus2 mode has checkpoint expectations");
+  }
+  Plus2CheckpointExpectations expected;
+  expected.parent_modes = configuration.parent_modes;
+  expected.target_modes = configuration.target_modes;
+  expected.ell_max_first = configuration.ell_max_first;
+  expected.ell_max_second = configuration.ell_max_second;
+  expected.linear_method = configuration.linear_method;
+  expected.second_method = configuration.second_method;
+  expected.initial_policy = configuration.initial_policy;
+  expected.git_commit = configuration.git_commit;
+  expected.runtime_config_schema_version =
+      configuration.runtime_config_schema_version;
+  expected.radial_count = configuration.radial_count;
+  expected.theta_count = configuration.theta_count;
+  return expected;
+}
 
 // Standalone orchestration slice for the passive spin +2 state. It is not a
 // SpatialPipeline member and contains no curvature or source formula. The
@@ -213,10 +215,7 @@ class Plus2ReplayOrchestrator {
     if (configuration_.initial_policy != Plus2InitialPolicy::Checkpoint) {
       throw std::logic_error("plus2 run does not request a checkpoint");
     }
-    const Plus2CheckpointExpectations expected{
-        plus2_fixed_tetrad_raw_scaling, plus2_signed_mode_registry,
-        configuration_.parent_modes, configuration_.target_modes,
-        configuration_.radial_count, configuration_.theta_count};
+    const auto expected = plus2_checkpoint_expectations(configuration_);
     auto metadata = load_plus2_checkpoint(
         execution, configuration_.checkpoint, companion_, expected);
     companion_initialized_ = true;
