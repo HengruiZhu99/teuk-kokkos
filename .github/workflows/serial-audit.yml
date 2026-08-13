@@ -23,15 +23,27 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Select Python 3.12
+      - name: Select the audited Python 3.12.3 runtime
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.12.3"
           cache: pip
           cache-dependency-path: requirements-audit-lock.txt
 
       - name: Install the hash-locked audit environment
         run: python -m pip install --require-hashes -r requirements-audit-lock.txt
+
+      - name: Record the numerical runtime and CPU dispatch
+        run: |
+          python -VV
+          python - <<'PY'
+          import numpy as np
+          import scipy
+
+          print(f"numpy={np.__version__}")
+          print(f"scipy={scipy.__version__}")
+          np.show_runtime()
+          PY
 
       - name: Configure the audit-enabled Serial build
         run: >-
