@@ -1,0 +1,52 @@
+name: Serial audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: serial-audit-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out the exact commit and Kokkos submodule
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Select Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-audit-lock.txt
+
+      - name: Install the hash-locked audit environment
+        run: python -m pip install --require-hashes -r requirements-audit-lock.txt
+
+      - name: Configure the audit-enabled Serial build
+        run: >-
+          cmake --preset serial
+          -DTEUK_ENABLE_SYMBOLIC_AUDIT=ON
+          -DPython3_EXECUTABLE="$(command -v python)"
+
+      - name: Build from clean sources
+        run: cmake --build --preset serial --clean-first --parallel 2
+
+      - name: Run the direct unit suite
+        run: ./build/serial/teuk_tests
+
+      - name: Run the complete audit suite
+        run: ctest --preset serial --output-on-failure
+
+      - name: Check patch whitespace
+        run: git diff --check
